@@ -14,25 +14,6 @@
 
 ---
 
-## Contact 
-
-| Platform | Link |
-|----------|------|
-| 📱 Telegram | [t.me/novustch](https://t.me/novustch) |
-| 📲 WhatsApp | [wa.me/14105015750](https://wa.me/14105015750) |
-| 💬 Discord | [discordapp.com/users/985432160498491473](https://discordapp.com/users/985432160498491473)
-
-<div align="left">
-    <a href="https://t.me/novustch" target="_blank"><img alt="Telegram"
-        src="https://img.shields.io/badge/Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white"/></a>
-    <a href="https://wa.me/14105015750" target="_blank"><img alt="WhatsApp"
-        src="https://img.shields.io/badge/WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white"/></a>
-    <a href="https://discordapp.com/users/985432160498491473" target="_blank"><img alt="Discord"
-        src="https://img.shields.io/badge/Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white"/></a>
-</div>
-
-Feel free to reach out for implementation assistance or integration support.
-
 ## 📋 Table of Contents
 
 - [Overview](#-overview)
@@ -44,6 +25,7 @@ Feel free to reach out for implementation assistance or integration support.
 - [Scripts](#-scripts)
 - [Documentation](#-documentation)
 - [Contributing](#-contributing)
+- [Support](#-support)
 - [License](#-license)
 - [Disclaimer](#-disclaimer)
 
@@ -281,6 +263,25 @@ Contributions are welcome! Please see our [Contributing Guidelines](./CONTRIBUTI
 - Use ESLint and Prettier for code formatting
 - Write meaningful commit messages
 - Add tests for new features
+
+## Support 
+
+| Platform | Link |
+|----------|------|
+| 📱 Telegram | [t.me/novustch](https://t.me/novustch) |
+| 📲 WhatsApp | [wa.me/14105015750](https://wa.me/14105015750) |
+| 💬 Discord | [discordapp.com/users/985432160498491473](https://discordapp.com/users/985432160498491473)
+
+<div align="left">
+    <a href="https://t.me/novustch" target="_blank"><img alt="Telegram"
+        src="https://img.shields.io/badge/Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white"/></a>
+    <a href="https://wa.me/14105015750" target="_blank"><img alt="WhatsApp"
+        src="https://img.shields.io/badge/WhatsApp-25D366?style=for-the-badge&logo=whatsapp&logoColor=white"/></a>
+    <a href="https://discordapp.com/users/985432160498491473" target="_blank"><img alt="Discord"
+        src="https://img.shields.io/badge/Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white"/></a>
+</div>
+
+Feel free to reach out for implementation assistance or integration support.
 
 ## 📄 License
 
