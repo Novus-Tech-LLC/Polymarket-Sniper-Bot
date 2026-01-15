@@ -11,7 +11,8 @@ export type RuntimeEnv = {
   retryLimit: number;
   aggregationEnabled: boolean;
   aggregationWindowSeconds: number;
-  usdcContractAddress: string;
+  collateralTokenAddress: string;
+  collateralTokenDecimals: number;
   polymarketApiKey?: string;
   polymarketApiSecret?: string;
   polymarketApiPassphrase?: string;
@@ -56,7 +57,8 @@ export function loadEnv(): RuntimeEnv {
     retryLimit: Number(process.env.RETRY_LIMIT ?? DEFAULT_CONFIG.RETRY_LIMIT),
     aggregationEnabled: String(process.env.TRADE_AGGREGATION_ENABLED ?? 'false') === 'true',
     aggregationWindowSeconds: Number(process.env.TRADE_AGGREGATION_WINDOW_SECONDS ?? DEFAULT_CONFIG.AGGREGATION_WINDOW_SECONDS),
-    usdcContractAddress: process.env.USDC_CONTRACT_ADDRESS || POLYGON_USDC_ADDRESS,
+    collateralTokenAddress: process.env.COLLATERAL_TOKEN_ADDRESS || process.env.USDC_CONTRACT_ADDRESS || POLYGON_USDC_ADDRESS,
+    collateralTokenDecimals: Number(process.env.COLLATERAL_TOKEN_DECIMALS ?? 6),
     polymarketApiKey: process.env.POLYMARKET_API_KEY,
     polymarketApiSecret: process.env.POLYMARKET_API_SECRET,
     polymarketApiPassphrase: process.env.POLYMARKET_API_PASSPHRASE,
@@ -67,4 +69,3 @@ export function loadEnv(): RuntimeEnv {
 
   return env;
 }
-

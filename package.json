@@ -28,11 +28,13 @@
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
     "format": "prettier --write .",
+    "arbitrage": "node src/arbitrage/run.js",
     "check-allowance": "ts-node src/cli/check-allowance.command.ts",
     "verify-allowance": "ts-node src/cli/verify-allowance.command.ts",
     "set-token-allowance": "ts-node src/cli/set-token-allowance.command.ts",
     "manual-sell": "ts-node src/cli/manual-sell.command.ts",
-    "simulate": "ts-node src/cli/run-simulations.command.ts"
+    "simulate": "ts-node src/cli/run-simulations.command.ts",
+    "test": "node --test -r ts-node/register/transpile-only tests/arbitrage/*.test.ts"
   },
   "keywords": [
     "polymarket",

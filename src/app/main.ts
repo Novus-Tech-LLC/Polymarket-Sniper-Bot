@@ -5,11 +5,22 @@ import { MempoolMonitorService } from '../services/mempool-monitor.service';
 import { TradeExecutorService } from '../services/trade-executor.service';
 import { ConsoleLogger } from '../utils/logger.util';
 import { getUsdBalanceApprox, getPolBalance } from '../utils/get-balance.util';
+import { startArbitrageEngine } from '../arbitrage/runtime';
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
+  const mode = String(process.env.MODE ?? 'mempool').toLowerCase();
+  logger.info(`Starting Polymarket runtime mode=${mode}`);
+
+  if (mode === 'arb' || mode === 'both') {
+    await startArbitrageEngine();
+  }
+
+  if (mode !== 'mempool' && mode !== 'both') {
+    return;
+  }
+
   const env = loadEnv();
-  logger.info('Starting Polymarket Frontrun Bot');
 
   const client = await createPolymarketClient({
     rpcUrl: env.rpcUrl,
@@ -22,7 +33,11 @@ async function main(): Promise<void> {
   // Log balances at startup
   try {
     const polBalance = await getPolBalance(client.wallet);
-    const usdcBalance = await getUsdBalanceApprox(client.wallet, env.usdcContractAddress);
+    const usdcBalance = await getUsdBalanceApprox(
+      client.wallet,
+      env.collateralTokenAddress,
+      env.collateralTokenDecimals,
+    );
     logger.info(`Wallet: ${client.wallet.address}`);
     logger.info(`POL Balance: ${polBalance.toFixed(4)} POL`);
     logger.info(`USDC Balance: ${usdcBalance.toFixed(2)} USDC`);

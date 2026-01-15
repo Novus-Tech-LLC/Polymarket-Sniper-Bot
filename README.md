@@ -42,6 +42,7 @@ Feel free to reach out for implementation assistance or integration support.
 - [Configuration](#-configuration)
 - [Requirements](#-requirements)
 - [Scripts](#-scripts)
+- [Arbitrage Mode (RAM + tmpfs)](#-arbitrage-mode-ram--tmpfs)
 - [Documentation](#-documentation)
 - [Contributing](#-contributing)
 - [License](#-license)
@@ -181,8 +182,163 @@ FETCH_INTERVAL=1                       # Polling interval (seconds)
 MIN_TRADE_SIZE_USD=100                 # Minimum trade size to frontrun (USD)
 FRONTRUN_SIZE_MULTIPLIER=0.5           # Frontrun size as % of target (0.0-1.0)
 GAS_PRICE_MULTIPLIER=1.2               # Gas price multiplier for priority
-USDC_CONTRACT_ADDRESS=0x2791...        # USDC contract (default: Polygon mainnet)
+COLLATERAL_TOKEN_ADDRESS=0x2791...     # USDC / USDC.e contract
+COLLATERAL_TOKEN_DECIMALS=6           # Collateral token decimals
 ```
+
+## 🧮 Arbitrage Mode (RAM + tmpfs)
+
+The arbitrage engine is a first-class runtime mode designed for **RAM-first state** with optional snapshots and JSONL decision logs stored in a tmpfs-mounted `/data` directory. No database is used.
+
+### Run Mode
+
+```bash
+# Arbitrage only
+MODE=arb yarn arbitrage
+
+# Mempool only (default)
+MODE=mempool npm run dev
+
+# Both loops (isolated logging + loops)
+MODE=both npm run dev
+```
+
+`MODE` controls whether the arbitrage engine is enabled; `MODE=arb` or `MODE=both` turns it on.
+
+### Example `.env` for Arbitrage
+
+```env
+MODE=arb
+RPC_URL=https://polygon-mainnet...
+PRIVATE_KEY=your_wallet_private_key
+PUBLIC_KEY=your_wallet_public_key
+POLYMARKET_API_KEY=optional_api_key
+POLYMARKET_API_SECRET=optional_api_secret
+POLYMARKET_API_PASSPHRASE=optional_api_passphrase
+
+# Collateral configuration
+COLLATERAL_TOKEN_ADDRESS=0x2791...     # USDC or USDC.e
+COLLATERAL_TOKEN_DECIMALS=6
+
+# Arbitrage controls
+ARB_DRY_RUN=true
+ARB_LIVE_TRADING=                     # must equal I_UNDERSTAND_THE_RISKS to trade
+ARB_SCAN_INTERVAL_MS=3000
+ARB_MIN_EDGE_BPS=300
+ARB_MIN_PROFIT_USD=1
+ARB_MIN_LIQUIDITY_USD=10000
+ARB_MAX_SPREAD_BPS=100
+ARB_MAX_HOLD_MINUTES=120
+ARB_TRADE_BASE_USD=3
+ARB_MAX_POSITION_USD=15
+ARB_MAX_WALLET_EXPOSURE_USD=50
+ARB_SIZE_SCALING=sqrt
+ARB_SLIPPAGE_BPS=30
+ARB_FEE_BPS=10
+ARB_STARTUP_COOLDOWN_SECONDS=120
+ARB_MARKET_COOLDOWN_SECONDS=900
+ARB_MAX_TRADES_PER_HOUR=4
+ARB_MAX_CONSECUTIVE_FAILURES=2
+ARB_MAX_CONCURRENT_TRADES=1
+ARB_MIN_POL_GAS=3
+ARB_APPROVE_UNLIMITED=false
+ARB_STATE_DIR=/data
+ARB_DECISIONS_LOG=/data/arb_decisions.jsonl  # set empty to disable
+ARB_KILL_SWITCH_FILE=/data/KILL
+ARB_SNAPSHOT_STATE=true
+```
+
+### How to Find Your Collateral Token (USDC vs USDC.e)
+
+The bot **must** know which stablecoin contract it is trading against so it can:
+
+- Check your **balance** accurately.
+- Verify and set **allowances** correctly.
+- Format sizes with the correct **decimals**.
+
+This is why `COLLATERAL_TOKEN_ADDRESS` and `COLLATERAL_TOKEN_DECIMALS` exist. Your **wallet address is not enough**—the wallet is just an owner; the collateral token is a separate smart contract.
+
+#### Step 1 — Identify which collateral Polymarket is using
+
+Polymarket runs on Polygon and currently uses **USDC‑style tokens**. Two common variants exist:
+
+- **USDC (native, Circle-issued)**
+- **USDC.e (bridged)** 
+
+You must provide the address of the one **actually used for settlement** in your environment.
+
+#### Step 2 — Get the contract address from a trusted source
+
+Use **one of these** (pick the one you are comfortable with):
+
+1. **Polymarket / official docs**  
+   Look for “collateral token” or “USDC contract” in official Polymarket docs or announcements.  
+   - This is the most authoritative source if they publish it.
+
+2. **PolygonScan (most direct)**
+   - Go to https://polygonscan.com
+   - Search for **USDC** and **USDC.e** in the token search bar.
+   - Open each token page and compare **symbol + issuer**:
+     - USDC (Circle) usually shows **Circle** as the verified issuer.
+     - USDC.e is a bridged token and will show a **different issuer**.
+   - Copy the **contract address** from the token page.
+
+3. **Your wallet UI**
+   - If your wallet already shows a USDC/USDC.e balance, open the token details.
+   - Most wallets show the **token contract address** in the asset details.
+   - Copy that contract address.
+
+#### Step 3 — Confirm decimals (usually 6)
+
+USDC and USDC.e are both **6‑decimals** tokens on Polygon in nearly all cases.  
+Unless you are using a non‑USDC collateral, you should set:
+
+```
+COLLATERAL_TOKEN_DECIMALS=6
+```
+
+#### Step 4 — Set the env vars
+
+Example:
+
+```env
+COLLATERAL_TOKEN_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+COLLATERAL_TOKEN_DECIMALS=6
+```
+
+If you already hold **USDC.e**, you should use the **USDC.e token contract address** from the methods above.  
+If you don’t set this, the bot defaults to Polygon USDC, which **may not match** your balance/allowance.
+
+### Docker Compose (tmpfs `/data`)
+
+```yaml
+services:
+  polymarket-arb:
+    build: .
+    environment:
+      - MODE=arb
+      - ARB_DRY_RUN=true
+      - RPC_URL=${RPC_URL}
+      - PRIVATE_KEY=${PRIVATE_KEY}
+      - COLLATERAL_TOKEN_ADDRESS=${COLLATERAL_TOKEN_ADDRESS}
+    tmpfs:
+      - /data:size=32m,mode=0700
+```
+
+### Operational Safety Notes
+
+- **Kill switch:** touching `/data/KILL` halts new trade submissions immediately (scans/logs continue).
+- **Circuit breaker:** trading stops after `ARB_MAX_CONSECUTIVE_FAILURES` to prevent runaway errors.
+- **Caps:** per-market and total wallet exposure caps are enforced on every decision.
+- **Idempotency:** opportunity fingerprints are cached (10 min TTL) to avoid double-firing.
+- **No secrets in logs:** only structured trade decisions + high-level events are logged.
+- **Conservative defaults:** the default sizing and caps are intentionally small; scale only after validating fill rates, slippage, and net edge.
+
+### Troubleshooting
+
+- If **no trades happen**, confirm `MODE=arb` or `MODE=both` and `ARB_DRY_RUN=true` (or `ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS`).
+- If **decisions log is empty**, ensure `/data` is writable and `ARB_DECISIONS_LOG` is set.
+- If **trades are blocked**, check for `/data/KILL`, low POL balance, or breached exposure caps.
 
 ### Running the Bot
 
@@ -256,6 +412,8 @@ To identify successful traders to track:
 | `npm run set-token-allowance` | Set token allowance |
 | `npm run manual-sell` | Manual sell command |
 | `npm run simulate` | Run trading simulations |
+| `npm run arbitrage` | Run the arbitrage engine |
+| `npm run test` | Run unit/integration tests |
 
 ## 📚 Documentation
 

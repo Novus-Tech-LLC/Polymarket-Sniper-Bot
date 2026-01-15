@@ -5,15 +5,16 @@ const USDC_ABI = ['function balanceOf(address owner) view returns (uint256)'];
 
 export async function getUsdBalanceApprox(
   wallet: Wallet,
-  usdcContractAddress: string,
+  collateralTokenAddress: string,
+  collateralTokenDecimals = 6,
 ): Promise<number> {
   const provider = wallet.provider;
   if (!provider) {
     throw new Error('Wallet provider is required');
   }
-  const usdcContract = new Contract(usdcContractAddress, USDC_ABI, provider);
+  const usdcContract = new Contract(collateralTokenAddress, USDC_ABI, provider);
   const balance = await usdcContract.balanceOf(wallet.address);
-  return parseFloat(utils.formatUnits(balance, 6));
+  return parseFloat(utils.formatUnits(balance, collateralTokenDecimals));
 }
 
 export async function getPolBalance(wallet: Wallet): Promise<number> {
@@ -24,4 +25,3 @@ export async function getPolBalance(wallet: Wallet): Promise<number> {
   const balance = await provider.getBalance(wallet.address);
   return parseFloat(utils.formatEther(balance));
 }
-

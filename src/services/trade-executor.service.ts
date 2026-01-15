@@ -31,7 +31,11 @@ export class TradeExecutorService {
   async frontrunTrade(signal: TradeSignal): Promise<void> {
     const { logger, env, client } = this.deps;
     try {
-      const yourUsdBalance = await getUsdBalanceApprox(client.wallet, env.usdcContractAddress);
+      const yourUsdBalance = await getUsdBalanceApprox(
+        client.wallet,
+        env.collateralTokenAddress,
+        env.collateralTokenDecimals,
+      );
       const polBalance = await getPolBalance(client.wallet);
 
       logger.info(`[Frontrun] Balance check - POL: ${polBalance.toFixed(4)} POL, USDC: ${yourUsdBalance.toFixed(2)} USDC`);
@@ -112,5 +116,4 @@ export class TradeExecutorService {
     }
   }
 }
-
 

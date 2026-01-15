@@ -1,0 +1,14 @@
+import 'dotenv/config';
+import { parseCliOverrides } from './config';
+import { startArbitrageEngine } from './runtime';
+
+async function run(): Promise<void> {
+  const overrides = parseCliOverrides(process.argv.slice(2));
+  await startArbitrageEngine(overrides);
+}
+
+run().catch((err) => {
+  // eslint-disable-next-line no-console
+  console.error('Arbitrage runtime error', err);
+  process.exit(1);
+});
