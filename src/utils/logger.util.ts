@@ -7,6 +7,16 @@ export interface Logger {
   debug: (msg: string) => void;
 }
 
+const DEBUG_LEVELS = new Set(['', 'debug', 'trace']);
+
+const shouldLogDebug = (): boolean => {
+  const logLevel = (process.env.LOG_LEVEL ?? '').toLowerCase();
+  if (process.env.DEBUG === '1') {
+    return true;
+  }
+  return DEBUG_LEVELS.has(logLevel);
+};
+
 export class ConsoleLogger implements Logger {
   info(msg: string): void {
     // eslint-disable-next-line no-console
@@ -21,10 +31,9 @@ export class ConsoleLogger implements Logger {
     console.error(chalk.red('[ERROR]'), msg, err ? `\n${err.stack ?? err.message}` : '');
   }
   debug(msg: string): void {
-    if (process.env.DEBUG === '1') {
+    if (shouldLogDebug()) {
       // eslint-disable-next-line no-console
       console.debug(chalk.gray('[DEBUG]'), msg);
     }
   }
 }
-
