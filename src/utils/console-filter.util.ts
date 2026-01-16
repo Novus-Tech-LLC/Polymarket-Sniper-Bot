@@ -1,4 +1,5 @@
 import type { Logger } from './logger.util';
+import { formatAuthHeaderPresence, getAuthHeaderPresence } from './clob-auth-headers.util';
 import { redactSensitiveValues } from './sanitize-axios-error.util';
 
 type ConsoleError = typeof console.error;
@@ -6,7 +7,11 @@ type ConsoleError = typeof console.error;
 type ClobErrorPayload = {
   status?: number;
   data?: { error?: string };
-  config?: { params?: { token_id?: string } };
+  config?: { params?: { token_id?: string }; headers?: Record<string, unknown> };
+};
+
+type ClobErrorLog = ClobErrorPayload & {
+  config?: { params?: { token_id?: string }; headers?: Record<string, unknown> };
 };
 
 let installed = false;
@@ -77,7 +82,28 @@ export const suppressClobOrderbookErrors = (logger?: Logger): void => {
     if (typeof args[0] === 'string' && args[0].includes('[CLOB Client] request error')) {
       const sanitizedArgs = [...args];
       if (typeof sanitizedArgs[1] === 'string') {
-        sanitizedArgs[1] = redactSensitiveValues(sanitizedArgs[1]);
+        try {
+          const payload = JSON.parse(sanitizedArgs[1]) as ClobErrorLog;
+          const headers = payload?.config?.headers;
+          if (headers && typeof headers === 'object') {
+            const presence = getAuthHeaderPresence(headers as Record<string, string>);
+            payload.config = {
+              ...payload.config,
+              headers: {
+                authHeaderPresence: presence,
+              },
+            };
+            if (logger) {
+              logger.warn(`[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`);
+              if (payload.status === 401 && !presence.signatureHeaderPresent) {
+                logger.warn('[CLOB] secret missing from request');
+              }
+            }
+          }
+          sanitizedArgs[1] = redactSensitiveValues(JSON.stringify(payload));
+        } catch {
+          sanitizedArgs[1] = redactSensitiveValues(sanitizedArgs[1]);
+        }
       }
       originalConsoleError?.(...(sanitizedArgs as Parameters<ConsoleError>));
       return;

@@ -1,9 +1,10 @@
 import { Wallet, providers } from 'ethers';
-import { ClobClient, Chain } from '@polymarket/clob-client';
+import { ClobClient, Chain, createL2Headers } from '@polymarket/clob-client';
 import type { ApiKeyCreds } from '@polymarket/clob-client';
 import { POLYMARKET_API } from '../constants/polymarket.constants';
 import { initializeApiCreds } from './clob-auth';
 import type { Logger } from '../utils/logger.util';
+import { formatAuthHeaderPresence, getAuthHeaderPresence } from '../utils/clob-auth-headers.util';
 import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 
 export type CreateClientInput = {
@@ -60,6 +61,26 @@ const maybeEnableServerTime = async (client: ClobClient, logger?: Logger): Promi
   }
 };
 
+const logAuthHeaderPresence = async (
+  client: ClobClient,
+  creds: ApiKeyCreds,
+  logger?: Logger,
+): Promise<void> => {
+  if (!logger) return;
+  try {
+    const signer = (client as ClobClient & { signer?: unknown }).signer as { getAddress: () => Promise<string> } | undefined;
+    if (!signer) return;
+    const headers = await createL2Headers(signer, creds, {
+      method: 'GET',
+      requestPath: '/auth/api-keys',
+    });
+    const presence = getAuthHeaderPresence(headers);
+    logger.info(`[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`);
+  } catch (err) {
+    logger.warn(`[CLOB] Failed to inspect auth headers. ${sanitizeErrorMessage(err)}`);
+  }
+};
+
 export async function createPolymarketClient(
   input: CreateClientInput,
 ): Promise<ClobClient & { wallet: Wallet }> {
@@ -98,6 +119,7 @@ export async function createPolymarketClient(
 
   if (creds) {
     await initializeApiCreds(client, creds);
+    await logAuthHeaderPresence(client, creds, input.logger);
   }
 
   return Object.assign(client, { wallet });

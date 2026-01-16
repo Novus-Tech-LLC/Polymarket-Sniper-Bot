@@ -24,8 +24,12 @@ export function redactSensitiveValues(value: string): string {
     const jsonRegex = new RegExp(`("${key}"\\s*:\\s*)"[^"]*"`, 'gi');
     redacted = redacted.replace(jsonRegex, '$1"<redacted>"');
   }
-  redacted = redacted.replace(/headers\\s*[:=]\\s*\\{[^}]*\\}/gi, 'headers=<redacted>');
-  redacted = redacted.replace(/"headers"\\s*:\\s*\\{[^}]*\\}/gi, '"headers":"<redacted>"');
+  redacted = redacted.replace(/headers\\s*[:=]\\s*\\{[^}]*\\}/gi, (match) => {
+    return match.includes('authHeaderPresence') ? match : 'headers=<redacted>';
+  });
+  redacted = redacted.replace(/"headers"\\s*:\\s*\\{[^}]*\\}/gi, (match) => {
+    return match.includes('authHeaderPresence') ? match : '"headers":"<redacted>"';
+  });
   return redacted;
 }
 
