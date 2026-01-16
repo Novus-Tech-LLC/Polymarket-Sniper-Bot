@@ -111,6 +111,20 @@ Create a `.env` file in the project root with the following variables:
 | `TRADE_AGGREGATION_WINDOW_SECONDS` | `300` | Time window for aggregating trades (seconds) |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC contract on Polygon |
 | `MONGO_URI` | - | MongoDB connection string (optional) |
+| `WIREGUARD_ENABLED` | `false` | Enable WireGuard setup on startup |
+| `WIREGUARD_INTERFACE_NAME` | `wg0` | WireGuard interface name |
+| `WIREGUARD_CONFIG_PATH` | `/etc/wireguard/wg0.conf` | Config path written at startup |
+| `WIREGUARD_CONFIG` | - | Full WireGuard config contents (overrides per-field vars) |
+| `WIREGUARD_ADDRESS` | - | Interface Address (comma-separated) |
+| `WIREGUARD_PRIVATE_KEY` | - | Interface private key |
+| `WIREGUARD_MTU` | - | MTU (optional) |
+| `WIREGUARD_DNS` | - | DNS servers (comma-separated) |
+| `WIREGUARD_PEER_PUBLIC_KEY` | - | Peer public key |
+| `WIREGUARD_PEER_PRESHARED_KEY` | - | Peer preshared key (optional) |
+| `WIREGUARD_PEER_ENDPOINT` | - | Peer endpoint (host:port) |
+| `WIREGUARD_ALLOWED_IPS` | - | Allowed IP ranges |
+| `WIREGUARD_PERSISTENT_KEEPALIVE` | - | Persistent keepalive interval (seconds) |
+| `WIREGUARD_FORCE_RESTART` | `false` | Force `wg-quick down` before `up` |
 
 ### Example `.env` File
 
@@ -128,7 +142,23 @@ USDC_CONTRACT_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
 POLYMARKET_API_KEY=your_clob_api_key
 POLYMARKET_API_SECRET=your_clob_api_secret
 POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
+
+# WireGuard (optional)
+WIREGUARD_ENABLED=true
+WIREGUARD_INTERFACE_NAME=wg0
+WIREGUARD_ADDRESS=10.151.22.111/32,fd7d:76ee:e68f:a993:c4ca:f41:f871:35b4/128
+WIREGUARD_PRIVATE_KEY=your_private_key
+WIREGUARD_MTU=1320
+WIREGUARD_DNS=10.128.0.1,fd7d:76ee:e68f:a993::1
+WIREGUARD_PEER_PUBLIC_KEY=your_peer_public_key
+WIREGUARD_PEER_PRESHARED_KEY=your_preshared_key
+WIREGUARD_PEER_ENDPOINT=europe3.vpn.airdns.org:1637
+WIREGUARD_ALLOWED_IPS=0.0.0.0/0,::/0
+WIREGUARD_PERSISTENT_KEEPALIVE=15
+WIREGUARD_FORCE_RESTART=false
 ```
+
+> Note: WireGuard setup requires the container to run with `NET_ADMIN` and `/dev/net/tun` access (see Docker Compose example).
 
 ---
 

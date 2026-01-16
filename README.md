@@ -362,6 +362,46 @@ docker run --env-file .env polymarket-sniper-bot
 | `PUBLIC_KEY` | (Monitor only) Your Polygon wallet address | `your_wallet_address` |
 | `ARB_DEBUG_TOP_N` | (Arb only) Log top N pre-filter candidates each scan | `0` |
 
+### WireGuard (optional)
+
+Enable WireGuard if your RPC or Polymarket connectivity requires a VPN tunnel. The bot can build a config from env vars or accept a full config blob.
+
+**Supported env vars**
+
+- `WIREGUARD_ENABLED` (default `false`)
+- `WIREGUARD_INTERFACE_NAME` (default `wg0`)
+- `WIREGUARD_CONFIG_PATH` (default `/etc/wireguard/<interface>.conf`)
+- `WIREGUARD_CONFIG` (full config; overrides per-field vars)
+- `WIREGUARD_ADDRESS`
+- `WIREGUARD_PRIVATE_KEY`
+- `WIREGUARD_MTU`
+- `WIREGUARD_DNS`
+- `WIREGUARD_PEER_PUBLIC_KEY`
+- `WIREGUARD_PEER_PRESHARED_KEY`
+- `WIREGUARD_PEER_ENDPOINT`
+- `WIREGUARD_ALLOWED_IPS`
+- `WIREGUARD_PERSISTENT_KEEPALIVE`
+- `WIREGUARD_FORCE_RESTART` (default `false`)
+
+**Example (per-field env vars)**
+
+```env
+WIREGUARD_ENABLED=true
+WIREGUARD_INTERFACE_NAME=wg0
+WIREGUARD_ADDRESS=10.151.22.111/32,fd7d:76ee:e68f:a993:c4ca:f41:f871:35b4/128
+WIREGUARD_PRIVATE_KEY=your_private_key
+WIREGUARD_MTU=1320
+WIREGUARD_DNS=10.128.0.1,fd7d:76ee:e68f:a993::1
+WIREGUARD_PEER_PUBLIC_KEY=your_peer_public_key
+WIREGUARD_PEER_PRESHARED_KEY=your_preshared_key
+WIREGUARD_PEER_ENDPOINT=europe3.vpn.airdns.org:1637
+WIREGUARD_ALLOWED_IPS=0.0.0.0/0,::/0
+WIREGUARD_PERSISTENT_KEEPALIVE=15
+WIREGUARD_FORCE_RESTART=false
+```
+
+> Docker: WireGuard requires `NET_ADMIN` and `/dev/net/tun` access (see `docker-compose.yml`).
+
 ### Presets
 
 Defaults: `ARB_PRESET=safe_small` and `MONITOR_PRESET=balanced`.

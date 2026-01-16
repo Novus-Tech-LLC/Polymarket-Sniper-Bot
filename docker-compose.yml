@@ -3,6 +3,10 @@ services:
   polymarket-copy-bot:
     build: .
     restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     environment:
       - MODE=arb
       - TARGET_ADDRESSES=0xabc0000000000000000000000000000000000001,0xabc0000000000000000000000000000000000002
@@ -44,5 +48,17 @@ services:
       - ARB_DECISIONS_LOG=/data/arb_decisions.jsonl
       - ARB_KILL_SWITCH_FILE=/data/KILL
       - ARB_SNAPSHOT_STATE=true
+      - WIREGUARD_ENABLED=false
+      - WIREGUARD_INTERFACE_NAME=wg0
+      - WIREGUARD_ADDRESS=10.151.22.111/32,fd7d:76ee:e68f:a993:c4ca:f41:f871:35b4/128
+      - WIREGUARD_PRIVATE_KEY=your_private_key
+      - WIREGUARD_MTU=1320
+      - WIREGUARD_DNS=10.128.0.1,fd7d:76ee:e68f:a993::1
+      - WIREGUARD_PEER_PUBLIC_KEY=your_peer_public_key
+      - WIREGUARD_PEER_PRESHARED_KEY=your_preshared_key
+      - WIREGUARD_PEER_ENDPOINT=europe3.vpn.airdns.org:1637
+      - WIREGUARD_ALLOWED_IPS=0.0.0.0/0,::/0
+      - WIREGUARD_PERSISTENT_KEEPALIVE=15
+      - WIREGUARD_FORCE_RESTART=false
     tmpfs:
       - /data:size=32m,mode=0700
