@@ -139,6 +139,25 @@ const canWriteSysctl = async (path: string): Promise<boolean> => {
   }
 };
 
+const ensureSysctl = async (logger: Logger): Promise<boolean> => {
+  const sysctlKey = 'net.ipv4.conf.all.src_valid_mark';
+  try {
+    await execFileAsync('sysctl', ['-w', `${sysctlKey}=1`]);
+  } catch (err) {
+    logger.warn(`WireGuard sysctl update failed: ${(err as Error).message}`);
+  }
+
+  const writable = await canWriteSysctl(SYSCTL_SRC_VALID_MARK);
+  if (!writable) {
+    logger.warn(
+      `WireGuard setup skipped because ${SYSCTL_SRC_VALID_MARK} is not writable. ` +
+        'Run the container with NET_ADMIN and writable /proc/sys (e.g., --cap-add=NET_ADMIN --sysctl net.ipv4.conf.all.src_valid_mark=1) or disable WIREGUARD_ENABLED.',
+    );
+    return false;
+  }
+  return true;
+};
+
 export async function startWireguard(logger: Logger): Promise<void> {
   const env = getWireguardEnv();
   if (!env.enabled) {
@@ -146,12 +165,8 @@ export async function startWireguard(logger: Logger): Promise<void> {
   }
 
   try {
-    const sysctlWritable = await canWriteSysctl(SYSCTL_SRC_VALID_MARK);
-    if (!sysctlWritable) {
-      logger.warn(
-        `WireGuard setup skipped because ${SYSCTL_SRC_VALID_MARK} is not writable. ` +
-          'Run the container with NET_ADMIN and writable /proc/sys (e.g., --cap-add=NET_ADMIN --sysctl net.ipv4.conf.all.src_valid_mark=1) or disable WIREGUARD_ENABLED.',
-      );
+    const sysctlReady = await ensureSysctl(logger);
+    if (!sysctlReady) {
       return;
     }
     await writeConfig(env, true);
