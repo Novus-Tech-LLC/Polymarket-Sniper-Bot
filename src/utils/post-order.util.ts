@@ -17,8 +17,14 @@ export type PostOrderInput = {
   targetGasPrice?: string; // Gas price of target transaction for frontrunning
 };
 
+const missingOrderbooks = new Set<string>();
+
 export async function postOrder(input: PostOrderInput): Promise<void> {
   const { client, marketId, tokenId, outcome, side, sizeUsd, maxAcceptablePrice } = input;
+
+  if (missingOrderbooks.has(tokenId)) {
+    throw new Error(`No orderbook exists for token ${tokenId} (cached)`);
+  }
 
   // Optional: validate market exists if marketId provided
   if (marketId) {
@@ -34,6 +40,7 @@ export async function postOrder(input: PostOrderInput): Promise<void> {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (errorMessage.includes('No orderbook exists') || errorMessage.includes('404')) {
+      missingOrderbooks.add(tokenId);
       throw new Error(`Market ${marketId} is closed or resolved - no orderbook available for token ${tokenId}`);
     }
     throw error;
@@ -110,4 +117,3 @@ export async function postOrder(input: PostOrderInput): Promise<void> {
     }
   }
 }
-
