@@ -2,7 +2,7 @@ import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ClobClient } from '@polymarket/clob-client';
 import { postOrder } from '../../src/utils/post-order.util';
-import { resetApiCredsCache } from '../../src/infrastructure/clob-auth';
+import { initializeApiCreds, resetApiCredsCache } from '../../src/infrastructure/clob-auth';
 
 const baseOrderBook = {
   asks: [{ price: '1', size: '1' }],
@@ -13,17 +13,10 @@ afterEach(() => {
   resetApiCredsCache();
 });
 
-test('postOrder derives and sets API creds before placing orders', async () => {
+test('postOrder applies cached API creds before placing orders', async () => {
   const callOrder: string[] = [];
 
   const client = {
-    createOrDeriveApiCreds: async () => {
-      callOrder.push('derive');
-      return { key: 'key', secret: 'secret', passphrase: 'pass' };
-    },
-    setApiCreds: () => {
-      callOrder.push('set');
-    },
     getOrderBook: async () => baseOrderBook,
     createMarketOrder: async () => ({ signed: true }),
     postOrder: async () => {
@@ -31,6 +24,14 @@ test('postOrder derives and sets API creds before placing orders', async () => {
       return { success: true };
     },
   } as unknown as ClobClient;
+
+  Object.defineProperty(client, 'creds', {
+    set: () => {
+      callOrder.push('set');
+    },
+  });
+
+  await initializeApiCreds(client, { key: 'key', secret: 'secret', passphrase: 'pass' });
 
   await postOrder({
     client,
@@ -45,16 +46,11 @@ test('postOrder derives and sets API creds before placing orders', async () => {
   assert.ok(callOrder.indexOf('set') < callOrder.indexOf('post'));
 });
 
-test('postOrder re-derives API creds and retries once on auth failure', async () => {
+test('postOrder re-applies API creds and retries once on auth failure', async () => {
   let postAttempts = 0;
-  const derivedCreds: string[] = [];
+  const setCalls: string[] = [];
 
   const client = {
-    createOrDeriveApiCreds: async () => {
-      derivedCreds.push(`derive-${derivedCreds.length + 1}`);
-      return { key: `key-${derivedCreds.length}`, secret: 'secret', passphrase: 'pass' };
-    },
-    setApiCreds: () => undefined,
     getOrderBook: async () => baseOrderBook,
     createMarketOrder: async () => ({ signed: true }),
     postOrder: async () => {
@@ -68,6 +64,15 @@ test('postOrder re-derives API creds and retries once on auth failure', async ()
     },
   } as unknown as ClobClient;
 
+  Object.defineProperty(client, 'creds', {
+    set: () => {
+      setCalls.push('set');
+    },
+  });
+
+  await initializeApiCreds(client, { key: 'key', secret: 'secret', passphrase: 'pass' });
+  setCalls.length = 0;
+
   await postOrder({
     client,
     tokenId: 'token-2',
@@ -77,5 +82,5 @@ test('postOrder re-derives API creds and retries once on auth failure', async ()
   });
 
   assert.equal(postAttempts, 2);
-  assert.equal(derivedCreds.length, 2);
+  assert.equal(setCalls.length, 2);
 });

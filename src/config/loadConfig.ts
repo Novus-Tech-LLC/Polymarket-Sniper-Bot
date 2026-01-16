@@ -18,9 +18,9 @@ export type MonitorRuntimeConfig = {
   requireConfirmed: boolean;
   collateralTokenAddress: string;
   collateralTokenDecimals: number;
-  polymarketApiKey?: string;
-  polymarketApiSecret?: string;
-  polymarketApiPassphrase?: string;
+  polymarketApiKey: string;
+  polymarketApiSecret: string;
+  polymarketApiPassphrase: string;
   minTradeSizeUsd: number;
   frontrunSizeMultiplier?: number;
   gasPriceMultiplier?: number;
@@ -93,9 +93,9 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   rpcUrl: '',
   privateKey: '',
   proxyWallet: undefined,
-  polymarketApiKey: undefined,
-  polymarketApiSecret: undefined,
-  polymarketApiPassphrase: undefined,
+  polymarketApiKey: '',
+  polymarketApiSecret: '',
+  polymarketApiPassphrase: '',
   collateralTokenAddress: POLYGON_USDC_ADDRESS,
   collateralTokenDecimals: 6,
 };
@@ -397,9 +397,9 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
     rpcUrl: required('RPC_URL', overrides),
     privateKey: required('PRIVATE_KEY', overrides),
     proxyWallet: readEnv('PUBLIC_KEY', overrides),
-    polymarketApiKey: readEnv('POLYMARKET_API_KEY', overrides),
-    polymarketApiSecret: readEnv('POLYMARKET_API_SECRET', overrides),
-    polymarketApiPassphrase: readEnv('POLYMARKET_API_PASSPHRASE', overrides),
+    polymarketApiKey: required('POLYMARKET_API_KEY', overrides),
+    polymarketApiSecret: required('POLYMARKET_API_SECRET', overrides),
+    polymarketApiPassphrase: required('POLYMARKET_API_PASSPHRASE', overrides),
     collateralTokenAddress: collateralAddressRaw || POLYGON_USDC_ADDRESS,
     collateralTokenDecimals: readNumber('COLLATERAL_TOKEN_DECIMALS', 6, overrides),
     presetName,
@@ -481,9 +481,9 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     requireConfirmed: MONITOR_LEGACY_DEFAULTS.requireConfirmed,
     collateralTokenAddress: POLYGON_USDC_ADDRESS,
     collateralTokenDecimals: 6,
-    polymarketApiKey: readEnv('POLYMARKET_API_KEY', overrides),
-    polymarketApiSecret: readEnv('POLYMARKET_API_SECRET', overrides),
-    polymarketApiPassphrase: readEnv('POLYMARKET_API_PASSPHRASE', overrides),
+    polymarketApiKey: required('POLYMARKET_API_KEY', overrides),
+    polymarketApiSecret: required('POLYMARKET_API_SECRET', overrides),
+    polymarketApiPassphrase: required('POLYMARKET_API_PASSPHRASE', overrides),
     minTradeSizeUsd: MONITOR_LEGACY_DEFAULTS.minTradeSizeUsd,
     frontrunSizeMultiplier: MONITOR_LEGACY_DEFAULTS.frontrunSizeMultiplier,
     gasPriceMultiplier: MONITOR_LEGACY_DEFAULTS.gasPriceMultiplier,

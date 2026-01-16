@@ -183,7 +183,7 @@ POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
 ```
 
 > ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES` and `PUBLIC_KEY`. The quick start above is intentionally minimal to highlight presets.
-> ✅ **Note:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` can be provided to use pre-generated CLOB credentials; if omitted, the bot will derive API credentials via wallet signature.
+> ✅ **Note:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` are required for CLOB access.
 
 ## 🧮 Arbitrage Mode (RAM + tmpfs)
 

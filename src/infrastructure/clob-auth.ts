@@ -1,7 +1,6 @@
 import type { ApiKeyCreds, ClobClient } from '@polymarket/clob-client';
 
 let cachedCreds: ApiKeyCreds | null = null;
-let loggedDerivation = false;
 
 export async function initializeApiCreds(client: ClobClient, providedCreds?: ApiKeyCreds): Promise<ApiKeyCreds> {
   if (providedCreds) {
@@ -15,23 +14,15 @@ export async function initializeApiCreds(client: ClobClient, providedCreds?: Api
     return cachedCreds;
   }
 
-  const derivedCreds = await client.createOrDeriveApiKey();
-  applyClientCreds(client, derivedCreds);
-  cachedCreds = derivedCreds;
-
-  if (!loggedDerivation) {
-    console.log('[CLOB] API credentials derived via wallet signature');
-    loggedDerivation = true;
-  }
-
-  return derivedCreds;
+  throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE.');
 }
 
 export async function refreshApiCreds(client: ClobClient): Promise<ApiKeyCreds> {
-  const derivedCreds = await client.createOrDeriveApiKey();
-  applyClientCreds(client, derivedCreds);
-  cachedCreds = derivedCreds;
-  return derivedCreds;
+  if (!cachedCreds) {
+    throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE.');
+  }
+  applyClientCreds(client, cachedCreds);
+  return cachedCreds;
 }
 
 export async function withAuthRetry<T>(client: ClobClient, operation: () => Promise<T>): Promise<T> {
@@ -49,7 +40,6 @@ export async function withAuthRetry<T>(client: ClobClient, operation: () => Prom
 
 export function resetApiCredsCache(): void {
   cachedCreds = null;
-  loggedDerivation = false;
 }
 
 function isAuthError(error: unknown): boolean {
