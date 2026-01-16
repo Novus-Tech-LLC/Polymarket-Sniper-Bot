@@ -44,7 +44,8 @@ export const publicKeyMatchesDerived = (configuredPublicKey?: string, derivedSig
 
 export const detectSecretDecodingMode = (secret?: string): SecretDecodingMode => {
   if (!secret) return 'raw';
-  if (secret.includes('-') || secret.includes('_')) {
+  const base64UrlAlphabet = /^[A-Za-z0-9_-]+$/;
+  if ((secret.includes('-') || secret.includes('_')) && base64UrlAlphabet.test(secret)) {
     return 'base64url';
   }
   if (secret.includes('+') || secret.includes('/') || secret.endsWith('=')) {
