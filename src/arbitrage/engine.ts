@@ -195,10 +195,9 @@ export class ArbitrageEngine {
   }
 
   private getDiagnostics(): ArbDiagnostics | undefined {
-    if (
-      typeof (this.strategy as { getDiagnostics?: () => ArbDiagnostics }).getDiagnostics === 'function'
-    ) {
-      return (this.strategy as { getDiagnostics: () => ArbDiagnostics }).getDiagnostics();
+    const strategyWithDiagnostics = this.strategy as unknown as { getDiagnostics?: () => ArbDiagnostics };
+    if (typeof strategyWithDiagnostics.getDiagnostics === 'function') {
+      return strategyWithDiagnostics.getDiagnostics();
     }
     return undefined;
   }

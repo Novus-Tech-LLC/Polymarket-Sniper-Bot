@@ -154,7 +154,7 @@ const ARB_ENV_MAP = {
   ARB_DEBUG_TOP_N: { key: 'debugTopN', parse: parseNumber },
   ARB_UNITS_AUTO_FIX: { key: 'unitsAutoFix', parse: parseBool },
   ARB_LOG_EVERY_MARKET: { key: 'logEveryMarket', parse: parseBool },
-} as const;
+} as const satisfies Record<string, { key: keyof ArbConfig; parse: EnvParser<unknown> }>;
 
 const MONITOR_ENV_MAP = {
   MONITOR_ENABLED: { key: 'enabled', parse: parseBool },
@@ -166,7 +166,7 @@ const MONITOR_ENV_MAP = {
   TRADE_AGGREGATION_WINDOW_SECONDS: { key: 'aggregationWindowSeconds', parse: parseNumber },
   FRONTRUN_SIZE_MULTIPLIER: { key: 'frontrunSizeMultiplier', parse: parseNumber },
   GAS_PRICE_MULTIPLIER: { key: 'gasPriceMultiplier', parse: parseNumber },
-} as const;
+} as const satisfies Record<string, { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }>;
 
 const MONITOR_LEGACY_KEYS = [
   'FETCH_INTERVAL',
@@ -358,12 +358,14 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
 
   let overrideResult = { applied: [] as string[], unsafeApplied: [] as string[], ignored: [] as string[] };
   if (presetName === 'custom') {
+    const baseConfigRecord = baseConfig as Record<keyof ArbConfig, ArbConfig[keyof ArbConfig]>;
     Object.keys(ARB_ENV_MAP).forEach((envKey) => {
       const raw = readEnv(envKey, overrides);
       if (raw === undefined) return;
-      const parsed = ARB_ENV_MAP[envKey as keyof typeof ARB_ENV_MAP].parse(raw);
+      const mapping = ARB_ENV_MAP[envKey as keyof typeof ARB_ENV_MAP];
+      const parsed = mapping.parse(raw);
       if (parsed === undefined) return;
-      baseConfig[ARB_ENV_MAP[envKey as keyof typeof ARB_ENV_MAP].key] = parsed as ArbConfig[keyof ArbConfig];
+      baseConfigRecord[mapping.key] = parsed as ArbConfig[keyof ArbConfig];
     });
   } else {
     overrideResult = applyOverrides(baseConfig, overrides, ARB_ENV_MAP, ARB_OVERRIDE_ALLOWLIST, allowUnsafe);
@@ -488,13 +490,17 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
 
   let overrideResult = { applied: [] as string[], unsafeApplied: [] as string[], ignored: [] as string[] };
   if (presetName === 'custom') {
+    const baseConfigRecord = baseConfig as Record<
+      keyof MonitorRuntimeConfig,
+      MonitorRuntimeConfig[keyof MonitorRuntimeConfig]
+    >;
     Object.keys(MONITOR_ENV_MAP).forEach((envKey) => {
       const raw = readEnv(envKey, overrides);
       if (raw === undefined) return;
-      const parsed = MONITOR_ENV_MAP[envKey as keyof typeof MONITOR_ENV_MAP].parse(raw);
+      const mapping = MONITOR_ENV_MAP[envKey as keyof typeof MONITOR_ENV_MAP];
+      const parsed = mapping.parse(raw);
       if (parsed === undefined) return;
-      baseConfig[MONITOR_ENV_MAP[envKey as keyof typeof MONITOR_ENV_MAP].key] =
-        parsed as MonitorRuntimeConfig[keyof MonitorRuntimeConfig];
+      baseConfigRecord[mapping.key] = parsed as MonitorRuntimeConfig[keyof MonitorRuntimeConfig];
     });
   } else {
     overrideResult = applyOverrides(baseConfig, overrides, MONITOR_ENV_MAP, MONITOR_OVERRIDE_ALLOWLIST, allowUnsafe);
