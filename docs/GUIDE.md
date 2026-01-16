@@ -173,7 +173,7 @@ WIREGUARD_FORCE_RESTART=false
 
 > Note: OpenVPN and WireGuard are mutually exclusive; if both are enabled, OpenVPN takes priority.
 
-> Note: WireGuard setup requires the container to run with `NET_ADMIN` and `/dev/net/tun` access (see Docker Compose example). Device access must be granted at runtime; it cannot be baked into the image.
+> Note: WireGuard setup requires privileged mode plus `NET_ADMIN` and `/dev/net/tun` access (see Docker Compose example). Device access must be granted at runtime; it cannot be baked into the image.
 > Ensure `ip6tables-restore` is installed in the container if you use IPv6 addresses/allowed IPs; otherwise remove IPv6 entries.
 
 ---

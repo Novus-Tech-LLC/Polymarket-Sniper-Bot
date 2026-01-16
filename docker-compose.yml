@@ -3,6 +3,7 @@ services:
   polymarket-copy-bot:
     build: .
     restart: unless-stopped
+    privileged: true # Required when WireGuard is enabled
     cap_add:
       - NET_ADMIN
     devices:

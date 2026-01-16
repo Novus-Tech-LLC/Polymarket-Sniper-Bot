@@ -425,7 +425,7 @@ WIREGUARD_PERSISTENT_KEEPALIVE=15
 WIREGUARD_FORCE_RESTART=false
 ```
 
-> Docker: WireGuard requires `NET_ADMIN` and `/dev/net/tun` access (see `docker-compose.yml`). Device access must be granted at runtime; it cannot be baked into the image.
+> Docker: WireGuard requires privileged mode **and** `NET_ADMIN` + `/dev/net/tun` access (see `docker-compose.yml`). Device access must be granted at runtime; it cannot be baked into the image.
 > Ensure `ip6tables-restore` is available in the container if you use IPv6 addresses/allowed IPs; otherwise remove IPv6 entries.
 
 ### Presets
