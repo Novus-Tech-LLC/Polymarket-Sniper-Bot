@@ -49,6 +49,17 @@ test('allowlisted override applies for arb presets', () => {
   assert.equal(config.maxWalletExposureUsd, 40);
 });
 
+test('ARB_MAX_SPREAD_BPS override applies for arb presets', () => {
+  resetEnv();
+  Object.assign(process.env, baseArbEnv, {
+    ARB_PRESET: 'safe_small',
+    ARB_MAX_SPREAD_BPS: '180',
+  });
+
+  const config = loadArbConfig();
+  assert.equal(config.maxSpreadBps, 180);
+});
+
 test('non-allowlisted arb override is ignored unless unsafe overrides enabled', () => {
   resetEnv();
   Object.assign(process.env, baseArbEnv, {

@@ -343,8 +343,10 @@ docker run --env-file .env polymarket-sniper-bot
 | `MODE` | `mempool`, `arb`, or `both` | `both` |
 | `ARB_PRESET` | Arbitrage preset name | `safe_small` |
 | `MONITOR_PRESET` | Monitor preset name | `balanced` |
+| `MONITOR_REQUIRE_CONFIRMED` | Require confirmed trades before acting | `true` |
 | `TARGET_ADDRESSES` | (Monitor only) Comma-separated addresses to monitor | `0xabc...,0xdef...` |
 | `PUBLIC_KEY` | (Monitor only) Your Polygon wallet address | `your_wallet_address` |
+| `ARB_DEBUG_TOP_N` | (Arb only) Log top N pre-filter candidates each scan | `0` |
 
 ### Presets
 
@@ -371,6 +373,8 @@ Defaults: `ARB_PRESET=safe_small` and `MONITOR_PRESET=balanced`.
 | `active` | Lower minimum trade size | 1s poll | Higher |
 | `test` | Very low thresholds for testing | 2s poll | Highest |
 
+`MONITOR_REQUIRE_CONFIRMED` is `true` for `conservative`/`balanced` and `false` for `active`/`test`.
+
 ### Advanced Overrides (Allowlist)
 
 Presets are the default. Only a short list of overrides are allowed unless you explicitly enable unsafe overrides.
@@ -381,18 +385,25 @@ Presets are the default. Only a short list of overrides are allowed unless you e
 - `ARB_MAX_WALLET_EXPOSURE_USD`
 - `ARB_MAX_POSITION_USD`
 - `ARB_MAX_TRADES_PER_HOUR`
+- `ARB_MAX_SPREAD_BPS`
 - `ARB_KILL_SWITCH_FILE`
 - `ARB_DECISIONS_LOG`
 - `ARB_MIN_POL_GAS`
 - `ARB_SCAN_INTERVAL_MS`
+- `ARB_DEBUG_TOP_N`
 
 **Monitor safe overrides**
 - `MIN_TRADE_SIZE_USD`
 - `TRADE_MULTIPLIER`
 - `FETCH_INTERVAL`
 - `GAS_PRICE_MULTIPLIER`
+- `MONITOR_REQUIRE_CONFIRMED`
 
 To override anything else, set `ARB_ALLOW_UNSAFE_OVERRIDES=true`. The bot will warn when unsafe or legacy overrides are used.
+
+`ARB_MAX_SPREAD_BPS` can be overridden without abandoning presets so you can tune spread tolerance while keeping the preset baseline.
+
+`ARB_DEBUG_TOP_N` logs a ranked pre-filter snapshot each scan (market_id, yesBid/yesAsk, noBid/noAsk, sum, edge_bps, spread_bps, liquidity).
 
 ### Legacy Environment Variables
 

@@ -14,7 +14,9 @@ export type ArbSkipReason =
 
 export type CandidateSnapshot = {
   marketId: string;
+  yesBid: number;
   yesAsk: number;
+  noBid: number;
   noAsk: number;
   sum: number;
   edgeBps: number;
@@ -53,20 +55,30 @@ const normalizeOrderbookTop = (top: { bestAsk: number; bestBid: number }, autoFi
     return { bestAsk: 0, bestBid: 0, skipReason: 'SKIP_BAD_BOOK' };
   }
 
-  const needsFix = ask > 1.5 || bid > 1.5;
-  if (needsFix) {
-    if (!autoFix) {
-      return { bestAsk: 0, bestBid: 0, skipReason: 'SKIP_UNITS' };
+  const normalize = (value: number): { value: number; skipReason?: ArbSkipReason } => {
+    if (value > 1.5) {
+      if (!autoFix) {
+        return { value: 0, skipReason: 'SKIP_UNITS' };
+      }
+      const fixed = value / 100;
+      if (fixed > 1.5) {
+        return { value: 0, skipReason: 'SKIP_UNITS' };
+      }
+      return { value: fixed };
     }
-    const fixedAsk = ask / 100;
-    const fixedBid = bid / 100;
-    if (fixedAsk > 1.5 || fixedBid > 1.5) {
-      return { bestAsk: 0, bestBid: 0, skipReason: 'SKIP_UNITS' };
-    }
-    return { bestAsk: fixedAsk, bestBid: fixedBid };
+    return { value };
+  };
+
+  const askNormalized = normalize(ask);
+  if (askNormalized.skipReason) {
+    return { bestAsk: 0, bestBid: 0, skipReason: askNormalized.skipReason };
+  }
+  const bidNormalized = normalize(bid);
+  if (bidNormalized.skipReason) {
+    return { bestAsk: 0, bestBid: 0, skipReason: bidNormalized.skipReason };
   }
 
-  return { bestAsk: ask, bestBid: bid };
+  return { bestAsk: askNormalized.value, bestBid: bidNormalized.value };
 };
 
 export class IntraMarketArbStrategy implements Strategy {
@@ -99,21 +111,29 @@ export class IntraMarketArbStrategy implements Strategy {
       }
 
       const yesAsk = yesTop.bestAsk;
+      const yesBid = yesTop.bestBid;
       const noAsk = noTop.bestAsk;
+      const noBid = noTop.bestBid;
       if (yesAsk <= 0 || noAsk <= 0) {
+        skipCounts.SKIP_BAD_BOOK += 1;
+        continue;
+      }
+      if (yesBid <= 0 || noBid <= 0) {
         skipCounts.SKIP_BAD_BOOK += 1;
         continue;
       }
 
       const edgeBps = calculateEdgeBps(yesAsk, noAsk);
 
-      const spreadYes = calculateSpreadBps(yesTop.bestBid, yesAsk);
-      const spreadNo = calculateSpreadBps(noTop.bestBid, noAsk);
+      const spreadYes = calculateSpreadBps(yesBid, yesAsk);
+      const spreadNo = calculateSpreadBps(noBid, noAsk);
       const spreadBps = Math.max(spreadYes, spreadNo);
 
       const candidate: CandidateSnapshot = {
         marketId: market.marketId,
+        yesBid,
         yesAsk,
+        noBid,
         noAsk,
         sum: yesAsk + noAsk,
         edgeBps,

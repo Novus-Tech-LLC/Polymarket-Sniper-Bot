@@ -88,6 +88,29 @@ test('strategy auto-fixes cents to probability units when enabled', () => {
   assert.equal(opportunities[0].yesAsk, 0.53);
 });
 
+test('strategy treats missing bids as bad books', () => {
+  const strategy = new IntraMarketArbStrategy({
+    config: { ...baseConfig, minEdgeBps: 0, maxSpreadBps: 5 },
+    getExposure: () => ({ market: 0, wallet: 0 }),
+  });
+
+  const markets: MarketSnapshot[] = [
+    {
+      marketId: 'missing-bid',
+      yesTokenId: 'yes',
+      noTokenId: 'no',
+      liquidityUsd: 10000,
+      yesTop: { bestAsk: 0.6, bestBid: 0 },
+      noTop: { bestAsk: 0.4, bestBid: 0.39 },
+    },
+  ];
+
+  strategy.findOpportunities(markets, Date.now());
+  const diagnostics = strategy.getDiagnostics();
+  assert.equal(diagnostics.skipCounts.SKIP_BAD_BOOK, 1);
+  assert.equal(diagnostics.skipCounts.SKIP_WIDE_SPREAD, 0);
+});
+
 test('strategy increments skip reason histogram correctly', () => {
   const now = Date.now();
   const config: ArbConfig = {
