@@ -21,6 +21,7 @@ import {
   resolveDerivedSignerAddress,
   resolveEffectivePolyAddress,
 } from '../clob/addressing';
+import { buildSignedPath } from '../utils/query-string.util';
 
 export type CreateClientInput = {
   rpcUrl: string;
@@ -109,17 +110,24 @@ const logAuthHeaderPresence = async (
   try {
     const signer = (client as ClobClient & { signer?: Wallet | providers.JsonRpcSigner }).signer;
     if (!signer) return;
+    const orderBuilder = (client as ClobClient & { orderBuilder?: { signatureType?: number } }).orderBuilder;
+    const signatureType = orderBuilder?.signatureType;
+    const params = signatureType !== undefined ? { signature_type: signatureType } : undefined;
+    const { signedPath, paramsKeys } = buildSignedPath('/balance-allowance', params);
     const timestamp = Math.floor(Date.now() / 1000);
     const headers = await createL2Headers(signer, creds, {
       method: 'GET',
-      requestPath: '/balance-allowance',
+      requestPath: signedPath,
     }, timestamp);
     const presence = getAuthHeaderPresence(headers, { secretConfigured: Boolean(creds?.secret) });
     logger.info(`[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`);
+    logger.info(
+      `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'}`,
+    );
     logAuthSigningDiagnostics({
       logger,
       secret: creds.secret,
-      messageComponents: buildAuthMessageComponents(timestamp, 'GET', '/balance-allowance'),
+      messageComponents: buildAuthMessageComponents(timestamp, 'GET', signedPath),
     });
   } catch (err) {
     logger.warn(`[CLOB] Failed to inspect auth headers. ${sanitizeErrorMessage(err)}`);
