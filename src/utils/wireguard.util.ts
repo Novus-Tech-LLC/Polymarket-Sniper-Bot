@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
 import type { Logger } from './logger.util';
 
 const execFileAsync = promisify(execFile);
+const SYSCTL_SRC_VALID_MARK = '/proc/sys/net/ipv4/conf/all/src_valid_mark';
 
 type WireguardEnv = {
   enabled: boolean;
@@ -129,6 +130,15 @@ const isMissingIp6tablesRestore = (err: unknown): boolean => {
   return message.includes('ip6tables-restore') && message.includes('command not found');
 };
 
+const canWriteSysctl = async (path: string): Promise<boolean> => {
+  try {
+    await fs.access(path, fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export async function startWireguard(logger: Logger): Promise<void> {
   const env = getWireguardEnv();
   if (!env.enabled) {
@@ -136,6 +146,14 @@ export async function startWireguard(logger: Logger): Promise<void> {
   }
 
   try {
+    const sysctlWritable = await canWriteSysctl(SYSCTL_SRC_VALID_MARK);
+    if (!sysctlWritable) {
+      logger.warn(
+        `WireGuard setup skipped because ${SYSCTL_SRC_VALID_MARK} is not writable. ` +
+          'Run the container with NET_ADMIN and writable /proc/sys (e.g., --cap-add=NET_ADMIN --sysctl net.ipv4.conf.all.src_valid_mark=1) or disable WIREGUARD_ENABLED.',
+      );
+      return;
+    }
     await writeConfig(env, true);
 
     if (env.forceRestart) {

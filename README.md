@@ -400,7 +400,8 @@ WIREGUARD_PERSISTENT_KEEPALIVE=15
 WIREGUARD_FORCE_RESTART=false
 ```
 
-> Docker: WireGuard requires `NET_ADMIN` and `/dev/net/tun` access (see `docker-compose.yml`).
+> Docker: WireGuard requires `NET_ADMIN` and `/dev/net/tun` access (see `docker-compose.yml`) and a writable
+> `/proc/sys/net/ipv4/conf/all/src_valid_mark` (set via `--sysctl net.ipv4.conf.all.src_valid_mark=1` when needed).
 > Ensure `ip6tables-restore` is available in the container if you use IPv6 addresses/allowed IPs; otherwise remove IPv6 entries.
 
 ### Presets
