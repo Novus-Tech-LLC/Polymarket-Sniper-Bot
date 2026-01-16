@@ -68,6 +68,14 @@ export class ArbitrageEngine {
 
       const opportunities = this.strategy.findOpportunities(snapshots, now);
       opportunities.sort((a, b) => b.estProfitUsd - a.estProfitUsd);
+      if (opportunities.length === 0) {
+        this.logger.info(`[ARB] Scan complete: 0 opportunities (markets=${markets.length})`);
+      } else {
+        const top = opportunities[0];
+        this.logger.info(
+          `[ARB] Found ${opportunities.length} opportunity(ies). Top market=${top.marketId} edge=${top.edgeBps.toFixed(1)}bps est=$${top.estProfitUsd.toFixed(2)} size=$${top.sizeUsd.toFixed(2)}`,
+        );
+      }
 
       for (const opportunity of opportunities) {
         if (this.activeTrades >= this.config.maxConcurrentTrades) break;
@@ -96,12 +104,18 @@ export class ArbitrageEngine {
   private async handleOpportunity(opportunity: Opportunity, now: number): Promise<void> {
     const decision = this.riskManager.canExecute(opportunity, now);
     if (!decision.allowed) {
+      this.logger.info(
+        `[ARB] Skip market=${opportunity.marketId} reason=${decision.reason || 'filtered'} edge=${opportunity.edgeBps.toFixed(1)}bps est=$${opportunity.estProfitUsd.toFixed(2)} size=$${opportunity.sizeUsd.toFixed(2)}`,
+      );
       await this.logDecision(opportunity, 'skip', decision.reason || 'filtered', now);
       return;
     }
 
     const gasCheck = await this.riskManager.ensureGasBalance(now);
     if (!gasCheck.ok) {
+      this.logger.warn(
+        `[ARB] Skip market=${opportunity.marketId} reason=low_gas edge=${opportunity.edgeBps.toFixed(1)}bps est=$${opportunity.estProfitUsd.toFixed(2)} size=$${opportunity.sizeUsd.toFixed(2)}`,
+      );
       await this.logDecision(opportunity, 'skip', 'low_gas', now);
       return;
     }
