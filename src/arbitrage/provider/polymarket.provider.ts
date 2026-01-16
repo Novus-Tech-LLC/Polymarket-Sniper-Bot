@@ -1,5 +1,6 @@
 import type { ClobClient } from '@polymarket/clob-client';
 import type { Logger } from '../../utils/logger.util';
+import { OrderbookNotFoundError } from '../../errors/app.errors';
 import type { MarketDataProvider, MarketSummary, OrderBookTop } from '../types';
 
 const OUTCOME_YES = new Set(['yes', 'y', 'true']);
@@ -28,6 +29,8 @@ function parseUsd(value?: string | number): number | undefined {
 export class PolymarketMarketDataProvider implements MarketDataProvider {
   private readonly client: ClobClient;
   private readonly logger: Logger;
+  private readonly missingOrderbooks = new Set<string>();
+  private readonly tokenMarketMap = new Map<string, string>();
 
   constructor(params: { client: ClobClient; logger: Logger }) {
     this.client = params.client;
@@ -48,10 +51,17 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
 
       if (!marketId || !yesToken?.token_id || !noToken?.token_id) continue;
 
+      const marketKey = String(marketId);
+      const yesTokenId = String(yesToken.token_id);
+      const noTokenId = String(noToken.token_id);
+
+      this.tokenMarketMap.set(yesTokenId, marketKey);
+      this.tokenMarketMap.set(noTokenId, marketKey);
+
       markets.push({
-        marketId: String(marketId),
-        yesTokenId: String(yesToken.token_id),
-        noTokenId: String(noToken.token_id),
+        marketId: marketKey,
+        yesTokenId,
+        noTokenId,
         endTime: parseTimestamp(market.end_date || market.end_time || market.endDate),
         liquidityUsd: parseUsd(market.liquidity || market.liquidity_usd || market.liquidityUsd),
         volumeUsd: parseUsd(market.volume || market.volume_usd || market.volumeUsd),
@@ -66,12 +76,34 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
   }
 
   async getOrderBookTop(tokenId: string): Promise<OrderBookTop> {
-    const book = await this.client.getOrderBook(tokenId);
-    const bestAsk = book.asks?.length ? Number(book.asks[0].price) : 0;
-    const bestBid = book.bids?.length ? Number(book.bids[0].price) : 0;
-    return {
-      bestAsk: Number.isFinite(bestAsk) ? bestAsk : 0,
-      bestBid: Number.isFinite(bestBid) ? bestBid : 0,
-    };
+    if (this.missingOrderbooks.has(tokenId)) {
+      return { bestAsk: 0, bestBid: 0 };
+    }
+
+    try {
+      const book = await this.client.getOrderBook(tokenId);
+      const bestAsk = book.asks?.length ? Number(book.asks[0].price) : 0;
+      const bestBid = book.bids?.length ? Number(book.bids[0].price) : 0;
+      return {
+        bestAsk: Number.isFinite(bestAsk) ? bestAsk : 0,
+        bestBid: Number.isFinite(bestBid) ? bestBid : 0,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('No orderbook exists') || message.includes('404') || message.includes('Not Found')) {
+        if (!this.missingOrderbooks.has(tokenId)) {
+          this.missingOrderbooks.add(tokenId);
+          const marketId = this.tokenMarketMap.get(tokenId);
+          throw new OrderbookNotFoundError(
+            `No orderbook exists for token ${tokenId}${marketId ? ` (market ${marketId})` : ''}`,
+            tokenId,
+            marketId,
+            error instanceof Error ? error : undefined,
+          );
+        }
+        return { bestAsk: 0, bestBid: 0 };
+      }
+      throw error;
+    }
   }
 }

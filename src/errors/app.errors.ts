@@ -64,6 +64,20 @@ export class MarketError extends AppError {
 }
 
 /**
+ * Orderbook error - thrown when no orderbook exists for a token
+ */
+export class OrderbookNotFoundError extends MarketError {
+  constructor(
+    message: string,
+    public readonly tokenId?: string,
+    marketId?: string,
+    cause?: Error,
+  ) {
+    super(message, marketId, cause);
+  }
+}
+
+/**
  * Network error - thrown when RPC or API calls fail
  */
 export class NetworkError extends AppError {
@@ -75,4 +89,3 @@ export class NetworkError extends AppError {
     super(message, 'NETWORK_ERROR', cause);
   }
 }
-

@@ -1,6 +1,7 @@
 import type { Logger } from '../utils/logger.util';
 import type { ArbConfig } from './config';
 import type { DecisionLogger } from './utils/decision-logger';
+import { OrderbookNotFoundError } from '../errors/app.errors';
 import type { MarketDataProvider, Opportunity, RiskManager, Strategy, TradeExecutor } from './types';
 import { Semaphore } from './utils/limiter';
 
@@ -58,8 +59,8 @@ export class ArbitrageEngine {
       const snapshots = await Promise.all(
         markets.map((market) =>
           this.orderbookLimiter.with(async () => {
-            const yesTop = await this.provider.getOrderBookTop(market.yesTokenId);
-            const noTop = await this.provider.getOrderBookTop(market.noTokenId);
+            const yesTop = await this.getOrderBookTopSafe(market.yesTokenId, market.marketId);
+            const noTop = await this.getOrderBookTopSafe(market.noTokenId, market.marketId);
             return { ...market, yesTop, noTop };
           }),
         ),
@@ -75,6 +76,20 @@ export class ArbitrageEngine {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`[ARB] Scan error: ${message}`);
+    }
+  }
+
+  private async getOrderBookTopSafe(tokenId: string, marketId: string): Promise<{ bestAsk: number; bestBid: number }> {
+    try {
+      return await this.provider.getOrderBookTop(tokenId);
+    } catch (error) {
+      if (error instanceof OrderbookNotFoundError) {
+        this.logger.warn(
+          `[ARB] Invalid orderbook token ${tokenId} for market ${marketId}. Remove from config/watchlist if applicable.`,
+        );
+        return { bestAsk: 0, bestBid: 0 };
+      }
+      throw error;
     }
   }
 
