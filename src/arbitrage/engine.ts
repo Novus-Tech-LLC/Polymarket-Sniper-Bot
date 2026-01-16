@@ -56,12 +56,19 @@ export class ArbitrageEngine {
   async scanOnce(now: number = Date.now()): Promise<void> {
     try {
       const markets = await this.provider.getActiveMarkets();
+      let orderbookFailures = 0;
+      let marketsWithOrderbookFailures = 0;
       const snapshots = await Promise.all(
         markets.map((market) =>
           this.orderbookLimiter.with(async () => {
-            const yesTop = await this.getOrderBookTopSafe(market.yesTokenId, market.marketId);
-            const noTop = await this.getOrderBookTopSafe(market.noTokenId, market.marketId);
-            return { ...market, yesTop, noTop };
+            const yesResult = await this.getOrderBookTopSafe(market.yesTokenId, market.marketId);
+            const noResult = await this.getOrderBookTopSafe(market.noTokenId, market.marketId);
+            const hasFailure = yesResult.failed || noResult.failed;
+            if (hasFailure) {
+              marketsWithOrderbookFailures += 1;
+            }
+            orderbookFailures += (yesResult.failed ? 1 : 0) + (noResult.failed ? 1 : 0);
+            return { ...market, yesTop: yesResult.top, noTop: noResult.top };
           }),
         ),
       );
@@ -69,11 +76,13 @@ export class ArbitrageEngine {
       const opportunities = this.strategy.findOpportunities(snapshots, now);
       opportunities.sort((a, b) => b.estProfitUsd - a.estProfitUsd);
       if (opportunities.length === 0) {
-        this.logger.info(`[ARB] Scan complete: 0 opportunities (markets=${markets.length})`);
+        this.logger.info(
+          `[ARB] Scan complete: 0 opportunities (markets=${markets.length}, orderbook_failures=${orderbookFailures}, markets_with_missing_orderbooks=${marketsWithOrderbookFailures})`,
+        );
       } else {
         const top = opportunities[0];
         this.logger.info(
-          `[ARB] Found ${opportunities.length} opportunity(ies). Top market=${top.marketId} edge=${top.edgeBps.toFixed(1)}bps est=$${top.estProfitUsd.toFixed(2)} size=$${top.sizeUsd.toFixed(2)}`,
+          `[ARB] Found ${opportunities.length} opportunity(ies). Top market=${top.marketId} edge=${top.edgeBps.toFixed(1)}bps est=$${top.estProfitUsd.toFixed(2)} size=$${top.sizeUsd.toFixed(2)} (orderbook_failures=${orderbookFailures}, markets_with_missing_orderbooks=${marketsWithOrderbookFailures})`,
         );
       }
 
@@ -87,15 +96,19 @@ export class ArbitrageEngine {
     }
   }
 
-  private async getOrderBookTopSafe(tokenId: string, marketId: string): Promise<{ bestAsk: number; bestBid: number }> {
+  private async getOrderBookTopSafe(
+    tokenId: string,
+    marketId: string,
+  ): Promise<{ top: { bestAsk: number; bestBid: number }; failed: boolean }> {
     try {
-      return await this.provider.getOrderBookTop(tokenId);
+      const top = await this.provider.getOrderBookTop(tokenId);
+      return { top, failed: false };
     } catch (error) {
       if (error instanceof OrderbookNotFoundError) {
         this.logger.warn(
           `[ARB] Invalid orderbook token ${tokenId} for market ${marketId}. Remove from config/watchlist if applicable.`,
         );
-        return { bestAsk: 0, bestBid: 0 };
+        return { top: { bestAsk: 0, bestBid: 0 }, failed: true };
       }
       throw error;
     }
