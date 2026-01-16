@@ -16,6 +16,50 @@ export type CreateClientInput = {
   logger?: Logger;
 };
 
+const SERVER_TIME_SKEW_THRESHOLD_SECONDS = 30;
+
+const parseTimestampSeconds = (value: unknown): number | undefined => {
+  if (value === null || value === undefined) return undefined;
+  const raw = typeof value === 'string' ? Number(value) : value;
+  if (typeof raw !== 'number' || Number.isNaN(raw)) return undefined;
+  if (raw > 1_000_000_000_000) return Math.floor(raw / 1000);
+  return Math.floor(raw);
+};
+
+const extractServerTimeSeconds = (payload: unknown): number | undefined => {
+  const direct = parseTimestampSeconds(payload);
+  if (direct !== undefined) return direct;
+  if (!payload || typeof payload !== 'object') return undefined;
+  const record = payload as Record<string, unknown>;
+  const candidates = ['serverTime', 'server_time', 'timestamp', 'time', 'epoch', 'seconds'];
+  for (const key of candidates) {
+    const parsed = parseTimestampSeconds(record[key]);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+};
+
+const maybeEnableServerTime = async (client: ClobClient, logger?: Logger): Promise<void> => {
+  try {
+    const serverTimePayload = await client.getServerTime();
+    const serverSeconds = extractServerTimeSeconds(serverTimePayload);
+    if (serverSeconds === undefined) {
+      logger?.warn('[CLOB] Unable to parse server time; using local clock.');
+      return;
+    }
+    const localSeconds = Math.floor(Date.now() / 1000);
+    const skewSeconds = Math.abs(serverSeconds - localSeconds);
+    if (skewSeconds >= SERVER_TIME_SKEW_THRESHOLD_SECONDS) {
+      (client as ClobClient & { useServerTime?: boolean }).useServerTime = true;
+      logger?.warn(`[CLOB] Clock skew ${skewSeconds}s detected; enabling server time for signatures.`);
+      return;
+    }
+    logger?.info(`[CLOB] Clock skew ${skewSeconds}s; using local clock.`);
+  } catch (err) {
+    logger?.warn(`[CLOB] Failed to fetch server time; using local clock. ${sanitizeErrorMessage(err)}`);
+  }
+};
+
 export async function createPolymarketClient(
   input: CreateClientInput,
 ): Promise<ClobClient & { wallet: Wallet }> {
@@ -37,6 +81,8 @@ export async function createPolymarketClient(
     wallet,
     creds,
   );
+
+  await maybeEnableServerTime(client, input.logger);
 
   if (!creds && input.deriveApiKey) {
     try {

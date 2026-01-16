@@ -13,6 +13,7 @@ export type MonitorRuntimeConfig = {
   detectOnly: boolean;
   clobCredsComplete: boolean;
   clobDeriveEnabled: boolean;
+  clobCredsChecklist: ClobCredsChecklist;
   fetchIntervalSeconds: number;
   tradeMultiplier: number;
   retryLimit: number;
@@ -43,6 +44,14 @@ export type ArbRuntimeConfig = ArbConfig & {
   overridesApplied: string[];
   ignoredOverrides: string[];
   unsafeOverridesApplied: string[];
+  clobCredsChecklist: ClobCredsChecklist;
+};
+
+export type ClobCredsChecklist = {
+  key: { present: boolean; source?: string };
+  secret: { present: boolean; source?: string };
+  passphrase: { present: boolean; source?: string };
+  deriveEnabled: boolean;
 };
 
 const ARB_OVERRIDE_ALLOWLIST = new Set([
@@ -259,15 +268,21 @@ const readNumber = (key: string, fallback: number, overrides?: Overrides): numbe
   return parsed ?? fallback;
 };
 
-const readFirstEnv = (keys: string[], overrides?: Overrides): string | undefined => {
+const readFirstEnvWithSource = (
+  keys: string[],
+  overrides?: Overrides,
+): { value?: string; source?: string } => {
   for (const key of keys) {
     const raw = readEnv(key, overrides);
     if (raw === undefined || raw === null) continue;
     const value = String(raw).trim();
-    if (value.length > 0) return value;
+    if (value.length > 0) return { value, source: key };
   }
-  return undefined;
+  return {};
 };
+
+const readFirstEnv = (keys: string[], overrides?: Overrides): string | undefined =>
+  readFirstEnvWithSource(keys, overrides).value;
 
 const readBoolFromKeys = (keys: string[], overrides?: Overrides): boolean => {
   for (const key of keys) {
@@ -292,13 +307,30 @@ const CLOB_CRED_KEYS = {
 
 const CLOB_DERIVE_KEYS = ['CLOB_DERIVE_API_KEY', 'POLYMARKET_DERIVE_API_KEY', 'POLY_DERIVE_API_KEY'];
 
-const readClobCreds = (overrides?: Overrides): { key?: string; secret?: string; passphrase?: string } => ({
-  key: readFirstEnv(CLOB_CRED_KEYS.key, overrides),
-  secret: readFirstEnv(CLOB_CRED_KEYS.secret, overrides),
-  passphrase: readFirstEnv(CLOB_CRED_KEYS.passphrase, overrides),
-});
+const readClobCreds = (overrides?: Overrides): { key?: string; secret?: string; passphrase?: string } => {
+  const keyEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.key, overrides);
+  const secretEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.secret, overrides);
+  const passphraseEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.passphrase, overrides);
+  return {
+    key: keyEntry.value,
+    secret: secretEntry.value,
+    passphrase: passphraseEntry.value,
+  };
+};
 
 const readClobDeriveEnabled = (overrides?: Overrides): boolean => readBoolFromKeys(CLOB_DERIVE_KEYS, overrides);
+
+const buildClobCredsChecklist = (overrides?: Overrides): ClobCredsChecklist => {
+  const keyEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.key, overrides);
+  const secretEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.secret, overrides);
+  const passphraseEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.passphrase, overrides);
+  return {
+    key: { present: Boolean(keyEntry.value), source: keyEntry.source },
+    secret: { present: Boolean(secretEntry.value), source: secretEntry.source },
+    passphrase: { present: Boolean(passphraseEntry.value), source: passphraseEntry.source },
+    deriveEnabled: readClobDeriveEnabled(overrides),
+  };
+};
 
 const parseList = (val: string | undefined): string[] => {
   if (!val) return [];
@@ -435,6 +467,7 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
   const clobCreds = readClobCreds(overrides);
   const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
   const clobDeriveEnabled = readClobDeriveEnabled(overrides);
+  const clobCredsChecklist = buildClobCredsChecklist(overrides);
 
   if (presetName === 'custom') {
     warnLegacyKeys('ARB', legacyKeysDetected);
@@ -491,6 +524,7 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
     detectOnly: !clobCredsComplete,
     clobCredsComplete,
     clobDeriveEnabled,
+    clobCredsChecklist,
     polymarketApiKey: clobCreds.key ?? '',
     polymarketApiSecret: clobCreds.secret ?? '',
     polymarketApiPassphrase: clobCreds.passphrase ?? '',
@@ -549,6 +583,7 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
   const clobCreds = readClobCreds(overrides);
   const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
   const clobDeriveEnabled = readClobDeriveEnabled(overrides);
+  const clobCredsChecklist = buildClobCredsChecklist(overrides);
 
   if (presetName === 'custom') {
     warnLegacyKeys('MONITOR', legacyKeysDetected);
@@ -573,6 +608,7 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     detectOnly: !clobCredsComplete,
     clobCredsComplete,
     clobDeriveEnabled,
+    clobCredsChecklist,
     fetchIntervalSeconds: MONITOR_LEGACY_DEFAULTS.fetchIntervalSeconds,
     tradeMultiplier: MONITOR_LEGACY_DEFAULTS.tradeMultiplier,
     retryLimit: MONITOR_LEGACY_DEFAULTS.retryLimit,
