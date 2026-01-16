@@ -5,6 +5,7 @@ import { SignatureType } from '@polymarket/order-utils';
 import { Wallet } from 'ethers';
 import { POLYMARKET_API } from '../constants/polymarket.constants';
 import type { Logger } from '../utils/logger.util';
+import { buildSignedPath } from '../utils/query-string.util';
 
 export type SecretDecodingMode = 'raw' | 'base64' | 'base64url';
 export type SignatureEncodingMode = 'base64' | 'base64url';
@@ -287,7 +288,12 @@ export const runClobAuthPreflight = async (params: {
   const timestamp = Math.floor(Date.now() / 1000);
   const endpoint = '/balance-allowance';
   params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
-  const messageComponents = buildAuthMessageComponents(timestamp, 'GET', endpoint);
+  const requestParams = { signature_type: signatureType };
+  const { signedPath, paramsKeys } = buildSignedPath(endpoint, requestParams);
+  params.logger.info(
+    `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'}`,
+  );
+  const messageComponents = buildAuthMessageComponents(timestamp, 'GET', signedPath);
   const { messageDigest, secretDecodingUsed, signatureEncoding } = logAuthSigningDiagnostics({
     logger: params.logger,
     secret: params.creds.secret,
@@ -319,7 +325,7 @@ export const runClobAuthPreflight = async (params: {
         secretDecodingUsed,
         expectedBodyIncluded: false,
         bodyIncluded: messageComponents.bodyIncluded,
-        expectedQueryPresent: false,
+        expectedQueryPresent: paramsKeys.length > 0,
         pathIncludesQuery: messageComponents.path.includes('?'),
       });
 
