@@ -129,6 +129,53 @@ const isMissingIp6tablesRestore = (err: unknown): boolean => {
   return message.includes('ip6tables-restore') && message.includes('command not found');
 };
 
+const hasCommand = async (command: string): Promise<boolean> => {
+  try {
+    await execFileAsync('sh', ['-c', `command -v ${command}`]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const ensureResolvconfAvailable = async (logger: Logger, dns: string | undefined): Promise<void> => {
+  if (!dns) {
+    return;
+  }
+
+  if (await hasCommand('resolvconf')) {
+    return;
+  }
+
+  try {
+    if (await hasCommand('apk')) {
+      logger.info('Installing openresolv to enable WireGuard DNS updates.');
+      await execFileAsync('apk', ['add', '--no-cache', 'openresolv']);
+      return;
+    }
+    if (await hasCommand('apt-get')) {
+      logger.info('Installing resolvconf to enable WireGuard DNS updates.');
+      await execFileAsync('sh', ['-c', 'apt-get update && apt-get install -y resolvconf']);
+      return;
+    }
+    if (await hasCommand('dnf')) {
+      logger.info('Installing resolvconf to enable WireGuard DNS updates.');
+      await execFileAsync('dnf', ['install', '-y', 'resolvconf']);
+      return;
+    }
+    if (await hasCommand('yum')) {
+      logger.info('Installing resolvconf to enable WireGuard DNS updates.');
+      await execFileAsync('yum', ['install', '-y', 'resolvconf']);
+      return;
+    }
+  } catch (err) {
+    logger.warn(`Failed to install resolvconf automatically: ${(err as Error).message}`);
+    return;
+  }
+
+  logger.warn('resolvconf is not installed and no supported package manager was found.');
+};
+
 export async function startWireguard(logger: Logger): Promise<void> {
   const env = getWireguardEnv();
   if (!env.enabled) {
@@ -136,6 +183,7 @@ export async function startWireguard(logger: Logger): Promise<void> {
   }
 
   try {
+    await ensureResolvconfAvailable(logger, env.dns);
     await writeConfig(env, true);
 
     if (env.forceRestart) {
