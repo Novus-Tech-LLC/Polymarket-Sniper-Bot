@@ -56,6 +56,7 @@ export async function startArbitrageEngine(
       const authOk = await verifyApiCreds(client);
       if (!authOk) {
         config.detectOnly = true;
+        logger.warn('[CLOB] invalid creds');
         logger.warn('[CLOB] Auth check failed; switching to detect-only.');
         logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
       }

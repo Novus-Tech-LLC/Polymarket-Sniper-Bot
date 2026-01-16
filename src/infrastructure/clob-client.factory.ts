@@ -74,7 +74,7 @@ const logAuthHeaderPresence = async (
       method: 'GET',
       requestPath: '/auth/api-keys',
     });
-    const presence = getAuthHeaderPresence(headers);
+    const presence = getAuthHeaderPresence(headers, { secretConfigured: Boolean(creds?.secret) });
     logger.info(`[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`);
   } catch (err) {
     logger.warn(`[CLOB] Failed to inspect auth headers. ${sanitizeErrorMessage(err)}`);

@@ -5,6 +5,10 @@ export type AuthHeaderPresence = {
   signatureHeaderPresent: boolean;
 };
 
+export type AuthHeaderPresenceOptions = {
+  secretConfigured?: boolean;
+};
+
 const normalizeHeaderKeys = (headers: Record<string, unknown>): Set<string> => {
   return new Set(Object.keys(headers).map((key) => key.toLowerCase()));
 };
@@ -15,22 +19,24 @@ const hasHeader = (keys: Set<string>, candidates: string[]): boolean => {
 
 export const getAuthHeaderPresence = (
   headers?: Record<string, string | string[] | number | boolean | undefined>,
+  options?: AuthHeaderPresenceOptions,
 ): AuthHeaderPresence => {
   if (!headers) {
     return {
       apiKeyHeaderPresent: false,
       passphraseHeaderPresent: false,
-      secretHeaderPresent: false,
+      secretHeaderPresent: Boolean(options?.secretConfigured),
       signatureHeaderPresent: false,
     };
   }
 
   const keys = normalizeHeaderKeys(headers as Record<string, unknown>);
+  const secretFromHeaders = hasHeader(keys, ['POLY_SECRET', 'AUTHORIZATION', 'POLY_SIGNATURE']);
 
   return {
     apiKeyHeaderPresent: hasHeader(keys, ['POLY_API_KEY', 'X-API-KEY']),
     passphraseHeaderPresent: hasHeader(keys, ['POLY_PASSPHRASE']),
-    secretHeaderPresent: hasHeader(keys, ['POLY_SECRET', 'AUTHORIZATION']),
+    secretHeaderPresent: secretFromHeaders || Boolean(options?.secretConfigured),
     signatureHeaderPresent: hasHeader(keys, ['POLY_SIGNATURE']),
   };
 };

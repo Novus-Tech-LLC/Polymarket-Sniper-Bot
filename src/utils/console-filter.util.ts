@@ -95,7 +95,7 @@ export const suppressClobOrderbookErrors = (logger?: Logger): void => {
             };
             if (logger) {
               logger.warn(`[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`);
-              if (payload.status === 401 && !presence.signatureHeaderPresent) {
+              if (payload.status === 401 && !presence.secretHeaderPresent) {
                 logger.warn('[CLOB] secret missing from request');
               }
             }
