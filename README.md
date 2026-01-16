@@ -310,6 +310,8 @@ services:
 - **Idempotency:** opportunity fingerprints are cached (10 min TTL) to avoid double-firing.
 - **No secrets in logs:** only structured trade decisions + high-level events are logged.
 - **Conservative defaults:** the default sizing and caps are intentionally small; scale only after validating fill rates, slippage, and net edge.
+- **Cloudflare protection:** if the CLOB endpoint responds with a Cloudflare block (HTTP 403 + HTML), the bot pauses order submission for `CLOUDFLARE_COOLDOWN_SECONDS` while continuing to monitor/detect trades.
+- **Order throttling:** order submission enforces `ORDER_SUBMIT_MIN_INTERVAL_MS`, `ORDER_SUBMIT_MAX_PER_HOUR`, and per-market cooldowns to avoid hammering endpoints.
 
 ### Troubleshooting
 
@@ -351,6 +353,11 @@ docker run --env-file .env polymarket-sniper-bot
 | `ARB_PRESET` | Arbitrage preset name | `safe_small` |
 | `MONITOR_PRESET` | Monitor preset name | `balanced` |
 | `MONITOR_REQUIRE_CONFIRMED` | Require confirmed trades before acting | `true` |
+| `MIN_ORDER_USD` | Minimum order size before submission | `10` |
+| `ORDER_SUBMIT_MIN_INTERVAL_MS` | Min ms between submits | `20000` |
+| `ORDER_SUBMIT_MAX_PER_HOUR` | Max submits per hour | `20` |
+| `ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS` | Per-market cooldown seconds | `300` |
+| `CLOUDFLARE_COOLDOWN_SECONDS` | Pause submits after Cloudflare block | `3600` |
 | `TARGET_ADDRESSES` | (Monitor only) Comma-separated addresses to monitor | `0xabc...,0xdef...` |
 | `PUBLIC_KEY` | (Monitor only) Your Polygon wallet address | `your_wallet_address` |
 | `ARB_DEBUG_TOP_N` | (Arb only) Log top N pre-filter candidates each scan | `0` |
@@ -405,6 +412,11 @@ Presets are the default. Only a short list of overrides are allowed unless you e
 - `FETCH_INTERVAL`
 - `GAS_PRICE_MULTIPLIER`
 - `MONITOR_REQUIRE_CONFIRMED`
+- `MIN_ORDER_USD`
+- `ORDER_SUBMIT_MIN_INTERVAL_MS`
+- `ORDER_SUBMIT_MAX_PER_HOUR`
+- `ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS`
+- `CLOUDFLARE_COOLDOWN_SECONDS`
 
 To override anything else, set `ARB_ALLOW_UNSAFE_OVERRIDES=true`. The bot will warn when unsafe or legacy overrides are used.
 

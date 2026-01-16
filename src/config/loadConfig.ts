@@ -24,6 +24,11 @@ export type MonitorRuntimeConfig = {
   minTradeSizeUsd: number;
   frontrunSizeMultiplier?: number;
   gasPriceMultiplier?: number;
+  minOrderUsd: number;
+  orderSubmitMinIntervalMs: number;
+  orderSubmitMaxPerHour: number;
+  orderSubmitMarketCooldownSeconds: number;
+  cloudflareCooldownSeconds: number;
   overridesApplied: string[];
   ignoredOverrides: string[];
   unsafeOverridesApplied: string[];
@@ -48,6 +53,11 @@ const ARB_OVERRIDE_ALLOWLIST = new Set([
   'ARB_MIN_POL_GAS',
   'ARB_SCAN_INTERVAL_MS',
   'ARB_DEBUG_TOP_N',
+  'MIN_ORDER_USD',
+  'ORDER_SUBMIT_MIN_INTERVAL_MS',
+  'ORDER_SUBMIT_MAX_PER_HOUR',
+  'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
+  'CLOUDFLARE_COOLDOWN_SECONDS',
 ]);
 
 const MONITOR_OVERRIDE_ALLOWLIST = new Set([
@@ -56,6 +66,11 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   'FETCH_INTERVAL',
   'GAS_PRICE_MULTIPLIER',
   'MONITOR_REQUIRE_CONFIRMED',
+  'MIN_ORDER_USD',
+  'ORDER_SUBMIT_MIN_INTERVAL_MS',
+  'ORDER_SUBMIT_MAX_PER_HOUR',
+  'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
+  'CLOUDFLARE_COOLDOWN_SECONDS',
 ]);
 
 const LEGACY_MIN_TRADE_KEYS = ['MIN_TRADE_SIZE', 'MIN_TRADE_USDC', 'MIN_TRADE_SIZE_USDC'] as const;
@@ -98,6 +113,11 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   polymarketApiPassphrase: '',
   collateralTokenAddress: POLYGON_USDC_ADDRESS,
   collateralTokenDecimals: 6,
+  minOrderUsd: DEFAULT_CONFIG.MIN_ORDER_USD,
+  orderSubmitMinIntervalMs: DEFAULT_CONFIG.ORDER_SUBMIT_MIN_INTERVAL_MS,
+  orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
+  orderSubmitMarketCooldownSeconds: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
+  cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
 };
 
 const MONITOR_LEGACY_DEFAULTS = {
@@ -111,6 +131,11 @@ const MONITOR_LEGACY_DEFAULTS = {
   minTradeSizeUsd: DEFAULT_CONFIG.MIN_TRADE_SIZE_USD,
   frontrunSizeMultiplier: DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER,
   gasPriceMultiplier: DEFAULT_CONFIG.GAS_PRICE_MULTIPLIER,
+  minOrderUsd: DEFAULT_CONFIG.MIN_ORDER_USD,
+  orderSubmitMinIntervalMs: DEFAULT_CONFIG.ORDER_SUBMIT_MIN_INTERVAL_MS,
+  orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
+  orderSubmitMarketCooldownSeconds: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
+  cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
 };
 
 type EnvParser<T> = (raw: string) => T | undefined;
@@ -159,6 +184,11 @@ const ARB_ENV_MAP = {
   ARB_DEBUG_TOP_N: { key: 'debugTopN', parse: parseNumber },
   ARB_UNITS_AUTO_FIX: { key: 'unitsAutoFix', parse: parseBool },
   ARB_LOG_EVERY_MARKET: { key: 'logEveryMarket', parse: parseBool },
+  MIN_ORDER_USD: { key: 'minOrderUsd', parse: parseNumber },
+  ORDER_SUBMIT_MIN_INTERVAL_MS: { key: 'orderSubmitMinIntervalMs', parse: parseNumber },
+  ORDER_SUBMIT_MAX_PER_HOUR: { key: 'orderSubmitMaxPerHour', parse: parseNumber },
+  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: { key: 'orderSubmitMarketCooldownSeconds', parse: parseNumber },
+  CLOUDFLARE_COOLDOWN_SECONDS: { key: 'cloudflareCooldownSeconds', parse: parseNumber },
 } as const satisfies Record<string, { key: keyof ArbConfig; parse: EnvParser<unknown> }>;
 
 const MONITOR_ENV_MAP = {
@@ -172,6 +202,11 @@ const MONITOR_ENV_MAP = {
   FRONTRUN_SIZE_MULTIPLIER: { key: 'frontrunSizeMultiplier', parse: parseNumber },
   GAS_PRICE_MULTIPLIER: { key: 'gasPriceMultiplier', parse: parseNumber },
   MONITOR_REQUIRE_CONFIRMED: { key: 'requireConfirmed', parse: parseBool },
+  MIN_ORDER_USD: { key: 'minOrderUsd', parse: parseNumber },
+  ORDER_SUBMIT_MIN_INTERVAL_MS: { key: 'orderSubmitMinIntervalMs', parse: parseNumber },
+  ORDER_SUBMIT_MAX_PER_HOUR: { key: 'orderSubmitMaxPerHour', parse: parseNumber },
+  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: { key: 'orderSubmitMarketCooldownSeconds', parse: parseNumber },
+  CLOUDFLARE_COOLDOWN_SECONDS: { key: 'cloudflareCooldownSeconds', parse: parseNumber },
 } as const satisfies Record<string, { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }>;
 
 const MONITOR_LEGACY_KEYS = [
@@ -185,6 +220,11 @@ const MONITOR_LEGACY_KEYS = [
   'FRONTRUN_SIZE_MULTIPLIER',
   'GAS_PRICE_MULTIPLIER',
   'MONITOR_REQUIRE_CONFIRMED',
+  'MIN_ORDER_USD',
+  'ORDER_SUBMIT_MIN_INTERVAL_MS',
+  'ORDER_SUBMIT_MAX_PER_HOUR',
+  'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
+  'CLOUDFLARE_COOLDOWN_SECONDS',
 ];
 
 const ARB_LEGACY_KEYS = Object.keys(ARB_ENV_MAP);
@@ -487,6 +527,11 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     minTradeSizeUsd: MONITOR_LEGACY_DEFAULTS.minTradeSizeUsd,
     frontrunSizeMultiplier: MONITOR_LEGACY_DEFAULTS.frontrunSizeMultiplier,
     gasPriceMultiplier: MONITOR_LEGACY_DEFAULTS.gasPriceMultiplier,
+    minOrderUsd: MONITOR_LEGACY_DEFAULTS.minOrderUsd,
+    orderSubmitMinIntervalMs: MONITOR_LEGACY_DEFAULTS.orderSubmitMinIntervalMs,
+    orderSubmitMaxPerHour: MONITOR_LEGACY_DEFAULTS.orderSubmitMaxPerHour,
+    orderSubmitMarketCooldownSeconds: MONITOR_LEGACY_DEFAULTS.orderSubmitMarketCooldownSeconds,
+    cloudflareCooldownSeconds: MONITOR_LEGACY_DEFAULTS.cloudflareCooldownSeconds,
     overridesApplied: [],
     ignoredOverrides: [],
     unsafeOverridesApplied: [],
@@ -558,6 +603,11 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
       enabled: baseConfig.enabled,
       fetchIntervalSeconds: baseConfig.fetchIntervalSeconds,
       minTradeSizeUsd: baseConfig.minTradeSizeUsd,
+      minOrderUsd: baseConfig.minOrderUsd,
+      orderSubmitMinIntervalMs: baseConfig.orderSubmitMinIntervalMs,
+      orderSubmitMaxPerHour: baseConfig.orderSubmitMaxPerHour,
+      orderSubmitMarketCooldownSeconds: baseConfig.orderSubmitMarketCooldownSeconds,
+      cloudflareCooldownSeconds: baseConfig.cloudflareCooldownSeconds,
       tradeMultiplier: baseConfig.tradeMultiplier,
       requireConfirmed: baseConfig.requireConfirmed,
       gasPriceMultiplier: baseConfig.gasPriceMultiplier,

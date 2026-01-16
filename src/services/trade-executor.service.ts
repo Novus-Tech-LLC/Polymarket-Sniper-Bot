@@ -70,7 +70,7 @@ export class TradeExecutorService {
 
       // Execute frontrun order with priority
       // The postOrder function will use higher gas prices if configured
-      await postOrder({
+      const submissionResult = await postOrder({
         client,
         marketId: signal.marketId,
         tokenId: signal.tokenId,
@@ -79,9 +79,19 @@ export class TradeExecutorService {
         sizeUsd: frontrunSize,
         priority: true, // Flag for priority execution
         targetGasPrice: signal.targetGasPrice,
+        logger,
+        orderConfig: {
+          minOrderUsd: env.minOrderUsd,
+          orderSubmitMinIntervalMs: env.orderSubmitMinIntervalMs,
+          orderSubmitMaxPerHour: env.orderSubmitMaxPerHour,
+          orderSubmitMarketCooldownSeconds: env.orderSubmitMarketCooldownSeconds,
+          cloudflareCooldownSeconds: env.cloudflareCooldownSeconds,
+        },
       });
       
-      logger.info(`[Frontrun] Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`);
+      if (submissionResult.status === 'submitted') {
+        logger.info(`[Frontrun] Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       if (errorMessage.includes('closed') || errorMessage.includes('resolved') || errorMessage.includes('No orderbook')) {
@@ -116,4 +126,3 @@ export class TradeExecutorService {
     }
   }
 }
-

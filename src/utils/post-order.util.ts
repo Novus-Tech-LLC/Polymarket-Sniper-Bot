@@ -2,6 +2,13 @@ import type { ClobClient } from '@polymarket/clob-client';
 import { OrderType, Side } from '@polymarket/clob-client';
 import { ORDER_EXECUTION } from '../constants/polymarket.constants';
 import { withAuthRetry } from '../infrastructure/clob-auth';
+import type { Logger } from './logger.util';
+import {
+  getOrderSubmissionController,
+  toOrderSubmissionSettings,
+  type OrderSubmissionConfig,
+  type OrderSubmissionResult,
+} from './order-submission.util';
 
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderOutcome = 'YES' | 'NO';
@@ -16,12 +23,23 @@ export type PostOrderInput = {
   maxAcceptablePrice?: number;
   priority?: boolean; // For frontrunning - execute with higher priority
   targetGasPrice?: string; // Gas price of target transaction for frontrunning
+  logger: Logger;
+  orderConfig?: OrderSubmissionConfig;
+  now?: number;
 };
 
 const missingOrderbooks = new Set<string>();
 
-export async function postOrder(input: PostOrderInput): Promise<void> {
-  const { client, marketId, tokenId, outcome, side, sizeUsd, maxAcceptablePrice } = input;
+export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionResult> {
+  const { client, marketId, tokenId, outcome, side, sizeUsd, maxAcceptablePrice, logger } = input;
+  const settings = toOrderSubmissionSettings({
+    minOrderUsd: input.orderConfig?.minOrderUsd,
+    orderSubmitMinIntervalMs: input.orderConfig?.orderSubmitMinIntervalMs,
+    orderSubmitMaxPerHour: input.orderConfig?.orderSubmitMaxPerHour,
+    orderSubmitMarketCooldownSeconds: input.orderConfig?.orderSubmitMarketCooldownSeconds,
+    cloudflareCooldownSeconds: input.orderConfig?.cloudflareCooldownSeconds,
+  });
+  const submissionController = getOrderSubmissionController(settings);
 
   if (missingOrderbooks.has(tokenId)) {
     throw new Error(`No orderbook exists for token ${tokenId} (cached)`);
@@ -100,21 +118,33 @@ export async function postOrder(input: PostOrderInput): Promise<void> {
       price: levelPrice,
     };
 
-    try {
-      const signedOrder = await client.createMarketOrder(orderArgs);
-      const response = await withAuthRetry(client, () => client.postOrder(signedOrder, OrderType.FOK));
+    const result = await submissionController.submit({
+      sizeUsd: orderValue,
+      marketId,
+      logger,
+      now: input.now,
+      skipRateLimit: retryCount > 0,
+      submit: async () => {
+        const signedOrder = await client.createMarketOrder(orderArgs);
+        return withAuthRetry(client, () => client.postOrder(signedOrder, OrderType.FOK));
+      },
+    });
 
-      if (response.success) {
-        remaining -= orderValue;
-        retryCount = 0;
-      } else {
-        retryCount++;
-      }
-    } catch (error) {
-      retryCount++;
-      if (retryCount >= maxRetries) {
-        throw error;
-      }
+    if (result.status === 'submitted') {
+      remaining -= orderValue;
+      retryCount = 0;
+      continue;
+    }
+
+    if (result.status === 'skipped') {
+      return result;
+    }
+
+    retryCount++;
+    if (retryCount >= maxRetries) {
+      return result;
     }
   }
+
+  return { status: 'failed', reason: 'order_incomplete' };
 }

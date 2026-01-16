@@ -8,6 +8,11 @@ import type { MarketDataProvider, TradeExecutionResult, TradeExecutor, TradePlan
 import { calculateEdgeBps, estimateProfitUsd } from '../utils/bps';
 import { POLYMARKET_CONTRACTS } from '../../constants/polymarket.constants';
 import { withAuthRetry } from '../../infrastructure/clob-auth';
+import {
+  getOrderSubmissionController,
+  toOrderSubmissionSettings,
+  type OrderSubmissionSettings,
+} from '../../utils/order-submission.util';
 
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -77,6 +82,7 @@ export class ArbTradeExecutor implements TradeExecutor {
   private readonly config: ArbConfig;
   private readonly logger: Logger;
   private readonly allowanceManager: AllowanceManager;
+  private readonly submissionSettings: OrderSubmissionSettings;
 
   constructor(params: {
     client: ClobClient & { wallet: Wallet };
@@ -94,6 +100,13 @@ export class ArbTradeExecutor implements TradeExecutor {
       spender: POLYMARKET_CONTRACTS[1],
       logger: params.logger,
       approveUnlimited: this.config.approveUnlimited,
+    });
+    this.submissionSettings = toOrderSubmissionSettings({
+      minOrderUsd: this.config.minOrderUsd,
+      orderSubmitMinIntervalMs: this.config.orderSubmitMinIntervalMs,
+      orderSubmitMaxPerHour: this.config.orderSubmitMaxPerHour,
+      orderSubmitMarketCooldownSeconds: this.config.orderSubmitMarketCooldownSeconds,
+      cloudflareCooldownSeconds: this.config.cloudflareCooldownSeconds,
     });
   }
 
@@ -119,7 +132,7 @@ export class ArbTradeExecutor implements TradeExecutor {
       const first = legOrder[0];
       const second = legOrder[1];
 
-      const firstTx = await this.submitMarketOrder(first.tokenId, plan.sizeUsd, first.ask);
+      const firstTx = await this.submitMarketOrder(plan.marketId, first.tokenId, plan.sizeUsd, first.ask);
 
       const refreshedFirst = await this.provider.getOrderBookTop(first.tokenId);
       const refreshedSecond = await this.provider.getOrderBookTop(second.tokenId);
@@ -138,7 +151,7 @@ export class ArbTradeExecutor implements TradeExecutor {
         return { status: 'failed', reason: 'second_leg_guard' };
       }
 
-      const secondTx = await this.submitMarketOrder(second.tokenId, plan.sizeUsd, refreshedSecond.bestAsk);
+      const secondTx = await this.submitMarketOrder(plan.marketId, second.tokenId, plan.sizeUsd, refreshedSecond.bestAsk);
 
       return {
         status: 'submitted',
@@ -151,7 +164,7 @@ export class ArbTradeExecutor implements TradeExecutor {
     }
   }
 
-  private async submitMarketOrder(tokenId: string, sizeUsd: number, askPrice: number): Promise<string> {
+  private async submitMarketOrder(marketId: string, tokenId: string, sizeUsd: number, askPrice: number): Promise<string> {
     const maxAcceptablePrice = askPrice * (1 + this.config.slippageBps / 10000);
     const top = await this.provider.getOrderBookTop(tokenId);
     if (!top.bestAsk || top.bestAsk > maxAcceptablePrice) {
@@ -166,11 +179,20 @@ export class ArbTradeExecutor implements TradeExecutor {
       price: top.bestAsk,
     };
 
-    const signedOrder = await this.client.createMarketOrder(orderArgs);
-    const response = await withAuthRetry(this.client, () => this.client.postOrder(signedOrder, OrderType.FOK));
-    if (!response?.success) {
-      throw new Error('order_rejected');
+    const submissionController = getOrderSubmissionController(this.submissionSettings);
+    const result = await submissionController.submit({
+      sizeUsd,
+      marketId,
+      logger: this.logger,
+      submit: async () => {
+        const signedOrder = await this.client.createMarketOrder(orderArgs);
+        return withAuthRetry(this.client, () => this.client.postOrder(signedOrder, OrderType.FOK));
+      },
+    });
+
+    if (result.status !== 'submitted') {
+      throw new Error(result.reason ?? 'order_rejected');
     }
-    return response?.order?.id || response?.order?.hash || '';
+    return result.orderId || '';
   }
 }

@@ -21,7 +21,7 @@ test('postOrder applies cached API creds before placing orders', async () => {
     createMarketOrder: async () => ({ signed: true }),
     postOrder: async () => {
       callOrder.push('post');
-      return { success: true };
+      return { success: true, order: { id: 'order-1' }, status: 200 };
     },
   } as unknown as ClobClient;
 
@@ -39,6 +39,19 @@ test('postOrder applies cached API creds before placing orders', async () => {
     outcome: 'YES',
     side: 'BUY',
     sizeUsd: 1,
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    },
+    orderConfig: {
+      minOrderUsd: 0,
+      orderSubmitMinIntervalMs: 0,
+      orderSubmitMaxPerHour: 1000,
+      orderSubmitMarketCooldownSeconds: 0,
+      cloudflareCooldownSeconds: 0,
+    },
   });
 
   assert.ok(callOrder.indexOf('set') !== -1);
@@ -60,7 +73,7 @@ test('postOrder re-applies API creds and retries once on auth failure', async ()
         (error as { response?: { status: number } }).response = { status: 401 };
         throw error;
       }
-      return { success: true };
+      return { success: true, order: { id: 'order-2' }, status: 200 };
     },
   } as unknown as ClobClient;
 
@@ -79,6 +92,19 @@ test('postOrder re-applies API creds and retries once on auth failure', async ()
     outcome: 'YES',
     side: 'BUY',
     sizeUsd: 1,
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    },
+    orderConfig: {
+      minOrderUsd: 0,
+      orderSubmitMinIntervalMs: 0,
+      orderSubmitMaxPerHour: 1000,
+      orderSubmitMarketCooldownSeconds: 0,
+      cloudflareCooldownSeconds: 0,
+    },
   });
 
   assert.equal(postAttempts, 2);

@@ -38,4 +38,9 @@ export type ArbConfig = {
   polymarketApiPassphrase: string;
   collateralTokenAddress: string;
   collateralTokenDecimals: number;
+  minOrderUsd: number;
+  orderSubmitMinIntervalMs: number;
+  orderSubmitMaxPerHour: number;
+  orderSubmitMarketCooldownSeconds: number;
+  cloudflareCooldownSeconds: number;
 };

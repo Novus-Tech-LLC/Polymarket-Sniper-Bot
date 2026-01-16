@@ -6,6 +6,9 @@ const baseArbEnv = {
   RPC_URL: 'http://localhost:8545',
   PRIVATE_KEY: '0x' + '11'.repeat(32),
   MODE: 'arb',
+  POLYMARKET_API_KEY: 'key',
+  POLYMARKET_API_SECRET: 'secret',
+  POLYMARKET_API_PASSPHRASE: 'passphrase',
 };
 
 const baseMonitorEnv = {
@@ -13,6 +16,9 @@ const baseMonitorEnv = {
   PUBLIC_KEY: '0x' + '22'.repeat(20),
   PRIVATE_KEY: '0x' + '33'.repeat(32),
   RPC_URL: 'http://localhost:8545',
+  POLYMARKET_API_KEY: 'key',
+  POLYMARKET_API_SECRET: 'secret',
+  POLYMARKET_API_PASSPHRASE: 'passphrase',
 };
 
 const originalEnv = { ...process.env };
