@@ -305,7 +305,12 @@ const CLOB_CRED_KEYS = {
   passphrase: ['POLYMARKET_API_PASSPHRASE', 'POLY_PASSPHRASE', 'CLOB_API_PASSPHRASE'],
 };
 
-const CLOB_DERIVE_KEYS = ['CLOB_DERIVE_API_KEY', 'POLYMARKET_DERIVE_API_KEY', 'POLY_DERIVE_API_KEY'];
+const CLOB_DERIVE_KEYS = [
+  'CLOB_DERIVE_CREDS',
+  'CLOB_DERIVE_API_KEY',
+  'POLYMARKET_DERIVE_API_KEY',
+  'POLY_DERIVE_API_KEY',
+];
 
 const readClobCreds = (overrides?: Overrides): { key?: string; secret?: string; passphrase?: string } => {
   const keyEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.key, overrides);

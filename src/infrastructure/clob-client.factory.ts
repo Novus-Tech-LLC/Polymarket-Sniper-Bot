@@ -1,6 +1,7 @@
 import { Wallet, providers } from 'ethers';
 import { ClobClient, Chain, createL2Headers } from '@polymarket/clob-client';
 import type { ApiKeyCreds } from '@polymarket/clob-client';
+import { SignatureType } from '@polymarket/order-utils';
 import { POLYMARKET_API } from '../constants/polymarket.constants';
 import { initializeApiCreds } from './clob-auth';
 import type { Logger } from '../utils/logger.util';
@@ -9,6 +10,7 @@ import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 import {
   buildAuthMessageComponents,
   formatApiKeyId,
+  getApiKeyDiagnostics,
   logAuthSigningDiagnostics,
   logClobDiagnostics,
   setupClobHeaderKeyLogging,
@@ -110,18 +112,37 @@ const logAuthHeaderPresence = async (
     const timestamp = Math.floor(Date.now() / 1000);
     const headers = await createL2Headers(signer, creds, {
       method: 'GET',
-      requestPath: '/auth/api-keys',
+      requestPath: '/balance-allowance',
     }, timestamp);
     const presence = getAuthHeaderPresence(headers, { secretConfigured: Boolean(creds?.secret) });
     logger.info(`[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`);
     logAuthSigningDiagnostics({
       logger,
       secret: creds.secret,
-      messageComponents: buildAuthMessageComponents(timestamp, 'GET', '/auth/api-keys'),
+      messageComponents: buildAuthMessageComponents(timestamp, 'GET', '/balance-allowance'),
     });
   } catch (err) {
     logger.warn(`[CLOB] Failed to inspect auth headers. ${sanitizeErrorMessage(err)}`);
   }
+};
+
+const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCreds | undefined> => {
+  const deriveClient = new ClobClient(
+    POLYMARKET_API.BASE_URL,
+    Chain.POLYGON,
+    wallet,
+    undefined,
+    SignatureType.EOA,
+  );
+  const deriveFn = deriveClient as ClobClient & {
+    create_or_derive_api_creds?: () => Promise<ApiKeyCreds>;
+    createOrDeriveApiKey?: () => Promise<ApiKeyCreds>;
+  };
+
+  if (deriveFn.create_or_derive_api_creds) {
+    return deriveFn.create_or_derive_api_creds();
+  }
+  return deriveFn.createOrDeriveApiKey?.();
 };
 
 export async function createPolymarketClient(
@@ -176,6 +197,11 @@ export async function createPolymarketClient(
       passphrase: input.apiPassphrase,
     };
   }
+  const deriveEnabled = Boolean(input.deriveApiKey);
+  if (deriveEnabled && creds) {
+    input.logger?.info('[CLOB] Derived creds enabled; ignoring provided API keys.');
+    creds = undefined;
+  }
 
   const client = new ClobClient(
     POLYMARKET_API.BASE_URL,
@@ -187,12 +213,13 @@ export async function createPolymarketClient(
   );
   await maybeEnableServerTime(client, input.logger);
 
-  if (!creds && input.deriveApiKey) {
+  if (deriveEnabled) {
     try {
-      const derived = await client.createOrDeriveApiKey();
+      const derived = await deriveApiCreds(wallet, input.logger);
       if (derived?.key && derived?.secret && derived?.passphrase) {
         creds = derived;
-        input.logger?.info('[CLOB] derived creds');
+        const { apiKeyDigest, keyIdSuffix } = getApiKeyDiagnostics(derived.key);
+        input.logger?.info(`[CLOB] derived creds apiKeyDigest=${apiKeyDigest} keyIdSuffix=${keyIdSuffix}`);
       }
     } catch (err) {
       input.logger?.warn(`[CLOB] Failed to derive API creds: ${sanitizeErrorMessage(err)}`);

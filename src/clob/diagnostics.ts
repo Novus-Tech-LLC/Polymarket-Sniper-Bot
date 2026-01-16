@@ -107,6 +107,15 @@ export const formatApiKeyId = (apiKey?: string): string => {
   return `sha256:${digest}`;
 };
 
+export const getApiKeyDiagnostics = (apiKey?: string): { apiKeyDigest: string; keyIdSuffix: string } => {
+  if (!apiKey) {
+    return { apiKeyDigest: 'n/a', keyIdSuffix: 'n/a' };
+  }
+  const apiKeyDigest = computeSha256Hex(apiKey).slice(0, 8);
+  const keyIdSuffix = apiKey.slice(-6);
+  return { apiKeyDigest, keyIdSuffix };
+};
+
 const signatureTypeLabel = (signatureType?: number): string => {
   switch (signatureType) {
     case SignatureType.EOA:
@@ -156,6 +165,8 @@ export const logAuthSigningDiagnostics = (params: {
     path: params.messageComponents.path,
     body: params.body,
   });
+  const messageStringLength = messageString.length;
+  const methodUppercase = params.messageComponents.method === params.messageComponents.method.toUpperCase();
   const messageDigest = computeSha256Hex(messageString).slice(0, 12);
   const secretDigest = params.secret
     ? computeSha256Hex(decodeSecretBytes(params.secret, secretDecodingUsed)).slice(0, 12)
@@ -163,7 +174,7 @@ export const logAuthSigningDiagnostics = (params: {
 
   if (params.logger) {
     params.logger.info(
-      `[CLOB][Diag][Sign] messageComponents timestamp=${params.messageComponents.timestamp} method=${params.messageComponents.method} path=${params.messageComponents.path} bodyIncluded=${params.messageComponents.bodyIncluded} bodyLength=${params.messageComponents.bodyLength}`,
+      `[CLOB][Diag][Sign] messageComponents timestamp=${params.messageComponents.timestamp} method=${params.messageComponents.method} methodUppercase=${methodUppercase} path=${params.messageComponents.path} bodyIncluded=${params.messageComponents.bodyIncluded} bodyLength=${params.messageComponents.bodyLength} messageStringLength=${messageStringLength}`,
     );
     params.logger.info(
       `[CLOB][Diag][Sign] messageDigest=${messageDigest} secretDigest=${secretDigest} signatureEncoding=${signatureEncoding} secretDecoding=${secretDecodingUsed} secretLooksBase64Url=${secretLooksBase64UrlFlag}`,
@@ -274,7 +285,9 @@ export const runClobAuthPreflight = async (params: {
   const funderAddress = orderBuilder?.funderAddress;
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const messageComponents = buildAuthMessageComponents(timestamp, 'GET', '/auth/api-keys');
+  const endpoint = '/balance-allowance';
+  params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
+  const messageComponents = buildAuthMessageComponents(timestamp, 'GET', endpoint);
   const { messageDigest, secretDecodingUsed, signatureEncoding } = logAuthSigningDiagnostics({
     logger: params.logger,
     secret: params.creds.secret,
@@ -283,36 +296,45 @@ export const runClobAuthPreflight = async (params: {
   });
 
   try {
-    await params.client.getApiKeys();
-    params.logger.info('[CLOB][Preflight] OK');
-    preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
-    return { ok: true, forced: Boolean(params.force) };
+    const response = await params.client.getBalanceAllowance();
+    const status = response?.status;
+    if (status === 200) {
+      params.logger.info('[CLOB][Preflight] OK');
+      preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
+      return { ok: true, status, forced: Boolean(params.force) };
+    }
+    params.logger.warn(`[CLOB][Preflight] FAIL status=${status ?? 'unknown'}`);
+    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+    return { ok: false, status, forced: Boolean(params.force) };
   } catch (error) {
     const status = extractStatus(error);
-    if (status !== 401) {
-      throw error;
+    if (status === 401) {
+      const secretFormat = detectSecretDecodingMode(params.creds.secret);
+      const reason = classifyAuthFailure({
+        configuredPublicKey: params.configuredPublicKey,
+        derivedSignerAddress: params.derivedSignerAddress,
+        signatureType,
+        privateKeyPresent: params.privateKeyPresent,
+        secretFormat,
+        secretDecodingUsed,
+        expectedBodyIncluded: false,
+        bodyIncluded: messageComponents.bodyIncluded,
+        expectedQueryPresent: false,
+        pathIncludesQuery: messageComponents.path.includes('?'),
+      });
+
+      params.logger.warn('[CLOB][Preflight] FAIL 401');
+      params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
+      params.logger.warn(
+        `[CLOB][401] address=${params.derivedSignerAddress ?? 'n/a'} sigType=${signatureType} funder=${funderAddress ?? 'none'} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
+      );
+
+      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      return { ok: false, status, reason, forced: Boolean(params.force) };
     }
-    const secretFormat = detectSecretDecodingMode(params.creds.secret);
-    const reason = classifyAuthFailure({
-      configuredPublicKey: params.configuredPublicKey,
-      derivedSignerAddress: params.derivedSignerAddress,
-      signatureType,
-      privateKeyPresent: params.privateKeyPresent,
-      secretFormat,
-      secretDecodingUsed,
-      expectedBodyIncluded: false,
-      bodyIncluded: messageComponents.bodyIncluded,
-      expectedQueryPresent: false,
-      pathIncludesQuery: messageComponents.path.includes('?'),
-    });
 
-    params.logger.warn('[CLOB][Preflight] FAIL 401');
-    params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
-    params.logger.warn(
-      `[CLOB][401] address=${params.derivedSignerAddress ?? 'n/a'} sigType=${signatureType} funder=${funderAddress ?? 'none'} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
-    );
-
+    params.logger.warn(`[CLOB][Preflight] FAIL status=${status ?? 'unknown'}`);
     preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
-    return { ok: false, status, reason, forced: Boolean(params.force) };
+    return { ok: false, status, forced: Boolean(params.force) };
   }
 };
