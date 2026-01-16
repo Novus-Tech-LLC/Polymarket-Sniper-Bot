@@ -45,6 +45,12 @@ export class MempoolMonitorService {
   async start(): Promise<void> {
     const { logger, env } = this.deps;
     logger.info('Starting Polymarket Frontrun Bot - Mempool Monitor');
+    logger.info(
+      `Monitoring ${env.targetAddresses.length} target address(es) every ${env.fetchIntervalSeconds}s (min trade: ${(
+        env.minTradeSizeUsd ?? DEFAULT_CONFIG.MIN_TRADE_SIZE_USD
+      ).toFixed(2)} USD, window: ${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s)`,
+    );
+    logger.debug(`Target addresses: ${env.targetAddresses.map((addr) => addr.toLowerCase()).join(', ') || 'none'}`);
     
     this.provider = new ethers.providers.JsonRpcProvider(env.rpcUrl);
     this.isRunning = true;
@@ -104,21 +110,37 @@ export class MempoolMonitorService {
 
   private async monitorRecentOrders(): Promise<void> {
     const { logger, env } = this.deps;
+    const startTime = Date.now();
+    let checkedAddresses = 0;
+    const stats: MonitorStats = {
+      tradesSeen: 0,
+      recentTrades: 0,
+      eligibleTrades: 0,
+      skippedSmallTrades: 0,
+      skippedConfirmedTrades: 0,
+    };
     
     // Monitor all addresses from env (these are the addresses we want to frontrun)
     for (const targetAddress of env.targetAddresses) {
       try {
-        await this.checkRecentActivity(targetAddress);
+        await this.checkRecentActivity(targetAddress, stats);
+        checkedAddresses += 1;
       } catch (err) {
         if (axios.isAxiosError(err) && err.response?.status === 404) {
+          checkedAddresses += 1;
           continue;
         }
         logger.debug(`Error checking activity for ${targetAddress}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+
+    const durationMs = Date.now() - startTime;
+    logger.info(
+      `[Monitor] Checked ${checkedAddresses} address(es) in ${durationMs}ms | trades: ${stats.tradesSeen}, recent: ${stats.recentTrades}, eligible: ${stats.eligibleTrades}, skipped: ${stats.skippedSmallTrades} small / ${stats.skippedConfirmedTrades} confirmed`,
+    );
   }
 
-  private async checkRecentActivity(targetAddress: string): Promise<void> {
+  private async checkRecentActivity(targetAddress: string, stats: MonitorStats): Promise<void> {
     const { logger, env } = this.deps;
     
     try {
@@ -130,6 +152,7 @@ export class MempoolMonitorService {
 
       for (const activity of activities) {
         if (activity.type !== 'TRADE') continue;
+        stats.tradesSeen += 1;
 
         const activityTime = typeof activity.timestamp === 'number' 
           ? activity.timestamp 
@@ -137,6 +160,7 @@ export class MempoolMonitorService {
         
         // Only process very recent trades (potential frontrun targets)
         if (activityTime < cutoffTime) continue;
+        stats.recentTrades += 1;
         
         // Skip if already processed
         if (this.processedHashes.has(activity.transactionHash)) continue;
@@ -147,16 +171,21 @@ export class MempoolMonitorService {
         // Check minimum trade size
         const sizeUsd = activity.usdcSize || activity.size * activity.price;
         const minTradeSize = env.minTradeSizeUsd || DEFAULT_CONFIG.MIN_TRADE_SIZE_USD;
-        if (sizeUsd < minTradeSize) continue;
+        if (sizeUsd < minTradeSize) {
+          stats.skippedSmallTrades += 1;
+          continue;
+        }
 
         // Check if transaction is still pending (frontrun opportunity)
         const txStatus = await this.checkTransactionStatus(activity.transactionHash);
         if (txStatus === 'confirmed') {
           // Too late to frontrun
           this.processedHashes.add(activity.transactionHash);
+          stats.skippedConfirmedTrades += 1;
           continue;
         }
 
+        stats.eligibleTrades += 1;
         logger.info(
           `[Frontrun] Detected pending trade: ${activity.side.toUpperCase()} ${sizeUsd.toFixed(2)} USD on market ${activity.conditionId}`,
         );
@@ -197,3 +226,10 @@ export class MempoolMonitorService {
   }
 }
 
+type MonitorStats = {
+  tradesSeen: number;
+  recentTrades: number;
+  eligibleTrades: number;
+  skippedSmallTrades: number;
+  skippedConfirmedTrades: number;
+};
