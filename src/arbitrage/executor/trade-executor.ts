@@ -107,10 +107,15 @@ export class ArbTradeExecutor implements TradeExecutor {
       orderSubmitMaxPerHour: this.config.orderSubmitMaxPerHour,
       orderSubmitMarketCooldownSeconds: this.config.orderSubmitMarketCooldownSeconds,
       cloudflareCooldownSeconds: this.config.cloudflareCooldownSeconds,
+      authCooldownSeconds: this.config.authCooldownSeconds,
     });
   }
 
   async execute(plan: TradePlan, now: number): Promise<TradeExecutionResult> {
+    if (this.config.detectOnly) {
+      this.logger.info(`[ARB] Detect-only: ${plan.marketId} size=${plan.sizeUsd.toFixed(2)} USD`);
+      return { status: 'dry_run' };
+    }
     if (this.config.dryRun || this.config.liveTrading !== 'I_UNDERSTAND_THE_RISKS') {
       this.logger.info(`[ARB] Dry run: ${plan.marketId} size=${plan.sizeUsd.toFixed(2)} USD`);
       return { status: 'dry_run' };

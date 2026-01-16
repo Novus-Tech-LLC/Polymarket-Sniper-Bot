@@ -7,6 +7,7 @@ export type OrderSubmissionSettings = {
   maxPerHour: number;
   marketCooldownMs: number;
   cloudflareCooldownMs: number;
+  authCooldownMs: number;
 };
 
 export type OrderSubmissionResult = {
@@ -27,6 +28,7 @@ const DEFAULT_SETTINGS: OrderSubmissionSettings = {
   maxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
   marketCooldownMs: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS * 1000,
   cloudflareCooldownMs: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS * 1000,
+  authCooldownMs: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS * 1000,
 };
 
 export type OrderSubmissionConfig = {
@@ -35,6 +37,7 @@ export type OrderSubmissionConfig = {
   orderSubmitMaxPerHour?: number;
   orderSubmitMarketCooldownSeconds?: number;
   cloudflareCooldownSeconds?: number;
+  authCooldownSeconds?: number;
 };
 
 export const toOrderSubmissionSettings = (config: OrderSubmissionConfig): OrderSubmissionSettings => ({
@@ -43,6 +46,7 @@ export const toOrderSubmissionSettings = (config: OrderSubmissionConfig): OrderS
   maxPerHour: config.orderSubmitMaxPerHour ?? DEFAULT_SETTINGS.maxPerHour,
   marketCooldownMs: (config.orderSubmitMarketCooldownSeconds ?? DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS) * 1000,
   cloudflareCooldownMs: (config.cloudflareCooldownSeconds ?? DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS) * 1000,
+  authCooldownMs: (config.authCooldownSeconds ?? DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS) * 1000,
 });
 
 export class OrderSubmissionController {
@@ -52,6 +56,8 @@ export class OrderSubmissionController {
   private marketLastSubmit = new Map<string, number>();
   private blockedUntil = 0;
   private lastBlockedLogAt = Number.NEGATIVE_INFINITY;
+  private authBlockedUntil = 0;
+  private lastAuthBlockedLogAt = Number.NEGATIVE_INFINITY;
   private lastFingerprintSubmit = new Map<string, number>();
   private lastRayId?: string;
 
@@ -104,6 +110,12 @@ export class OrderSubmissionController {
         return { status: 'submitted', orderId, statusCode };
       }
 
+      if (statusCode === 401) {
+        this.authBlockedUntil = now + this.settings.authCooldownMs;
+        logFailure(params.logger, statusCode, 'AUTH_UNAUTHORIZED');
+        return { status: 'failed', reason: 'AUTH_UNAUTHORIZED', statusCode, blockedUntil: this.authBlockedUntil };
+      }
+
       const reason = normalizeReason(extractReason(response) || 'order_rejected');
       logFailure(params.logger, statusCode, reason);
       return { status: 'failed', reason, statusCode };
@@ -116,6 +128,12 @@ export class OrderSubmissionController {
         logCloudflare(params.logger, bodyText, extractHeaders(error), this);
         logFailure(params.logger, statusCode, 'CLOUDFLARE_BLOCK');
         return { status: 'failed', reason: 'CLOUDFLARE_BLOCK', statusCode, blockedUntil };
+      }
+
+      if (statusCode === 401) {
+        this.authBlockedUntil = now + this.settings.authCooldownMs;
+        logFailure(params.logger, statusCode, 'AUTH_UNAUTHORIZED');
+        return { status: 'failed', reason: 'AUTH_UNAUTHORIZED', statusCode, blockedUntil: this.authBlockedUntil };
       }
 
       const reason = normalizeReason(extractReason(error) || 'request_error');
@@ -147,6 +165,16 @@ export class OrderSubmissionController {
         this.lastBlockedLogAt = params.now;
       }
       return { status: 'skipped', reason: 'CLOUDFLARE_BLOCK', blockedUntil: this.blockedUntil };
+    }
+
+    if (this.authBlockedUntil > params.now) {
+      if (params.now - this.lastAuthBlockedLogAt >= 60_000) {
+        params.logger.warn(
+          `CLOB execution paused due to auth failure until ${new Date(this.authBlockedUntil).toISOString()}`,
+        );
+        this.lastAuthBlockedLogAt = params.now;
+      }
+      return { status: 'skipped', reason: 'AUTH_BLOCK', blockedUntil: this.authBlockedUntil };
     }
 
     if (this.settings.marketCooldownMs > 0 && params.orderFingerprint) {

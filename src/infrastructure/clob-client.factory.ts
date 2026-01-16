@@ -3,6 +3,8 @@ import { ClobClient, Chain } from '@polymarket/clob-client';
 import type { ApiKeyCreds } from '@polymarket/clob-client';
 import { POLYMARKET_API } from '../constants/polymarket.constants';
 import { initializeApiCreds } from './clob-auth';
+import type { Logger } from '../utils/logger.util';
+import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 
 export type CreateClientInput = {
   rpcUrl: string;
@@ -10,6 +12,8 @@ export type CreateClientInput = {
   apiKey?: string;
   apiSecret?: string;
   apiPassphrase?: string;
+  deriveApiKey?: boolean;
+  logger?: Logger;
 };
 
 export async function createPolymarketClient(
@@ -18,15 +22,14 @@ export async function createPolymarketClient(
   const provider = new providers.JsonRpcProvider(input.rpcUrl);
   const wallet = new Wallet(input.privateKey, provider);
 
-  if (!input.apiKey || !input.apiSecret || !input.apiPassphrase) {
-    throw new Error('Missing Polymarket API credentials. Set POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE.');
+  let creds: ApiKeyCreds | undefined;
+  if (input.apiKey && input.apiSecret && input.apiPassphrase) {
+    creds = {
+      key: input.apiKey,
+      secret: input.apiSecret,
+      passphrase: input.apiPassphrase,
+    };
   }
-
-  const creds: ApiKeyCreds = {
-    key: input.apiKey,
-    secret: input.apiSecret,
-    passphrase: input.apiPassphrase,
-  };
 
   const client = new ClobClient(
     POLYMARKET_API.BASE_URL,
@@ -35,7 +38,21 @@ export async function createPolymarketClient(
     creds,
   );
 
-  await initializeApiCreds(client, creds);
+  if (!creds && input.deriveApiKey) {
+    try {
+      const derived = await client.createOrDeriveApiKey();
+      if (derived?.key && derived?.secret && derived?.passphrase) {
+        creds = derived;
+        input.logger?.info('[CLOB] derived creds');
+      }
+    } catch (err) {
+      input.logger?.warn(`[CLOB] Failed to derive API creds: ${sanitizeErrorMessage(err)}`);
+    }
+  }
+
+  if (creds) {
+    await initializeApiCreds(client, creds);
+  }
 
   return Object.assign(client, { wallet });
 }

@@ -38,6 +38,7 @@ export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionR
     orderSubmitMaxPerHour: input.orderConfig?.orderSubmitMaxPerHour,
     orderSubmitMarketCooldownSeconds: input.orderConfig?.orderSubmitMarketCooldownSeconds,
     cloudflareCooldownSeconds: input.orderConfig?.cloudflareCooldownSeconds,
+    authCooldownSeconds: input.orderConfig?.authCooldownSeconds,
   });
   const submissionController = getOrderSubmissionController(settings);
 

@@ -10,6 +10,9 @@ export type MonitorRuntimeConfig = {
   privateKey: string;
   mongoUri?: string;
   rpcUrl: string;
+  detectOnly: boolean;
+  clobCredsComplete: boolean;
+  clobDeriveEnabled: boolean;
   fetchIntervalSeconds: number;
   tradeMultiplier: number;
   retryLimit: number;
@@ -29,6 +32,7 @@ export type MonitorRuntimeConfig = {
   orderSubmitMaxPerHour: number;
   orderSubmitMarketCooldownSeconds: number;
   cloudflareCooldownSeconds: number;
+  authCooldownSeconds: number;
   overridesApplied: string[];
   ignoredOverrides: string[];
   unsafeOverridesApplied: string[];
@@ -58,6 +62,7 @@ const ARB_OVERRIDE_ALLOWLIST = new Set([
   'ORDER_SUBMIT_MAX_PER_HOUR',
   'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
   'CLOUDFLARE_COOLDOWN_SECONDS',
+  'CLOB_AUTH_COOLDOWN_SECONDS',
 ]);
 
 const MONITOR_OVERRIDE_ALLOWLIST = new Set([
@@ -71,6 +76,7 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   'ORDER_SUBMIT_MAX_PER_HOUR',
   'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
   'CLOUDFLARE_COOLDOWN_SECONDS',
+  'CLOB_AUTH_COOLDOWN_SECONDS',
 ]);
 
 const LEGACY_MIN_TRADE_KEYS = ['MIN_TRADE_SIZE', 'MIN_TRADE_USDC', 'MIN_TRADE_SIZE_USDC'] as const;
@@ -97,6 +103,9 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   liveTrading: '',
   minPolGas: 3,
   approveUnlimited: false,
+  detectOnly: false,
+  clobCredsComplete: false,
+  clobDeriveEnabled: false,
   stateDir: '/data',
   decisionsLog: '/data/arb_decisions.jsonl',
   killSwitchFile: '/data/KILL',
@@ -118,6 +127,7 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
   orderSubmitMarketCooldownSeconds: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
+  authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
 };
 
 const MONITOR_LEGACY_DEFAULTS = {
@@ -136,6 +146,7 @@ const MONITOR_LEGACY_DEFAULTS = {
   orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
   orderSubmitMarketCooldownSeconds: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
+  authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
 };
 
 type EnvParser<T> = (raw: string) => T | undefined;
@@ -189,6 +200,7 @@ const ARB_ENV_MAP = {
   ORDER_SUBMIT_MAX_PER_HOUR: { key: 'orderSubmitMaxPerHour', parse: parseNumber },
   ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: { key: 'orderSubmitMarketCooldownSeconds', parse: parseNumber },
   CLOUDFLARE_COOLDOWN_SECONDS: { key: 'cloudflareCooldownSeconds', parse: parseNumber },
+  CLOB_AUTH_COOLDOWN_SECONDS: { key: 'authCooldownSeconds', parse: parseNumber },
 } as const satisfies Record<string, { key: keyof ArbConfig; parse: EnvParser<unknown> }>;
 
 const MONITOR_ENV_MAP = {
@@ -207,6 +219,7 @@ const MONITOR_ENV_MAP = {
   ORDER_SUBMIT_MAX_PER_HOUR: { key: 'orderSubmitMaxPerHour', parse: parseNumber },
   ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: { key: 'orderSubmitMarketCooldownSeconds', parse: parseNumber },
   CLOUDFLARE_COOLDOWN_SECONDS: { key: 'cloudflareCooldownSeconds', parse: parseNumber },
+  CLOB_AUTH_COOLDOWN_SECONDS: { key: 'authCooldownSeconds', parse: parseNumber },
 } as const satisfies Record<string, { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }>;
 
 const MONITOR_LEGACY_KEYS = [
@@ -246,11 +259,44 @@ const readNumber = (key: string, fallback: number, overrides?: Overrides): numbe
   return parsed ?? fallback;
 };
 
+const readFirstEnv = (keys: string[], overrides?: Overrides): string | undefined => {
+  for (const key of keys) {
+    const raw = readEnv(key, overrides);
+    if (raw) return raw;
+  }
+  return undefined;
+};
+
+const readBoolFromKeys = (keys: string[], overrides?: Overrides): boolean => {
+  for (const key of keys) {
+    const raw = readEnv(key, overrides);
+    if (raw === undefined) continue;
+    if (String(raw).toLowerCase() === 'true') return true;
+  }
+  return false;
+};
+
 const required = (key: string, overrides?: Overrides): string => {
   const raw = readEnv(key, overrides);
   if (!raw) throw new Error(`Missing required env var: ${key}`);
   return raw;
 };
+
+const CLOB_CRED_KEYS = {
+  key: ['POLYMARKET_API_KEY', 'POLY_API_KEY', 'CLOB_API_KEY'],
+  secret: ['POLYMARKET_API_SECRET', 'POLY_SECRET', 'CLOB_API_SECRET'],
+  passphrase: ['POLYMARKET_API_PASSPHRASE', 'POLY_PASSPHRASE', 'CLOB_API_PASSPHRASE'],
+};
+
+const CLOB_DERIVE_KEYS = ['CLOB_DERIVE_API_KEY', 'POLYMARKET_DERIVE_API_KEY', 'POLY_DERIVE_API_KEY'];
+
+const readClobCreds = (overrides?: Overrides): { key?: string; secret?: string; passphrase?: string } => ({
+  key: readFirstEnv(CLOB_CRED_KEYS.key, overrides),
+  secret: readFirstEnv(CLOB_CRED_KEYS.secret, overrides),
+  passphrase: readFirstEnv(CLOB_CRED_KEYS.passphrase, overrides),
+});
+
+const readClobDeriveEnabled = (overrides?: Overrides): boolean => readBoolFromKeys(CLOB_DERIVE_KEYS, overrides);
 
 const parseList = (val: string | undefined): string[] => {
   if (!val) return [];
@@ -384,6 +430,9 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
   const presetLookup = getPresetName('ARB_PRESET', DEFAULT_ARB_PRESET, ARB_LEGACY_KEYS, overrides);
   let presetName = presetLookup.presetName;
   const { legacyKeysDetected } = presetLookup;
+  const clobCreds = readClobCreds(overrides);
+  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
+  const clobDeriveEnabled = readClobDeriveEnabled(overrides);
 
   if (presetName === 'custom') {
     warnLegacyKeys('ARB', legacyKeysDetected);
@@ -437,9 +486,12 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
     rpcUrl: required('RPC_URL', overrides),
     privateKey: required('PRIVATE_KEY', overrides),
     proxyWallet: readEnv('PUBLIC_KEY', overrides),
-    polymarketApiKey: required('POLYMARKET_API_KEY', overrides),
-    polymarketApiSecret: required('POLYMARKET_API_SECRET', overrides),
-    polymarketApiPassphrase: required('POLYMARKET_API_PASSPHRASE', overrides),
+    detectOnly: !clobCredsComplete,
+    clobCredsComplete,
+    clobDeriveEnabled,
+    polymarketApiKey: clobCreds.key ?? '',
+    polymarketApiSecret: clobCreds.secret ?? '',
+    polymarketApiPassphrase: clobCreds.passphrase ?? '',
     collateralTokenAddress: collateralAddressRaw || POLYGON_USDC_ADDRESS,
     collateralTokenDecimals: readNumber('COLLATERAL_TOKEN_DECIMALS', 6, overrides),
     presetName,
@@ -492,6 +544,9 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
   );
   let presetName = monitorPresetLookup.presetName;
   const { legacyKeysDetected } = monitorPresetLookup;
+  const clobCreds = readClobCreds(overrides);
+  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
+  const clobDeriveEnabled = readClobDeriveEnabled(overrides);
 
   if (presetName === 'custom') {
     warnLegacyKeys('MONITOR', legacyKeysDetected);
@@ -513,6 +568,9 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     privateKey: '',
     mongoUri: readEnv('MONGO_URI', overrides),
     rpcUrl: '',
+    detectOnly: !clobCredsComplete,
+    clobCredsComplete,
+    clobDeriveEnabled,
     fetchIntervalSeconds: MONITOR_LEGACY_DEFAULTS.fetchIntervalSeconds,
     tradeMultiplier: MONITOR_LEGACY_DEFAULTS.tradeMultiplier,
     retryLimit: MONITOR_LEGACY_DEFAULTS.retryLimit,
@@ -521,9 +579,9 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     requireConfirmed: MONITOR_LEGACY_DEFAULTS.requireConfirmed,
     collateralTokenAddress: POLYGON_USDC_ADDRESS,
     collateralTokenDecimals: 6,
-    polymarketApiKey: required('POLYMARKET_API_KEY', overrides),
-    polymarketApiSecret: required('POLYMARKET_API_SECRET', overrides),
-    polymarketApiPassphrase: required('POLYMARKET_API_PASSPHRASE', overrides),
+    polymarketApiKey: clobCreds.key ?? '',
+    polymarketApiSecret: clobCreds.secret ?? '',
+    polymarketApiPassphrase: clobCreds.passphrase ?? '',
     minTradeSizeUsd: MONITOR_LEGACY_DEFAULTS.minTradeSizeUsd,
     frontrunSizeMultiplier: MONITOR_LEGACY_DEFAULTS.frontrunSizeMultiplier,
     gasPriceMultiplier: MONITOR_LEGACY_DEFAULTS.gasPriceMultiplier,
@@ -532,6 +590,7 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     orderSubmitMaxPerHour: MONITOR_LEGACY_DEFAULTS.orderSubmitMaxPerHour,
     orderSubmitMarketCooldownSeconds: MONITOR_LEGACY_DEFAULTS.orderSubmitMarketCooldownSeconds,
     cloudflareCooldownSeconds: MONITOR_LEGACY_DEFAULTS.cloudflareCooldownSeconds,
+    authCooldownSeconds: MONITOR_LEGACY_DEFAULTS.authCooldownSeconds,
     overridesApplied: [],
     ignoredOverrides: [],
     unsafeOverridesApplied: [],

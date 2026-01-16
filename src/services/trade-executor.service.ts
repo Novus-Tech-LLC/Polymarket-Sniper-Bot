@@ -23,6 +23,7 @@ interface Position {
 
 export class TradeExecutorService {
   private readonly deps: TradeExecutorDeps;
+  private detectOnlyLogged = false;
 
   constructor(deps: TradeExecutorDeps) {
     this.deps = deps;
@@ -30,6 +31,13 @@ export class TradeExecutorService {
 
   async frontrunTrade(signal: TradeSignal): Promise<void> {
     const { logger, env, client } = this.deps;
+    if (env.detectOnly) {
+      if (!this.detectOnlyLogged) {
+        logger.warn('[Frontrun] Detect-only mode enabled; skipping order submissions.');
+        this.detectOnlyLogged = true;
+      }
+      return;
+    }
     try {
       const yourUsdBalance = await getUsdBalanceApprox(
         client.wallet,
@@ -82,12 +90,13 @@ export class TradeExecutorService {
         logger,
         orderConfig: {
           minOrderUsd: env.minOrderUsd,
-          orderSubmitMinIntervalMs: env.orderSubmitMinIntervalMs,
-          orderSubmitMaxPerHour: env.orderSubmitMaxPerHour,
-          orderSubmitMarketCooldownSeconds: env.orderSubmitMarketCooldownSeconds,
-          cloudflareCooldownSeconds: env.cloudflareCooldownSeconds,
-        },
-      });
+        orderSubmitMinIntervalMs: env.orderSubmitMinIntervalMs,
+        orderSubmitMaxPerHour: env.orderSubmitMaxPerHour,
+        orderSubmitMarketCooldownSeconds: env.orderSubmitMarketCooldownSeconds,
+        cloudflareCooldownSeconds: env.cloudflareCooldownSeconds,
+        authCooldownSeconds: env.authCooldownSeconds,
+      },
+    });
       
       if (submissionResult.status === 'submitted') {
         logger.info(`[Frontrun] Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`);

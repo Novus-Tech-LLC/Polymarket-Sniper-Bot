@@ -1,6 +1,20 @@
 import axios from 'axios';
 
-const SENSITIVE_KEYS = ['POLY_API_KEY', 'POLY_PASSPHRASE', 'POLY_SIGNATURE', 'Authorization', 'Cookie'];
+const SENSITIVE_KEYS = [
+  'POLY_API_KEY',
+  'POLY_SECRET',
+  'POLY_PASSPHRASE',
+  'POLY_SIGNATURE',
+  'POLYMARKET_API_KEY',
+  'POLYMARKET_API_SECRET',
+  'POLYMARKET_API_PASSPHRASE',
+  'CLOB_API_KEY',
+  'CLOB_API_SECRET',
+  'CLOB_API_PASSPHRASE',
+  'X-API-KEY',
+  'Authorization',
+  'Cookie',
+];
 
 function redactSensitiveValues(value: string): string {
   let redacted = value;
@@ -10,6 +24,8 @@ function redactSensitiveValues(value: string): string {
     const jsonRegex = new RegExp(`("${key}"\\s*:\\s*)"[^"]*"`, 'gi');
     redacted = redacted.replace(jsonRegex, '$1"<redacted>"');
   }
+  redacted = redacted.replace(/headers\\s*[:=]\\s*\\{[^}]*\\}/gi, 'headers=<redacted>');
+  redacted = redacted.replace(/"headers"\\s*:\\s*\\{[^}]*\\}/gi, '"headers":"<redacted>"');
   return redacted;
 }
 

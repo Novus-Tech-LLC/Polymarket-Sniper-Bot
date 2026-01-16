@@ -1,5 +1,6 @@
 import { ConsoleLogger } from '../utils/logger.util';
 import { createPolymarketClient } from '../infrastructure/clob-client.factory';
+import { verifyApiCreds } from '../infrastructure/clob-auth';
 import { loadArbConfig } from '../config/loadConfig';
 import { ArbitrageEngine } from './engine';
 import { PolymarketMarketDataProvider } from './provider/polymarket.provider';
@@ -9,6 +10,7 @@ import { ArbRiskManager } from './risk/risk-manager';
 import { ArbTradeExecutor } from './executor/trade-executor';
 import { DecisionLogger } from './utils/decision-logger';
 import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
+import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 
 export async function startArbitrageEngine(
   overrides: Record<string, string | undefined> = {},
@@ -20,6 +22,10 @@ export async function startArbitrageEngine(
   if (!config.enabled) {
     logger.info(`[ARB] Preset=${config.presetName} disabled (MODE=${process.env.MODE ?? 'arb'})`);
     return null;
+  }
+
+  if (!config.clobCredsComplete) {
+    logger.warn('CLOB creds incomplete');
   }
 
   const overridesInfo = config.overridesApplied.length ? ` overrides=${config.overridesApplied.join(',')}` : '';
@@ -34,7 +40,26 @@ export async function startArbitrageEngine(
     apiKey: config.polymarketApiKey,
     apiSecret: config.polymarketApiSecret,
     apiPassphrase: config.polymarketApiPassphrase,
+    deriveApiKey: config.clobDeriveEnabled,
+    logger,
   });
+
+  const clientCreds = (client as { creds?: { key?: string; secret?: string; passphrase?: string } }).creds;
+  const credsComplete = Boolean(clientCreds?.key && clientCreds?.secret && clientCreds?.passphrase);
+  config.clobCredsComplete = credsComplete;
+  config.detectOnly = !credsComplete;
+  if (credsComplete) {
+    try {
+      const authOk = await verifyApiCreds(client);
+      if (!authOk) {
+        config.detectOnly = true;
+        logger.warn('[CLOB] Auth check failed; switching to detect-only.');
+      }
+    } catch (err) {
+      config.detectOnly = true;
+      logger.warn(`[CLOB] Auth check failed; switching to detect-only. ${sanitizeErrorMessage(err)}`);
+    }
+  }
 
   const stateStore = new InMemoryStateStore(config.stateDir, config.snapshotState);
   await stateStore.load();

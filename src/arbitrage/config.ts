@@ -22,6 +22,9 @@ export type ArbConfig = {
   liveTrading: string;
   minPolGas: number;
   approveUnlimited: boolean;
+  detectOnly: boolean;
+  clobCredsComplete: boolean;
+  clobDeriveEnabled: boolean;
   stateDir: string;
   decisionsLog: string;
   killSwitchFile: string;
@@ -43,4 +46,5 @@ export type ArbConfig = {
   orderSubmitMaxPerHour: number;
   orderSubmitMarketCooldownSeconds: number;
   cloudflareCooldownSeconds: number;
+  authCooldownSeconds: number;
 };

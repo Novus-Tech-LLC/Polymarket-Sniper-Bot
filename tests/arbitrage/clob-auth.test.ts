@@ -15,6 +15,7 @@ afterEach(() => {
 
 test('postOrder applies cached API creds before placing orders', async () => {
   const callOrder: string[] = [];
+  let appliedCreds: { key: string; secret: string; passphrase: string } | undefined;
 
   const client = {
     getOrderBook: async () => baseOrderBook,
@@ -26,8 +27,9 @@ test('postOrder applies cached API creds before placing orders', async () => {
   } as unknown as ClobClient;
 
   Object.defineProperty(client, 'creds', {
-    set: () => {
+    set: (value: { key: string; secret: string; passphrase: string }) => {
       callOrder.push('set');
+      appliedCreds = value;
     },
   });
 
@@ -57,6 +59,7 @@ test('postOrder applies cached API creds before placing orders', async () => {
   assert.ok(callOrder.indexOf('set') !== -1);
   assert.ok(callOrder.indexOf('post') !== -1);
   assert.ok(callOrder.indexOf('set') < callOrder.indexOf('post'));
+  assert.deepEqual(appliedCreds, { key: 'key', secret: 'secret', passphrase: 'pass' });
 });
 
 test('postOrder re-applies API creds and retries once on auth failure', async () => {

@@ -14,15 +14,27 @@ export async function initializeApiCreds(client: ClobClient, providedCreds?: Api
     return cachedCreds;
   }
 
-  throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE.');
+  throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.');
 }
 
 export async function refreshApiCreds(client: ClobClient): Promise<ApiKeyCreds> {
   if (!cachedCreds) {
-    throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE.');
+    throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.');
   }
   applyClientCreds(client, cachedCreds);
   return cachedCreds;
+}
+
+export async function verifyApiCreds(client: ClobClient): Promise<boolean> {
+  try {
+    await client.getApiKeys();
+    return true;
+  } catch (error) {
+    if (isAuthError(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export async function withAuthRetry<T>(client: ClobClient, operation: () => Promise<T>): Promise<T> {
