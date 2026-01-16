@@ -10,7 +10,8 @@ RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
-RUN apk add --no-cache wireguard-tools openvpn iproute2 iptables openresolv
+RUN apk add --no-cache wireguard-tools openvpn iproute2 iptables openresolv \
+    && if [ ! -x /sbin/resolvconf ] && [ -x /usr/sbin/resolvconf ]; then ln -s /usr/sbin/resolvconf /sbin/resolvconf; fi
 ENV NODE_ENV=production
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/dist ./dist
