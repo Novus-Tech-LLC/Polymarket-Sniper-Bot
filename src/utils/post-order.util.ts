@@ -1,6 +1,7 @@
 import type { ClobClient } from '@polymarket/clob-client';
 import { OrderType, Side } from '@polymarket/clob-client';
 import { ORDER_EXECUTION } from '../constants/polymarket.constants';
+import { withAuthRetry } from '../infrastructure/clob-auth';
 
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderOutcome = 'YES' | 'NO';
@@ -101,7 +102,7 @@ export async function postOrder(input: PostOrderInput): Promise<void> {
 
     try {
       const signedOrder = await client.createMarketOrder(orderArgs);
-      const response = await client.postOrder(signedOrder, OrderType.FOK);
+      const response = await withAuthRetry(client, () => client.postOrder(signedOrder, OrderType.FOK));
 
       if (response.success) {
         remaining -= orderValue;

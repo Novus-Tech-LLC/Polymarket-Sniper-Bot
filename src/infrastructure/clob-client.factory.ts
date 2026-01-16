@@ -2,6 +2,7 @@ import { Wallet, providers } from 'ethers';
 import { ClobClient, Chain } from '@polymarket/clob-client';
 import type { ApiKeyCreds } from '@polymarket/clob-client';
 import { POLYMARKET_API } from '../constants/polymarket.constants';
+import { initializeApiCreds } from './clob-auth';
 
 export type CreateClientInput = {
   rpcUrl: string;
@@ -16,7 +17,7 @@ export async function createPolymarketClient(
 ): Promise<ClobClient & { wallet: Wallet }> {
   const provider = new providers.JsonRpcProvider(input.rpcUrl);
   const wallet = new Wallet(input.privateKey, provider);
-  
+
   let creds: ApiKeyCreds | undefined;
   if (input.apiKey && input.apiSecret && input.apiPassphrase) {
     creds = {
@@ -32,6 +33,8 @@ export async function createPolymarketClient(
     wallet,
     creds,
   );
+
+  await initializeApiCreds(client, creds);
+
   return Object.assign(client, { wallet });
 }
-

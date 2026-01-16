@@ -7,6 +7,7 @@ import type { ArbConfig } from '../config';
 import type { MarketDataProvider, TradeExecutionResult, TradeExecutor, TradePlan } from '../types';
 import { calculateEdgeBps, estimateProfitUsd } from '../utils/bps';
 import { POLYMARKET_CONTRACTS } from '../../constants/polymarket.constants';
+import { withAuthRetry } from '../../infrastructure/clob-auth';
 
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -166,7 +167,7 @@ export class ArbTradeExecutor implements TradeExecutor {
     };
 
     const signedOrder = await this.client.createMarketOrder(orderArgs);
-    const response = await this.client.postOrder(signedOrder, OrderType.FOK);
+    const response = await withAuthRetry(this.client, () => this.client.postOrder(signedOrder, OrderType.FOK));
     if (!response?.success) {
       throw new Error('order_rejected');
     }
