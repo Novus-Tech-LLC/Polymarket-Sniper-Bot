@@ -10,12 +10,11 @@ RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
-RUN apk add --no-cache wireguard-tools iproute2
+RUN apk add --no-cache wireguard-tools iproute2 iptables openresolv
 ENV NODE_ENV=production
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/dist ./dist
 COPY package.json ./package.json
 
 CMD ["node", "dist/app/main.js"]
-
 

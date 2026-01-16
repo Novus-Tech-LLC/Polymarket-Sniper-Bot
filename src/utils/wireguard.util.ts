@@ -151,10 +151,23 @@ export async function startWireguard(logger: Logger): Promise<void> {
       logger.info(`WireGuard interface ${env.interfaceName} is up.`);
     } catch (err) {
       if (isResolvconfError(err)) {
-        logger.warn('WireGuard DNS setup failed via resolvconf; retrying without DNS.');
+        const dnsHint = env.dns
+          ? ` DNS from WIREGUARD_DNS (${env.dns}) will be ignored unless resolvconf/openresolv is installed.`
+          : '';
+        logger.warn(`WireGuard DNS setup failed via resolvconf; retrying without DNS.${dnsHint}`);
         await writeConfig(env, false);
-        await execFileAsync('wg-quick', ['up', env.interfaceName]);
-        logger.info(`WireGuard interface ${env.interfaceName} is up (DNS disabled).`);
+        try {
+          await execFileAsync('wg-quick', ['up', env.interfaceName]);
+          logger.info(`WireGuard interface ${env.interfaceName} is up (DNS disabled).`);
+        } catch (retryErr) {
+          if (isMissingIp6tablesRestore(retryErr)) {
+            logger.error(
+              'WireGuard failed because ip6tables-restore is missing. Install iptables/ip6tables in the container or remove IPv6 entries from WIREGUARD_ADDRESS/WIREGUARD_ALLOWED_IPS.',
+            );
+            return;
+          }
+          throw retryErr;
+        }
         return;
       }
       if (isMissingIp6tablesRestore(err)) {
