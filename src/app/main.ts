@@ -65,6 +65,7 @@ async function main(): Promise<void> {
       const authOk = await verifyApiCreds(client);
       if (!authOk) {
         env.detectOnly = true;
+        logger.warn('[CLOB] invalid creds');
         logger.warn('[CLOB] Auth check failed; switching to detect-only.');
         logger.warn(formatClobAuthFailureHint(env.clobDeriveEnabled));
       }
