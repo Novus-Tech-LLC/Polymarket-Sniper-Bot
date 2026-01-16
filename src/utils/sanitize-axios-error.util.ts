@@ -16,7 +16,7 @@ const SENSITIVE_KEYS = [
   'Cookie',
 ];
 
-function redactSensitiveValues(value: string): string {
+export function redactSensitiveValues(value: string): string {
   let redacted = value;
   for (const key of SENSITIVE_KEYS) {
     const keyRegex = new RegExp(`(${key})\\s*[:=]\\s*([\"']?)[^\\s\"',;]+\\2`, 'gi');
