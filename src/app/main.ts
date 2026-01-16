@@ -11,6 +11,7 @@ import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
 import { startWireguard } from '../utils/wireguard.util';
 import { startOpenvpn } from '../utils/openvpn.util';
 import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
+import { formatClobCredsChecklist } from '../utils/clob-credentials.util';
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
   }
 
   const env = loadMonitorConfig(cliOverrides);
+  logger.info(formatClobCredsChecklist(env.clobCredsChecklist));
 
   if (!env.enabled) {
     logger.info(`[Monitor] Preset=${env.presetName} disabled; skipping monitor runtime.`);

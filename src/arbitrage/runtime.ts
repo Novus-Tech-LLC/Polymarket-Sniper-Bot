@@ -11,6 +11,7 @@ import { ArbTradeExecutor } from './executor/trade-executor';
 import { DecisionLogger } from './utils/decision-logger';
 import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
 import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
+import { formatClobCredsChecklist } from '../utils/clob-credentials.util';
 
 export async function startArbitrageEngine(
   overrides: Record<string, string | undefined> = {},
@@ -18,6 +19,7 @@ export async function startArbitrageEngine(
   const logger = new ConsoleLogger();
   suppressClobOrderbookErrors(logger);
   const config = loadArbConfig(overrides);
+  logger.info(formatClobCredsChecklist(config.clobCredsChecklist));
 
   if (!config.enabled) {
     logger.info(`[ARB] Preset=${config.presetName} disabled (MODE=${process.env.MODE ?? 'arb'})`);
