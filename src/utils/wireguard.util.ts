@@ -121,6 +121,14 @@ const isResolvconfError = (err: unknown): boolean => {
   return message.includes('resolvconf') || message.includes('signature mismatch') || message.includes('useable init system');
 };
 
+const isMissingIp6tablesRestore = (err: unknown): boolean => {
+  if (!(err instanceof Error)) {
+    return false;
+  }
+  const message = err.message.toLowerCase();
+  return message.includes('ip6tables-restore') && message.includes('command not found');
+};
+
 export async function startWireguard(logger: Logger): Promise<void> {
   const env = getWireguardEnv();
   if (!env.enabled) {
@@ -147,6 +155,12 @@ export async function startWireguard(logger: Logger): Promise<void> {
         await writeConfig(env, false);
         await execFileAsync('wg-quick', ['up', env.interfaceName]);
         logger.info(`WireGuard interface ${env.interfaceName} is up (DNS disabled).`);
+        return;
+      }
+      if (isMissingIp6tablesRestore(err)) {
+        logger.error(
+          'WireGuard failed because ip6tables-restore is missing. Install iptables/ip6tables in the container or remove IPv6 entries from WIREGUARD_ADDRESS/WIREGUARD_ALLOWED_IPS.',
+        );
         return;
       }
       throw err;

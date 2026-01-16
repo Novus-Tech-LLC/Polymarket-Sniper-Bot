@@ -159,6 +159,7 @@ WIREGUARD_FORCE_RESTART=false
 ```
 
 > Note: WireGuard setup requires the container to run with `NET_ADMIN` and `/dev/net/tun` access (see Docker Compose example).
+> Ensure `ip6tables-restore` is installed in the container if you use IPv6 addresses/allowed IPs; otherwise remove IPv6 entries.
 
 ---
 
