@@ -211,9 +211,13 @@ export class ArbitrageEngine {
     if (!this.config.debugTopN || candidates.length === 0) return;
     const lines = candidates.map((candidate) => {
       const liquidity = candidate.liquidityUsd !== undefined ? candidate.liquidityUsd.toFixed(2) : 'n/a';
-      return `market_id=${candidate.marketId} yesAsk=${candidate.yesAsk.toFixed(4)} noAsk=${candidate.noAsk.toFixed(
+      return `market_id=${candidate.marketId} yesBid=${candidate.yesBid.toFixed(4)} yesAsk=${candidate.yesAsk.toFixed(
         4,
-      )} sum=${candidate.sum.toFixed(4)} edge_bps=${candidate.edgeBps.toFixed(1)} liquidity=${liquidity} spread_bps=${candidate.spreadBps.toFixed(1)}`;
+      )} noBid=${candidate.noBid.toFixed(4)} noAsk=${candidate.noAsk.toFixed(
+        4,
+      )} sum=${candidate.sum.toFixed(4)} edge_bps=${candidate.edgeBps.toFixed(
+        1,
+      )} spread_bps=${candidate.spreadBps.toFixed(1)} liquidity=${liquidity}`;
     });
     this.logger.info(`[ARB] TopCandidates (pre-filter, top ${this.config.debugTopN}):\n${lines.join('\n')}`);
   }

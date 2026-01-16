@@ -15,6 +15,7 @@ export type MonitorRuntimeConfig = {
   retryLimit: number;
   aggregationEnabled: boolean;
   aggregationWindowSeconds: number;
+  requireConfirmed: boolean;
   collateralTokenAddress: string;
   collateralTokenDecimals: number;
   polymarketApiKey?: string;
@@ -41,10 +42,12 @@ const ARB_OVERRIDE_ALLOWLIST = new Set([
   'ARB_MAX_WALLET_EXPOSURE_USD',
   'ARB_MAX_POSITION_USD',
   'ARB_MAX_TRADES_PER_HOUR',
+  'ARB_MAX_SPREAD_BPS',
   'ARB_KILL_SWITCH_FILE',
   'ARB_DECISIONS_LOG',
   'ARB_MIN_POL_GAS',
   'ARB_SCAN_INTERVAL_MS',
+  'ARB_DEBUG_TOP_N',
 ]);
 
 const MONITOR_OVERRIDE_ALLOWLIST = new Set([
@@ -52,6 +55,7 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   'TRADE_MULTIPLIER',
   'FETCH_INTERVAL',
   'GAS_PRICE_MULTIPLIER',
+  'MONITOR_REQUIRE_CONFIRMED',
 ]);
 
 const LEGACY_MIN_TRADE_KEYS = ['MIN_TRADE_SIZE', 'MIN_TRADE_USDC', 'MIN_TRADE_SIZE_USDC'] as const;
@@ -103,6 +107,7 @@ const MONITOR_LEGACY_DEFAULTS = {
   retryLimit: DEFAULT_CONFIG.RETRY_LIMIT,
   aggregationEnabled: false,
   aggregationWindowSeconds: DEFAULT_CONFIG.AGGREGATION_WINDOW_SECONDS,
+  requireConfirmed: true,
   minTradeSizeUsd: DEFAULT_CONFIG.MIN_TRADE_SIZE_USD,
   frontrunSizeMultiplier: DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER,
   gasPriceMultiplier: DEFAULT_CONFIG.GAS_PRICE_MULTIPLIER,
@@ -166,6 +171,7 @@ const MONITOR_ENV_MAP = {
   TRADE_AGGREGATION_WINDOW_SECONDS: { key: 'aggregationWindowSeconds', parse: parseNumber },
   FRONTRUN_SIZE_MULTIPLIER: { key: 'frontrunSizeMultiplier', parse: parseNumber },
   GAS_PRICE_MULTIPLIER: { key: 'gasPriceMultiplier', parse: parseNumber },
+  MONITOR_REQUIRE_CONFIRMED: { key: 'requireConfirmed', parse: parseBool },
 } as const satisfies Record<string, { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }>;
 
 const MONITOR_LEGACY_KEYS = [
@@ -178,6 +184,7 @@ const MONITOR_LEGACY_KEYS = [
   'TRADE_AGGREGATION_WINDOW_SECONDS',
   'FRONTRUN_SIZE_MULTIPLIER',
   'GAS_PRICE_MULTIPLIER',
+  'MONITOR_REQUIRE_CONFIRMED',
 ];
 
 const ARB_LEGACY_KEYS = Object.keys(ARB_ENV_MAP);
@@ -471,6 +478,7 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     retryLimit: MONITOR_LEGACY_DEFAULTS.retryLimit,
     aggregationEnabled: MONITOR_LEGACY_DEFAULTS.aggregationEnabled,
     aggregationWindowSeconds: MONITOR_LEGACY_DEFAULTS.aggregationWindowSeconds,
+    requireConfirmed: MONITOR_LEGACY_DEFAULTS.requireConfirmed,
     collateralTokenAddress: POLYGON_USDC_ADDRESS,
     collateralTokenDecimals: 6,
     polymarketApiKey: readEnv('POLYMARKET_API_KEY', overrides),
@@ -551,6 +559,7 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
       fetchIntervalSeconds: baseConfig.fetchIntervalSeconds,
       minTradeSizeUsd: baseConfig.minTradeSizeUsd,
       tradeMultiplier: baseConfig.tradeMultiplier,
+      requireConfirmed: baseConfig.requireConfirmed,
       gasPriceMultiplier: baseConfig.gasPriceMultiplier,
       overridesApplied: baseConfig.overridesApplied,
       unsafeOverridesApplied: baseConfig.unsafeOverridesApplied,

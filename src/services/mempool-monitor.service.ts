@@ -47,7 +47,7 @@ export class MempoolMonitorService {
     logger.info('Starting Polymarket Frontrun Bot - Mempool Monitor');
     const overridesInfo = env.overridesApplied.length ? ` overrides=${env.overridesApplied.join(',')}` : '';
     logger.info(
-      `[Monitor] Preset=${env.presetName} min_trade_usd=${env.minTradeSizeUsd.toFixed(2)} recent_window=${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s fetch_interval=${env.fetchIntervalSeconds}s trade_multiplier=${env.tradeMultiplier} gas_multiplier=${env.gasPriceMultiplier} targets=${env.targetAddresses.length}${overridesInfo}`,
+      `[Monitor] Preset=${env.presetName} min_trade_usd=${env.minTradeSizeUsd.toFixed(2)} recent_window=${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s fetch_interval=${env.fetchIntervalSeconds}s trade_multiplier=${env.tradeMultiplier} gas_multiplier=${env.gasPriceMultiplier} require_confirmed=${env.requireConfirmed} targets=${env.targetAddresses.length}${overridesInfo}`,
     );
     logger.debug(`Target addresses: ${env.targetAddresses.map((addr) => addr.toLowerCase()).join(', ') || 'none'}`);
     
@@ -119,6 +119,10 @@ export class MempoolMonitorService {
       skippedUnconfirmedTrades: 0,
       skippedNonTargetTrades: 0,
       skippedParseErrorTrades: 0,
+      skippedOutsideRecentWindowTrades: 0,
+      skippedUnsupportedActionTrades: 0,
+      skippedMissingFieldsTrades: 0,
+      skippedApiErrorTrades: 0,
       skippedOtherTrades: 0,
     };
     
@@ -132,13 +136,14 @@ export class MempoolMonitorService {
           checkedAddresses += 1;
           continue;
         }
+        stats.skippedApiErrorTrades += 1;
         logger.debug(`Error checking activity for ${targetAddress}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     const durationMs = Date.now() - startTime;
     logger.info(
-      `[Monitor] Checked ${checkedAddresses} address(es) in ${durationMs}ms | trades: ${stats.tradesSeen}, recent: ${stats.recentTrades}, eligible: ${stats.eligibleTrades}, skipped_small: ${stats.skippedSmallTrades}, skipped_unconfirmed: ${stats.skippedUnconfirmedTrades}, skipped_non_target: ${stats.skippedNonTargetTrades}, skipped_parse_error: ${stats.skippedParseErrorTrades}, skipped_other: ${stats.skippedOtherTrades}`,
+      `[Monitor] Checked ${checkedAddresses} address(es) in ${durationMs}ms | trades: ${stats.tradesSeen}, recent: ${stats.recentTrades}, eligible: ${stats.eligibleTrades}, skipped_small: ${stats.skippedSmallTrades}, skipped_unconfirmed: ${stats.skippedUnconfirmedTrades}, skipped_non_target: ${stats.skippedNonTargetTrades}, skipped_parse_error: ${stats.skippedParseErrorTrades}, skipped_outside_recent_window: ${stats.skippedOutsideRecentWindowTrades}, skipped_unsupported_action: ${stats.skippedUnsupportedActionTrades}, skipped_missing_fields: ${stats.skippedMissingFieldsTrades}, skipped_api_error: ${stats.skippedApiErrorTrades}, skipped_other: ${stats.skippedOtherTrades}`,
     );
   }
 
@@ -154,7 +159,7 @@ export class MempoolMonitorService {
 
       for (const activity of activities) {
         if (activity.type !== 'TRADE') {
-          stats.skippedOtherTrades += 1;
+          stats.skippedUnsupportedActionTrades += 1;
           continue;
         }
         stats.tradesSeen += 1;
@@ -164,13 +169,13 @@ export class MempoolMonitorService {
           : Math.floor(new Date(activity.timestamp).getTime() / 1000);
 
         if (!activity.transactionHash || !activity.conditionId || activity.outcomeIndex === undefined) {
-          stats.skippedParseErrorTrades += 1;
+          stats.skippedMissingFieldsTrades += 1;
           continue;
         }
         
         // Only process very recent trades (potential frontrun targets)
         if (activityTime < cutoffTime) {
-          stats.skippedOtherTrades += 1;
+          stats.skippedOutsideRecentWindowTrades += 1;
           continue;
         }
         stats.recentTrades += 1;
@@ -199,12 +204,12 @@ export class MempoolMonitorService {
         }
 
         // Check if transaction is still pending (frontrun opportunity)
-        const txStatus = await this.checkTransactionStatus(activity.transactionHash);
-        if (txStatus === 'confirmed') {
-          // Too late to frontrun
-          this.processedHashes.add(activity.transactionHash);
-          stats.skippedUnconfirmedTrades += 1;
-          continue;
+        if (env.requireConfirmed) {
+          const txStatus = await this.checkTransactionStatus(activity.transactionHash);
+          if (txStatus !== 'confirmed') {
+            stats.skippedUnconfirmedTrades += 1;
+            continue;
+          }
         }
 
         stats.eligibleTrades += 1;
@@ -256,5 +261,9 @@ type MonitorStats = {
   skippedUnconfirmedTrades: number;
   skippedNonTargetTrades: number;
   skippedParseErrorTrades: number;
+  skippedOutsideRecentWindowTrades: number;
+  skippedUnsupportedActionTrades: number;
+  skippedMissingFieldsTrades: number;
+  skippedApiErrorTrades: number;
   skippedOtherTrades: number;
 };
