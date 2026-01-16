@@ -48,19 +48,22 @@ export async function startArbitrageEngine(
     publicKey: config.proxyWallet,
     logger,
   });
+  if (client.executionDisabled) {
+    config.detectOnly = true;
+  }
 
   const clientCredsRaw = (client as { creds?: { key?: string; secret?: string; passphrase?: string } }).creds;
   const clientCreds = isApiKeyCreds(clientCredsRaw) ? clientCredsRaw : undefined;
   const credsComplete = Boolean(clientCreds);
   config.clobCredsComplete = credsComplete;
-  config.detectOnly = !credsComplete;
+  config.detectOnly = !credsComplete || config.detectOnly;
   if (credsComplete) {
     try {
       const preflight = await runClobAuthPreflight({
         client,
         logger,
         creds: clientCreds,
-        derivedSignerAddress: client.wallet.address,
+        derivedSignerAddress: client.derivedSignerAddress,
         configuredPublicKey: config.proxyWallet,
         privateKeyPresent: Boolean(config.privateKey),
         force: process.env.CLOB_AUTH_FORCE === 'true',

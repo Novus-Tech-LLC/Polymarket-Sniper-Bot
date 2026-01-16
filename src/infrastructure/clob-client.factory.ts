@@ -8,12 +8,17 @@ import { formatAuthHeaderPresence, getAuthHeaderPresence } from '../utils/clob-a
 import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 import {
   buildAuthMessageComponents,
-  deriveSignerAddress,
   formatApiKeyId,
   logAuthSigningDiagnostics,
   logClobDiagnostics,
   setupClobHeaderKeyLogging,
 } from '../clob/diagnostics';
+import {
+  evaluatePublicKeyMismatch,
+  parseSignatureType,
+  resolveDerivedSignerAddress,
+  resolveEffectivePolyAddress,
+} from '../clob/addressing';
 
 export type CreateClientInput = {
   rpcUrl: string;
@@ -23,10 +28,33 @@ export type CreateClientInput = {
   apiPassphrase?: string;
   deriveApiKey?: boolean;
   publicKey?: string;
+  signatureType?: number;
+  funderAddress?: string;
+  polyAddressOverride?: string;
+  forceMismatch?: boolean;
   logger?: Logger;
 };
 
 const SERVER_TIME_SKEW_THRESHOLD_SECONDS = 30;
+let polyAddressDiagLogged = false;
+
+const readEnvValue = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
+
+const buildEffectiveSigner = (wallet: Wallet, effectivePolyAddress: string): Wallet => {
+  if (!effectivePolyAddress) return wallet;
+  return new Proxy(wallet, {
+    get(target, prop, receiver) {
+      if (prop === 'getAddress') {
+        return async () => effectivePolyAddress;
+      }
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value === 'function') {
+        return value.bind(target);
+      }
+      return value;
+    },
+  });
+};
 
 const parseTimestampSeconds = (value: unknown): number | undefined => {
   if (value === null || value === undefined) return undefined;
@@ -98,10 +126,47 @@ const logAuthHeaderPresence = async (
 
 export async function createPolymarketClient(
   input: CreateClientInput,
-): Promise<ClobClient & { wallet: Wallet }> {
+): Promise<ClobClient & {
+  wallet: Wallet;
+  derivedSignerAddress: string;
+  effectivePolyAddress: string;
+  publicKeyMismatch: boolean;
+  executionDisabled: boolean;
+}> {
   const provider = new providers.JsonRpcProvider(input.rpcUrl);
   const wallet = new Wallet(input.privateKey, provider);
   setupClobHeaderKeyLogging(input.logger);
+
+  const derivedSignerAddress = resolveDerivedSignerAddress(input.privateKey);
+  const signatureType = parseSignatureType(
+    input.signatureType ?? readEnvValue('CLOB_SIGNATURE_TYPE'),
+  );
+  const funderAddress = input.funderAddress ?? readEnvValue('CLOB_FUNDER_ADDRESS');
+  const polyAddressOverride = input.polyAddressOverride ?? readEnvValue('CLOB_POLY_ADDRESS_OVERRIDE');
+  const effectiveAddressResult = resolveEffectivePolyAddress({
+    derivedSignerAddress,
+    signatureType,
+    funderAddress,
+    polyAddressOverride,
+    logger: input.logger,
+  });
+  const configuredPublicKey = input.publicKey ?? readEnvValue('PUBLIC_KEY');
+  const forceMismatch = input.forceMismatch ?? readEnvValue('FORCE_MISMATCH') === 'true';
+  const mismatchResult = evaluatePublicKeyMismatch({
+    configuredPublicKey,
+    derivedSignerAddress,
+    forceMismatch,
+    logger: input.logger,
+  });
+
+  if (input.logger && !polyAddressDiagLogged) {
+    input.logger.info(
+      `[CLOB][Diag] derivedSignerAddress=${derivedSignerAddress} funderAddress=${funderAddress ?? 'none'} signatureType=${signatureType ?? 'n/a'} effectivePolyAddress=${effectiveAddressResult.effectivePolyAddress}`,
+    );
+    polyAddressDiagLogged = true;
+  }
+
+  const signer = buildEffectiveSigner(wallet, effectiveAddressResult.effectivePolyAddress);
 
   let creds: ApiKeyCreds | undefined;
   if (input.apiKey && input.apiSecret && input.apiPassphrase) {
@@ -115,8 +180,10 @@ export async function createPolymarketClient(
   const client = new ClobClient(
     POLYMARKET_API.BASE_URL,
     Chain.POLYGON,
-    wallet,
+    signer,
     creds,
+    signatureType,
+    funderAddress,
   );
   await maybeEnableServerTime(client, input.logger);
 
@@ -132,20 +199,19 @@ export async function createPolymarketClient(
     }
   }
 
-  const signatureType = (client as ClobClient & { orderBuilder?: { signatureType?: number } }).orderBuilder
+  const resolvedSignatureType = (client as ClobClient & { orderBuilder?: { signatureType?: number } }).orderBuilder
     ?.signatureType;
-  const funderAddress = (client as ClobClient & { orderBuilder?: { funderAddress?: string } }).orderBuilder
+  const resolvedFunderAddress = (client as ClobClient & { orderBuilder?: { funderAddress?: string } }).orderBuilder
     ?.funderAddress;
-  const derivedSignerAddress = deriveSignerAddress(input.privateKey);
-  const makerAddress = derivedSignerAddress ? funderAddress ?? derivedSignerAddress : 'n/a';
+  const makerAddress = effectiveAddressResult.effectivePolyAddress ?? derivedSignerAddress ?? 'n/a';
   logClobDiagnostics({
     logger: input.logger,
     derivedSignerAddress,
-    configuredPublicKey: input.publicKey,
+    configuredPublicKey,
     chainId: Chain.POLYGON,
     clobHost: POLYMARKET_API.BASE_URL,
-    signatureType,
-    funderAddress,
+    signatureType: resolvedSignatureType ?? signatureType,
+    funderAddress: resolvedFunderAddress ?? funderAddress,
     makerAddress,
     ownerId: formatApiKeyId(creds?.key),
     apiKeyPresent: Boolean(creds?.key),
@@ -158,5 +224,11 @@ export async function createPolymarketClient(
     await logAuthHeaderPresence(client, creds, input.logger);
   }
 
-  return Object.assign(client, { wallet });
+  return Object.assign(client, {
+    wallet,
+    derivedSignerAddress,
+    effectivePolyAddress: effectiveAddressResult.effectivePolyAddress,
+    publicKeyMismatch: mismatchResult.mismatch,
+    executionDisabled: mismatchResult.executionDisabled,
+  });
 }

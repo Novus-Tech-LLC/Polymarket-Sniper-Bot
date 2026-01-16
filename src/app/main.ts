@@ -56,12 +56,15 @@ async function main(): Promise<void> {
     publicKey: env.proxyWallet,
     logger,
   });
+  if (client.executionDisabled) {
+    env.detectOnly = true;
+  }
 
   const clientCredsRaw = (client as { creds?: { key?: string; secret?: string; passphrase?: string } }).creds;
   const clientCreds = isApiKeyCreds(clientCredsRaw) ? clientCredsRaw : undefined;
   const credsComplete = Boolean(clientCreds);
   env.clobCredsComplete = credsComplete;
-  env.detectOnly = !credsComplete;
+  env.detectOnly = !credsComplete || env.detectOnly;
 
   if (credsComplete) {
     try {
@@ -69,7 +72,7 @@ async function main(): Promise<void> {
         client,
         logger,
         creds: clientCreds,
-        derivedSignerAddress: client.wallet.address,
+        derivedSignerAddress: client.derivedSignerAddress,
         configuredPublicKey: env.proxyWallet,
         privateKeyPresent: Boolean(env.privateKey),
         force: process.env.CLOB_AUTH_FORCE === 'true',
