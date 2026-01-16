@@ -1,9 +1,11 @@
 import crypto from 'node:crypto';
 import axios from 'axios';
 import type { ApiKeyCreds, ClobClient } from '@polymarket/clob-client';
+import * as clobSigning from '@polymarket/clob-client/dist/signing';
 import { SignatureType } from '@polymarket/order-utils';
 import { Wallet } from 'ethers';
 import { POLYMARKET_API } from '../constants/polymarket.constants';
+import { initializeApiCreds } from '../infrastructure/clob-auth';
 import type { Logger } from '../utils/logger.util';
 import { buildSignedPath } from '../utils/query-string.util';
 
@@ -29,10 +31,30 @@ const SIGNATURE_ENCODING_USED: SignatureEncodingMode = 'base64url';
 const SECRET_DECODING_USED: SecretDecodingMode = 'base64';
 const PREFLIGHT_BACKOFF_BASE_MS = 1000;
 const PREFLIGHT_BACKOFF_MAX_MS = 5 * 60 * 1000;
+const PREFLIGHT_MATRIX_DEFAULT_SIGNATURE_TYPES = '0,2';
+const PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE = 'base64,base64url,raw';
+const PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING = 'base64url,base64';
+const PREFLIGHT_MATRIX_DEFAULT_ENDPOINT = '/balance-allowance';
+const PREFLIGHT_MATRIX_ERROR_TRUNCATE = 160;
 
 let headerKeysLogged = false;
 let preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
 let lastPreflightAttemptMs = 0;
+let matrixBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
+let lastMatrixAttemptMs = 0;
+let matrixCompleted = false;
+
+type AuthModeConfig = {
+  signatureType: number;
+  secretDecoding: SecretDecodingMode;
+  signatureEncoding: SignatureEncodingMode;
+  useDerivedCreds: boolean;
+};
+
+let activeAuthMode: AuthModeConfig | null = null;
+let hmacOverrideInstalled = false;
+let originalHmacSignature: ((secret: string, timestamp: number, method: string, path: string, body?: string) => string)
+  | null = null;
 
 const normalizeAddress = (value?: string): string | undefined => value?.toLowerCase();
 
@@ -82,6 +104,54 @@ export const decodeSecretBytes = (secret: string, mode: SecretDecodingMode): Buf
   return Buffer.from(secret, 'utf8');
 };
 
+const encodeSignature = (digest: Buffer, mode: SignatureEncodingMode): string => {
+  const base64 = digest.toString('base64');
+  if (mode === 'base64') {
+    return base64;
+  }
+  return base64.replace(/\+/g, '-').replace(/\//g, '_');
+};
+
+const readEnvValue = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
+
+const parseCsv = (value: string | undefined): string[] => {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+};
+
+const parseBooleanList = (value: string | undefined, fallback: boolean[]): boolean[] => {
+  const entries = parseCsv(value);
+  if (!entries.length) return fallback;
+  return entries.map((entry) => entry.toLowerCase() === 'true');
+};
+
+const installHmacOverride = (): void => {
+  if (hmacOverrideInstalled) return;
+  const signingModule = clobSigning as unknown as {
+    buildPolyHmacSignature?: (secret: string, timestamp: number, method: string, path: string, body?: string) => string;
+  };
+  if (typeof signingModule.buildPolyHmacSignature !== 'function') return;
+  originalHmacSignature = signingModule.buildPolyHmacSignature;
+  signingModule.buildPolyHmacSignature = (secret, timestamp, method, path, body) => {
+    if (!activeAuthMode) {
+      return originalHmacSignature ? originalHmacSignature(secret, timestamp, method, path, body) : '';
+    }
+    return buildHmacSignature({
+      secret,
+      timestamp,
+      method,
+      path,
+      body,
+      secretDecoding: activeAuthMode.secretDecoding,
+      signatureEncoding: activeAuthMode.signatureEncoding,
+    });
+  };
+  hmacOverrideInstalled = true;
+};
+
 export const buildAuthMessageString = (params: {
   timestamp: number;
   method: string;
@@ -93,6 +163,27 @@ export const buildAuthMessageString = (params: {
     message += params.body;
   }
   return message;
+};
+
+const buildHmacSignature = (params: {
+  secret: string;
+  timestamp: number;
+  method: string;
+  path: string;
+  body?: string;
+  secretDecoding: SecretDecodingMode;
+  signatureEncoding: SignatureEncodingMode;
+}): string => {
+  const message = buildAuthMessageString({
+    timestamp: params.timestamp,
+    method: params.method,
+    path: params.path,
+    body: params.body,
+  });
+  const secretBytes = decodeSecretBytes(params.secret, params.secretDecoding);
+  const hmac = crypto.createHmac('sha256', secretBytes);
+  const digest = hmac.update(message).digest();
+  return encodeSignature(digest, params.signatureEncoding);
 };
 
 export const computeSha256Hex = (value: string | Buffer): string => {
@@ -343,4 +434,194 @@ export const runClobAuthPreflight = async (params: {
     preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
     return { ok: false, status, forced: Boolean(params.force) };
   }
+};
+
+const formatPreflightError = (error: unknown): string => {
+  const status = extractStatus(error);
+  const maybeError = error as { response?: { data?: unknown }; message?: string };
+  let message = '';
+  if (typeof maybeError?.response?.data === 'string') {
+    message = maybeError.response.data;
+  } else if (maybeError?.response?.data && typeof maybeError.response.data === 'object') {
+    message = JSON.stringify(maybeError.response.data);
+  } else if (typeof maybeError?.message === 'string') {
+    message = maybeError.message;
+  }
+  if (!message) {
+    message = status ? `status_${status}` : 'unknown_error';
+  }
+  if (message.length > PREFLIGHT_MATRIX_ERROR_TRUNCATE) {
+    return `${message.slice(0, PREFLIGHT_MATRIX_ERROR_TRUNCATE)}…`;
+  }
+  return message;
+};
+
+const formatMatrixTable = (rows: string[][]): string => {
+  const header = ['id', 'signature_type', 'secretDecode', 'sigEncoding', 'derivedCreds', 'status', 'error'];
+  const table = [header, ...rows];
+  const widths = header.map((_, idx) => Math.max(...table.map((row) => row[idx].length)));
+  const formatRow = (row: string[]): string =>
+    row.map((value, idx) => value.padEnd(widths[idx])).join(' | ');
+  return ['[CLOB][Preflight][Matrix]', formatRow(header), ...rows.map(formatRow)].join('\n');
+};
+
+const applyAuthMode = async (
+  client: ClobClient,
+  creds: ApiKeyCreds,
+  mode: AuthModeConfig,
+): Promise<void> => {
+  activeAuthMode = mode;
+  installHmacOverride();
+  const orderBuilder = (client as { orderBuilder?: { signatureType?: number } }).orderBuilder;
+  if (orderBuilder) {
+    orderBuilder.signatureType = mode.signatureType;
+  }
+  await initializeApiCreds(client, creds);
+};
+
+export const runClobAuthMatrixPreflight = async (params: {
+  client: ClobClient;
+  logger?: Logger;
+  creds?: ApiKeyCreds;
+  derivedCreds?: ApiKeyCreds;
+}): Promise<{ ok: boolean } | null> => {
+  if (!params.logger || !params.creds) return null;
+  const matrixEnabled = readEnvValue('CLOB_PREFLIGHT_MATRIX') === 'true';
+  if (!matrixEnabled) return null;
+  if (matrixCompleted) return null;
+  const nowMs = Date.now();
+  if (nowMs - lastMatrixAttemptMs < matrixBackoffMs) {
+    return null;
+  }
+  lastMatrixAttemptMs = nowMs;
+
+  const endpoint = readEnvValue('CLOB_PREFLIGHT_ENDPOINT') ?? PREFLIGHT_MATRIX_DEFAULT_ENDPOINT;
+  const signatureTypeValues = parseCsv(
+    readEnvValue('CLOB_PREFLIGHT_TRY_SIGNATURE_TYPES') ?? PREFLIGHT_MATRIX_DEFAULT_SIGNATURE_TYPES,
+  );
+  const secretDecodingValues = parseCsv(
+    readEnvValue('CLOB_PREFLIGHT_TRY_SECRET_DECODE') ?? PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE,
+  ) as SecretDecodingMode[];
+  const signatureEncodingValues = parseCsv(
+    readEnvValue('CLOB_PREFLIGHT_TRY_SIG_ENCODING') ?? PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING,
+  ) as SignatureEncodingMode[];
+  const derivedCredsChoices = parseBooleanList(
+    readEnvValue('CLOB_PREFLIGHT_USE_DERIVED_CREDS'),
+    [false, true],
+  );
+
+  const signer = (params.client as { signer?: { getAddress: () => Promise<string> } }).signer;
+  const address = signer ? await signer.getAddress() : '';
+  const rows: string[][] = [];
+  let successMode: { mode: AuthModeConfig; creds: ApiKeyCreds } | null = null;
+  let attemptId = 0;
+
+  for (const signatureTypeRaw of signatureTypeValues) {
+    const signatureType = Number(signatureTypeRaw);
+    if (Number.isNaN(signatureType)) {
+      continue;
+    }
+    for (const secretDecoding of secretDecodingValues) {
+      for (const signatureEncoding of signatureEncodingValues) {
+        for (const useDerivedCreds of derivedCredsChoices) {
+          attemptId += 1;
+          const credsToUse = useDerivedCreds ? params.derivedCreds : params.creds;
+          if (!credsToUse) {
+            rows.push([
+              `${attemptId}`,
+              `${signatureType}`,
+              secretDecoding,
+              signatureEncoding,
+              `${useDerivedCreds}`,
+              'other',
+              'missing_creds',
+            ]);
+            continue;
+          }
+
+          const timestamp = Math.floor(Date.now() / 1000);
+          const requestParams = { signature_type: signatureType };
+          const { signedPath } = buildSignedPath(endpoint, requestParams);
+          const signature = buildHmacSignature({
+            secret: credsToUse.secret,
+            timestamp,
+            method: 'GET',
+            path: signedPath,
+            secretDecoding,
+            signatureEncoding,
+          });
+          const headers = {
+            POLY_ADDRESS: address,
+            POLY_SIGNATURE: signature,
+            POLY_TIMESTAMP: `${timestamp}`,
+            POLY_API_KEY: credsToUse.key,
+            POLY_PASSPHRASE: credsToUse.passphrase,
+          };
+
+          let statusLabel = 'other';
+          let errorLabel = '';
+          try {
+            const response = await axios.get(`${POLYMARKET_API.BASE_URL}${endpoint}`, {
+              headers,
+              params: requestParams,
+              timeout: 10000,
+            });
+            if (response?.status === 200) {
+              statusLabel = '200';
+              rows.push([
+                `${attemptId}`,
+                `${signatureType}`,
+                secretDecoding,
+                signatureEncoding,
+                `${useDerivedCreds}`,
+                statusLabel,
+                '',
+              ]);
+              successMode = {
+                mode: { signatureType, secretDecoding, signatureEncoding, useDerivedCreds },
+                creds: credsToUse,
+              };
+              break;
+            }
+            statusLabel = response?.status === 401 ? '401' : 'other';
+            errorLabel = response?.statusText ?? '';
+          } catch (error) {
+            const status = extractStatus(error);
+            statusLabel = status === 200 ? '200' : status === 401 ? '401' : 'other';
+            errorLabel = formatPreflightError(error);
+          }
+
+          rows.push([
+            `${attemptId}`,
+            `${signatureType}`,
+            secretDecoding,
+            signatureEncoding,
+            `${useDerivedCreds}`,
+            statusLabel,
+            errorLabel,
+          ]);
+
+          if (statusLabel === '200') {
+            break;
+          }
+        }
+        if (successMode) break;
+      }
+      if (successMode) break;
+    }
+    if (successMode) break;
+  }
+
+  params.logger.info(formatMatrixTable(rows));
+  matrixCompleted = true;
+
+  if (successMode) {
+    await applyAuthMode(params.client, successMode.creds, successMode.mode);
+    matrixBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
+    return { ok: true };
+  }
+
+  params.logger.warn('NO_VALID_AUTH_MODE');
+  matrixBackoffMs = Math.min(matrixBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+  return { ok: false };
 };

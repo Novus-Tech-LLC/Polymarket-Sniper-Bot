@@ -1,7 +1,7 @@
 import { ConsoleLogger } from '../utils/logger.util';
 import { createPolymarketClient } from '../infrastructure/clob-client.factory';
 import { isAuthError } from '../infrastructure/clob-auth';
-import { runClobAuthPreflight } from '../clob/diagnostics';
+import { runClobAuthMatrixPreflight, runClobAuthPreflight } from '../clob/diagnostics';
 import { loadArbConfig } from '../config/loadConfig';
 import { ArbitrageEngine } from './engine';
 import { PolymarketMarketDataProvider } from './provider/polymarket.provider';
@@ -59,20 +59,34 @@ export async function startArbitrageEngine(
   config.detectOnly = !credsComplete || config.detectOnly;
   if (credsComplete) {
     try {
-      const preflight = await runClobAuthPreflight({
-        client,
-        logger,
-        creds: clientCreds,
-        derivedSignerAddress: client.derivedSignerAddress,
-        configuredPublicKey: config.proxyWallet,
-        privateKeyPresent: Boolean(config.privateKey),
-        force: process.env.CLOB_AUTH_FORCE === 'true',
-      });
-      if (preflight && !preflight.ok && !preflight.forced) {
-        config.detectOnly = true;
-        logger.warn('[CLOB] Auth preflight failed; switching to detect-only.');
-        logger.warn('[CLOB] Set CLOB_AUTH_FORCE=true to override detect-only.');
-        logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
+      const matrixEnabled = process.env.CLOB_PREFLIGHT_MATRIX === 'true'
+        || process.env.clob_preflight_matrix === 'true';
+      if (matrixEnabled) {
+        const matrix = await runClobAuthMatrixPreflight({
+          client,
+          logger,
+          creds: clientCreds,
+          derivedCreds: client.derivedCreds,
+        });
+        if (matrix && !matrix.ok) {
+          config.detectOnly = true;
+        }
+      } else {
+        const preflight = await runClobAuthPreflight({
+          client,
+          logger,
+          creds: clientCreds,
+          derivedSignerAddress: client.derivedSignerAddress,
+          configuredPublicKey: config.proxyWallet,
+          privateKeyPresent: Boolean(config.privateKey),
+          force: process.env.CLOB_AUTH_FORCE === 'true',
+        });
+        if (preflight && !preflight.ok && !preflight.forced) {
+          config.detectOnly = true;
+          logger.warn('[CLOB] Auth preflight failed; switching to detect-only.');
+          logger.warn('[CLOB] Set CLOB_AUTH_FORCE=true to override detect-only.');
+          logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
+        }
       }
     } catch (err) {
       config.detectOnly = true;

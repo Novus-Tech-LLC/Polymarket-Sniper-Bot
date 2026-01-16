@@ -161,6 +161,8 @@ export async function createPolymarketClient(
   effectivePolyAddress: string;
   publicKeyMismatch: boolean;
   executionDisabled: boolean;
+  providedCreds?: ApiKeyCreds;
+  derivedCreds?: ApiKeyCreds;
 }> {
   const provider = new providers.JsonRpcProvider(input.rpcUrl);
   const wallet = new Wallet(input.privateKey, provider);
@@ -205,6 +207,7 @@ export async function createPolymarketClient(
       passphrase: input.apiPassphrase,
     };
   }
+  const providedCreds = creds;
   const deriveEnabled = Boolean(input.deriveApiKey);
   if (deriveEnabled && creds) {
     input.logger?.info('[CLOB] Derived creds enabled; ignoring provided API keys.');
@@ -221,11 +224,13 @@ export async function createPolymarketClient(
   );
   await maybeEnableServerTime(client, input.logger);
 
+  let derivedCreds: ApiKeyCreds | undefined;
   if (deriveEnabled) {
     try {
       const derived = await deriveApiCreds(wallet, input.logger);
       if (derived?.key && derived?.secret && derived?.passphrase) {
         creds = derived;
+        derivedCreds = derived;
         const { apiKeyDigest, keyIdSuffix } = getApiKeyDiagnostics(derived.key);
         input.logger?.info(`[CLOB] derived creds apiKeyDigest=${apiKeyDigest} keyIdSuffix=${keyIdSuffix}`);
       }
@@ -265,5 +270,7 @@ export async function createPolymarketClient(
     effectivePolyAddress: effectiveAddressResult.effectivePolyAddress,
     publicKeyMismatch: mismatchResult.mismatch,
     executionDisabled: mismatchResult.executionDisabled,
+    providedCreds,
+    derivedCreds,
   });
 }
