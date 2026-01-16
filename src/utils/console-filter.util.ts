@@ -1,4 +1,5 @@
 import type { Logger } from './logger.util';
+import { redactSensitiveValues } from './sanitize-axios-error.util';
 
 type ConsoleError = typeof console.error;
 
@@ -70,6 +71,15 @@ export const suppressClobOrderbookErrors = (logger?: Logger): void => {
         suppressedTokens.add(tokenId);
         logger.warn(`[CLOB] Suppressing repeated orderbook 404s for token ${tokenId}. Remove from watchlist if resolved.`);
       }
+      return;
+    }
+
+    if (typeof args[0] === 'string' && args[0].includes('[CLOB Client] request error')) {
+      const sanitizedArgs = [...args];
+      if (typeof sanitizedArgs[1] === 'string') {
+        sanitizedArgs[1] = redactSensitiveValues(sanitizedArgs[1]);
+      }
+      originalConsoleError?.(...(sanitizedArgs as Parameters<ConsoleError>));
       return;
     }
 
