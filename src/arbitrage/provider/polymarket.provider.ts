@@ -26,6 +26,52 @@ function parseUsd(value?: string | number): number | undefined {
   return Number.isNaN(num) ? undefined : num;
 }
 
+const INACTIVE_MARKET_STATUSES = new Set([
+  'closed',
+  'resolved',
+  'settled',
+  'inactive',
+  'archived',
+  'cancelled',
+  'canceled',
+  'finalized',
+]);
+
+function isMarketActive(market: Record<string, unknown>): boolean {
+  const statusRaw =
+    market.status ??
+    market.state ??
+    market.market_status ??
+    market.marketStatus ??
+    market.condition_status ??
+    market.conditionStatus;
+  if (typeof statusRaw === 'string' && INACTIVE_MARKET_STATUSES.has(statusRaw.toLowerCase())) {
+    return false;
+  }
+
+  const activityFlag =
+    market.active ??
+    market.is_active ??
+    market.isActive ??
+    market.trading ??
+    market.is_trading ??
+    market.isTrading;
+  if (activityFlag === false) return false;
+
+  const closedFlag =
+    market.closed ??
+    market.is_closed ??
+    market.isClosed ??
+    market.resolved ??
+    market.is_resolved ??
+    market.isResolved ??
+    market.settled ??
+    market.archived ??
+    market.is_archived ??
+    market.isArchived;
+  return closedFlag !== true;
+}
+
 export class PolymarketMarketDataProvider implements MarketDataProvider {
   private readonly client: ClobClient;
   private readonly logger: Logger;
@@ -43,6 +89,7 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
     const markets: MarketSummary[] = [];
 
     for (const market of data) {
+      if (!isMarketActive(market)) continue;
       const marketId = market.condition_id || market.conditionId || market.id || market.market_id;
       const tokens = Array.isArray(market.tokens) ? market.tokens : [];
 
