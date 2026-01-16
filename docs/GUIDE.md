@@ -108,6 +108,9 @@ Create a `.env` file in the project root with the following variables:
 | `TRADE_AGGREGATION_WINDOW_SECONDS` | `300` | Time window for aggregating trades (seconds) |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC contract on Polygon |
 | `MONGO_URI` | - | MongoDB connection string (optional) |
+| `POLYMARKET_API_KEY` | - | Polymarket CLOB API key (optional; otherwise derived via wallet signature) |
+| `POLYMARKET_API_SECRET` | - | Polymarket CLOB API secret (optional; otherwise derived via wallet signature) |
+| `POLYMARKET_API_PASSPHRASE` | - | Polymarket CLOB API passphrase (optional; otherwise derived via wallet signature) |
 
 ### Example `.env` File
 
@@ -122,6 +125,9 @@ FRONTRUN_SIZE_MULTIPLIER=0.5
 GAS_PRICE_MULTIPLIER=1.2
 RETRY_LIMIT=3
 USDC_CONTRACT_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+POLYMARKET_API_KEY=your_clob_api_key
+POLYMARKET_API_SECRET=your_clob_api_secret
+POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
 ```
 
 ---
@@ -458,5 +464,4 @@ docker stop polymarket-bot
 - [Polygon Documentation](https://docs.polygon.technology)
 
 ---
-
 
