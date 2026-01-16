@@ -18,14 +18,15 @@ export async function createPolymarketClient(
   const provider = new providers.JsonRpcProvider(input.rpcUrl);
   const wallet = new Wallet(input.privateKey, provider);
 
-  let creds: ApiKeyCreds | undefined;
-  if (input.apiKey && input.apiSecret && input.apiPassphrase) {
-    creds = {
-      key: input.apiKey,
-      secret: input.apiSecret,
-      passphrase: input.apiPassphrase,
-    };
+  if (!input.apiKey || !input.apiSecret || !input.apiPassphrase) {
+    throw new Error('Missing Polymarket API credentials. Set POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE.');
   }
+
+  const creds: ApiKeyCreds = {
+    key: input.apiKey,
+    secret: input.apiSecret,
+    passphrase: input.apiPassphrase,
+  };
 
   const client = new ClobClient(
     POLYMARKET_API.BASE_URL,

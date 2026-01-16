@@ -33,9 +33,9 @@ export type ArbConfig = {
   rpcUrl: string;
   privateKey: string;
   proxyWallet?: string;
-  polymarketApiKey?: string;
-  polymarketApiSecret?: string;
-  polymarketApiPassphrase?: string;
+  polymarketApiKey: string;
+  polymarketApiSecret: string;
+  polymarketApiPassphrase: string;
   collateralTokenAddress: string;
   collateralTokenDecimals: number;
 };
