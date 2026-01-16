@@ -3,6 +3,7 @@ import type { RuntimeEnv } from '../config/env';
 import type { Logger } from '../utils/logger.util';
 import type { TradeSignal } from '../domain/trade.types';
 import { httpGet } from '../utils/fetch-data.util';
+import { sanitizeAxiosError } from '../utils/sanitize-axios-error.util';
 import axios from 'axios';
 
 export type TradeMonitorDeps = {
@@ -56,7 +57,7 @@ export class TradeMonitorService {
         await this.fetchTraderActivities(trader, env);
       }
     } catch (err) {
-      logger.error('Monitor tick failed', err as Error);
+      logger.error('Monitor tick failed', sanitizeAxiosError(err));
     }
   }
 
@@ -128,8 +129,7 @@ export class TradeMonitorService {
         return;
       }
       // Log other errors
-      this.deps.logger.error(`Failed to fetch activities for ${trader}`, err as Error);
+      this.deps.logger.error(`Failed to fetch activities for ${trader}`, sanitizeAxiosError(err));
     }
   }
 }
-

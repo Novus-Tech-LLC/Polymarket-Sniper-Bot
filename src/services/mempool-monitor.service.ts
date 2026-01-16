@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 import { httpGet } from '../utils/fetch-data.util';
 import axios from 'axios';
 import { POLYMARKET_CONTRACTS, POLYMARKET_API, DEFAULT_CONFIG } from '../constants/polymarket.constants';
+import { sanitizeAxiosError, sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 
 export type MempoolMonitorDeps = {
   client: ClobClient;
@@ -137,7 +138,7 @@ export class MempoolMonitorService {
           continue;
         }
         stats.skippedApiErrorTrades += 1;
-        logger.debug(`Error checking activity for ${targetAddress}: ${err instanceof Error ? err.message : String(err)}`);
+        logger.debug(`Error checking activity for ${targetAddress}: ${sanitizeErrorMessage(err)}`);
       }
     }
 
@@ -239,7 +240,7 @@ export class MempoolMonitorService {
       if (axios.isAxiosError(err) && err.response?.status === 404) {
         return;
       }
-      throw err;
+      throw sanitizeAxiosError(err);
     }
   }
 

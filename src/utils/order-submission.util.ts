@@ -18,8 +18,7 @@ export type OrderSubmissionResult = {
 };
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
-const HTML_REGEX = /<\s*(!doctype|html|head|body)\b/i;
-const CLOUDFLARE_REGEX = /cloudflare|sorry, you have been blocked/i;
+const CLOUDFLARE_REGEX = /cloudflare|blocked/i;
 const RAY_ID_REGEX = /ray id\s*[:#]?\s*([a-z0-9-]+)/i;
 
 const DEFAULT_SETTINGS: OrderSubmissionSettings = {
@@ -52,6 +51,8 @@ export class OrderSubmissionController {
   private submitHistory: number[] = [];
   private marketLastSubmit = new Map<string, number>();
   private blockedUntil = 0;
+  private lastBlockedLogAt = Number.NEGATIVE_INFINITY;
+  private lastFingerprintSubmit = new Map<string, number>();
   private lastRayId?: string;
 
   constructor(settings: OrderSubmissionSettings) {
@@ -65,6 +66,7 @@ export class OrderSubmissionController {
   async submit(params: {
     sizeUsd: number;
     marketId?: string;
+    orderFingerprint?: string;
     logger: Logger;
     submit: () => Promise<unknown>;
     now?: number;
@@ -74,6 +76,7 @@ export class OrderSubmissionController {
     const preflight = this.checkPreflight({
       sizeUsd: params.sizeUsd,
       marketId: params.marketId,
+      orderFingerprint: params.orderFingerprint,
       logger: params.logger,
       now,
       skipRateLimit: params.skipRateLimit,
@@ -82,18 +85,18 @@ export class OrderSubmissionController {
       return preflight;
     }
 
-    this.recordAttempt(now, params.marketId);
+    this.recordAttempt(now, params.marketId, params.orderFingerprint);
 
     try {
       const response = await params.submit();
       const statusCode = extractStatusCode(response);
       const bodyText = extractBodyText(response);
-      if (isCloudflareBlocked(statusCode, bodyText, extractHeaders(response))) {
+      if (isCloudflareBlocked(statusCode, bodyText)) {
         const blockedUntil = now + this.settings.cloudflareCooldownMs;
         this.blockedUntil = blockedUntil;
         logCloudflare(params.logger, bodyText, extractHeaders(response), this);
-        logFailure(params.logger, statusCode, 'BLOCKED_BY_CLOUDFLARE');
-        return { status: 'failed', reason: 'BLOCKED_BY_CLOUDFLARE', statusCode, blockedUntil };
+        logFailure(params.logger, statusCode, 'CLOUDFLARE_BLOCK');
+        return { status: 'failed', reason: 'CLOUDFLARE_BLOCK', statusCode, blockedUntil };
       }
       const orderId = extractOrderId(response);
       const accepted = isOrderAccepted(response);
@@ -107,12 +110,12 @@ export class OrderSubmissionController {
     } catch (error) {
       const statusCode = extractStatusCode(error);
       const bodyText = extractBodyText(error);
-      if (isCloudflareBlocked(statusCode, bodyText, extractHeaders(error))) {
+      if (isCloudflareBlocked(statusCode, bodyText)) {
         const blockedUntil = now + this.settings.cloudflareCooldownMs;
         this.blockedUntil = blockedUntil;
         logCloudflare(params.logger, bodyText, extractHeaders(error), this);
-        logFailure(params.logger, statusCode, 'BLOCKED_BY_CLOUDFLARE');
-        return { status: 'failed', reason: 'BLOCKED_BY_CLOUDFLARE', statusCode, blockedUntil };
+        logFailure(params.logger, statusCode, 'CLOUDFLARE_BLOCK');
+        return { status: 'failed', reason: 'CLOUDFLARE_BLOCK', statusCode, blockedUntil };
       }
 
       const reason = normalizeReason(extractReason(error) || 'request_error');
@@ -124,6 +127,7 @@ export class OrderSubmissionController {
   private checkPreflight(params: {
     sizeUsd: number;
     marketId?: string;
+    orderFingerprint?: string;
     logger: Logger;
     now: number;
     skipRateLimit?: boolean;
@@ -136,10 +140,21 @@ export class OrderSubmissionController {
     }
 
     if (this.blockedUntil > params.now) {
-      params.logger.warn(
-        `[CLOB] execution paused due to Cloudflare block until ${new Date(this.blockedUntil).toISOString()}`,
-      );
-      return { status: 'skipped', reason: 'BLOCKED_BY_CLOUDFLARE', blockedUntil: this.blockedUntil };
+      if (params.now - this.lastBlockedLogAt >= 60_000) {
+        params.logger.warn(
+          `CLOB execution paused due to Cloudflare block until ${new Date(this.blockedUntil).toISOString()}`,
+        );
+        this.lastBlockedLogAt = params.now;
+      }
+      return { status: 'skipped', reason: 'CLOUDFLARE_BLOCK', blockedUntil: this.blockedUntil };
+    }
+
+    if (this.settings.marketCooldownMs > 0 && params.orderFingerprint) {
+      const lastFingerprint = this.lastFingerprintSubmit.get(params.orderFingerprint);
+      if (lastFingerprint && params.now - lastFingerprint < this.settings.marketCooldownMs) {
+        params.logger.warn('[CLOB] Order skipped (RATE_LIMIT_DUPLICATE_ORDER)');
+        return { status: 'skipped', reason: 'RATE_LIMIT_DUPLICATE_ORDER' };
+      }
     }
 
     if (!params.skipRateLimit && this.settings.minIntervalMs > 0 && params.now - this.lastSubmitAt < this.settings.minIntervalMs) {
@@ -166,11 +181,14 @@ export class OrderSubmissionController {
     return null;
   }
 
-  private recordAttempt(now: number, marketId?: string): void {
+  private recordAttempt(now: number, marketId?: string, fingerprint?: string): void {
     this.lastSubmitAt = now;
     this.submitHistory.push(now);
     if (marketId) {
       this.marketLastSubmit.set(marketId, now);
+    }
+    if (fingerprint) {
+      this.lastFingerprintSubmit.set(fingerprint, now);
     }
   }
 
@@ -247,16 +265,9 @@ function isOrderAccepted(response: unknown): boolean {
   return Boolean(candidate?.order?.id || candidate?.order?.hash || candidate?.order?.status);
 }
 
-function isCloudflareBlocked(
-  statusCode: number | undefined,
-  bodyText: string,
-  headers?: Record<string, string | string[] | undefined>,
-): boolean {
+function isCloudflareBlocked(statusCode: number | undefined, bodyText: string): boolean {
   if (statusCode !== 403) return false;
-  const contentType = headers?.['content-type'] || headers?.['Content-Type'];
-  const contentTypeValue = Array.isArray(contentType) ? contentType.join(' ') : contentType || '';
-  const isHtml = HTML_REGEX.test(bodyText) || contentTypeValue.toLowerCase().includes('text/html');
-  return isHtml || CLOUDFLARE_REGEX.test(bodyText);
+  return CLOUDFLARE_REGEX.test(bodyText);
 }
 
 function logCloudflare(

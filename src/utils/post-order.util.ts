@@ -117,10 +117,12 @@ export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionR
       amount: orderSize,
       price: levelPrice,
     };
+    const orderFingerprint = `${tokenId}:${orderSide}:${levelPrice}:${orderSize}`;
 
     const result = await submissionController.submit({
       sizeUsd: orderValue,
       marketId,
+      orderFingerprint,
       logger,
       now: input.now,
       skipRateLimit: retryCount > 0,
@@ -137,6 +139,10 @@ export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionR
     }
 
     if (result.status === 'skipped') {
+      return result;
+    }
+
+    if (result.statusCode === 403) {
       return result;
     }
 

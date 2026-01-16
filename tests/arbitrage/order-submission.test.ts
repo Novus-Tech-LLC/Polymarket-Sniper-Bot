@@ -30,7 +30,7 @@ test('cloudflare block triggers cooldown and blocks further submits', async () =
     status: 403,
     response: {
       status: 403,
-      data: '<html><body>Sorry, you have been blocked</body></html>',
+      data: '<html><body>Cloudflare - Sorry, you have been blocked</body></html>',
       headers: {
         'cf-ray': 'abc123',
         'content-type': 'text/html',
@@ -50,7 +50,7 @@ test('cloudflare block triggers cooldown and blocks further submits', async () =
   });
 
   assert.equal(firstResult.status, 'failed');
-  assert.equal(firstResult.reason, 'BLOCKED_BY_CLOUDFLARE');
+  assert.equal(firstResult.reason, 'CLOUDFLARE_BLOCK');
   assert.ok(firstResult.blockedUntil);
 
   const secondResult = await controller.submit({
@@ -65,9 +65,9 @@ test('cloudflare block triggers cooldown and blocks further submits', async () =
   });
 
   assert.equal(secondResult.status, 'skipped');
-  assert.equal(secondResult.reason, 'BLOCKED_BY_CLOUDFLARE');
+  assert.equal(secondResult.reason, 'CLOUDFLARE_BLOCK');
   assert.equal(submitCalls, 1);
-  assert.ok(logs.some((line) => line.includes('execution paused due to Cloudflare block until')));
+  assert.ok(logs.some((line) => line.includes('CLOB execution paused due to Cloudflare block until')));
 });
 
 test('tiny orders are skipped before submission', async () => {

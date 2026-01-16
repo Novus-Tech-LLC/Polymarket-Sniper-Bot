@@ -45,8 +45,11 @@ export function resetApiCredsCache(): void {
 function isAuthError(error: unknown): boolean {
   const maybeError = error as { response?: { status?: number }; status?: number; message?: string };
   const status = maybeError?.status ?? maybeError?.response?.status;
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return true;
+  }
+  if (status === 403) {
+    return false;
   }
 
   const message = maybeError?.message?.toLowerCase() ?? '';
