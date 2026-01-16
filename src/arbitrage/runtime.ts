@@ -8,9 +8,11 @@ import { InMemoryStateStore } from './state/state-store';
 import { ArbRiskManager } from './risk/risk-manager';
 import { ArbTradeExecutor } from './executor/trade-executor';
 import { DecisionLogger } from './utils/decision-logger';
+import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
 
 export async function startArbitrageEngine(overrides: Record<string, string | undefined> = {}): Promise<ArbitrageEngine> {
   const logger = new ConsoleLogger();
+  suppressClobOrderbookErrors(logger);
   const config = loadArbConfig(overrides);
 
   const client = await createPolymarketClient({

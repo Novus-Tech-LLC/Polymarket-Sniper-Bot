@@ -6,9 +6,11 @@ import { TradeExecutorService } from '../services/trade-executor.service';
 import { ConsoleLogger } from '../utils/logger.util';
 import { getUsdBalanceApprox, getPolBalance } from '../utils/get-balance.util';
 import { startArbitrageEngine } from '../arbitrage/runtime';
+import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
+  suppressClobOrderbookErrors(logger);
   const mode = String(process.env.MODE ?? process.env.mode ?? 'mempool').toLowerCase();
   logger.info(`Starting Polymarket runtime mode=${mode}`);
 
