@@ -111,6 +111,13 @@ Create a `.env` file in the project root with the following variables:
 | `TRADE_AGGREGATION_WINDOW_SECONDS` | `300` | Time window for aggregating trades (seconds) |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC contract on Polygon |
 | `MONGO_URI` | - | MongoDB connection string (optional) |
+| `OPENVPN_ENABLED` | `false` | Enable OpenVPN setup on startup |
+| `OPENVPN_CONFIG` | - | Full OpenVPN config contents (optional if file mounted) |
+| `OPENVPN_CONFIG_PATH` | `/etc/openvpn/openvpn.conf` | OpenVPN config path |
+| `OPENVPN_AUTH_PATH` | `/etc/openvpn/auth.txt` | OpenVPN auth file path |
+| `OPENVPN_USERNAME` | - | OpenVPN username (requires password) |
+| `OPENVPN_PASSWORD` | - | OpenVPN password (requires username) |
+| `OPENVPN_EXTRA_ARGS` | - | Extra args passed to `openvpn` |
 | `WIREGUARD_ENABLED` | `false` | Enable WireGuard setup on startup |
 | `WIREGUARD_INTERFACE_NAME` | `wg0` | WireGuard interface name |
 | `WIREGUARD_CONFIG_PATH` | `/etc/wireguard/wg0.conf` | Config path written at startup |
@@ -143,6 +150,12 @@ POLYMARKET_API_KEY=your_clob_api_key
 POLYMARKET_API_SECRET=your_clob_api_secret
 POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
 
+# OpenVPN (optional)
+OPENVPN_ENABLED=true
+OPENVPN_CONFIG=client\nproto udp\nremote europe3.vpn.airdns.org 443\nresolv-retry infinite\nnobind\npersist-key\npersist-tun\nremote-cert-tls server\ncipher AES-256-GCM\nauth SHA512\nkey-direction 1\n<ca>\n...\n</ca>\n<tls-auth>\n...\n</tls-auth>\n
+OPENVPN_USERNAME=your_airvpn_username
+OPENVPN_PASSWORD=your_airvpn_password
+
 # WireGuard (optional)
 WIREGUARD_ENABLED=true
 WIREGUARD_INTERFACE_NAME=wg0
@@ -158,8 +171,9 @@ WIREGUARD_PERSISTENT_KEEPALIVE=15
 WIREGUARD_FORCE_RESTART=false
 ```
 
-> Note: WireGuard setup requires the container to run with `NET_ADMIN` and `/dev/net/tun` access (see Docker Compose example) and
-> a writable `/proc/sys/net/ipv4/conf/all/src_valid_mark` (set via `--sysctl net.ipv4.conf.all.src_valid_mark=1` when needed).
+> Note: OpenVPN and WireGuard are mutually exclusive; if both are enabled, OpenVPN takes priority.
+
+> Note: WireGuard setup requires the container to run with `NET_ADMIN` and `/dev/net/tun` access (see Docker Compose example). Device access must be granted at runtime; it cannot be baked into the image.
 > Ensure `ip6tables-restore` is installed in the container if you use IPv6 addresses/allowed IPs; otherwise remove IPv6 entries.
 
 ---

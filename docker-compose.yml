@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
-    sysctls:
-      net.ipv4.conf.all.src_valid_mark: "1"
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
@@ -50,6 +48,13 @@ services:
       - ARB_DECISIONS_LOG=/data/arb_decisions.jsonl
       - ARB_KILL_SWITCH_FILE=/data/KILL
       - ARB_SNAPSHOT_STATE=true
+      - OPENVPN_ENABLED=false
+      - OPENVPN_CONFIG=
+      - OPENVPN_CONFIG_PATH=/etc/openvpn/openvpn.conf
+      - OPENVPN_AUTH_PATH=/etc/openvpn/auth.txt
+      - OPENVPN_USERNAME=
+      - OPENVPN_PASSWORD=
+      - OPENVPN_EXTRA_ARGS=
       - WIREGUARD_ENABLED=false
       - WIREGUARD_INTERFACE_NAME=wg0
       - WIREGUARD_ADDRESS=10.151.22.111/32,fd7d:76ee:e68f:a993:c4ca:f41:f871:35b4/128

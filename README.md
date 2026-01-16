@@ -366,6 +366,31 @@ docker run --env-file .env polymarket-sniper-bot
 
 Enable WireGuard if your RPC or Polymarket connectivity requires a VPN tunnel. The bot can build a config from env vars or accept a full config blob.
 
+### OpenVPN (optional)
+
+Use OpenVPN if your provider ships `.ovpn` configs (e.g., AirVPN). OpenVPN and WireGuard are mutually exclusive; if both are enabled, OpenVPN takes priority.
+
+**Supported env vars**
+
+- `OPENVPN_ENABLED` (default `false`)
+- `OPENVPN_CONFIG` (full config contents; optional if you mount a config file)
+- `OPENVPN_CONFIG_PATH` (default `/etc/openvpn/openvpn.conf`)
+- `OPENVPN_AUTH_PATH` (default `/etc/openvpn/auth.txt`)
+- `OPENVPN_USERNAME`
+- `OPENVPN_PASSWORD`
+- `OPENVPN_EXTRA_ARGS` (extra args passed to `openvpn`, e.g. `--verb 3`)
+
+**Example (AirVPN-style config + env auth)**
+
+```env
+OPENVPN_ENABLED=true
+OPENVPN_CONFIG=client\nproto udp\nremote europe3.vpn.airdns.org 443\nresolv-retry infinite\nnobind\npersist-key\npersist-tun\nremote-cert-tls server\ncipher AES-256-GCM\nauth SHA512\nkey-direction 1\n<ca>\n...\n</ca>\n<tls-auth>\n...\n</tls-auth>\n
+OPENVPN_USERNAME=your_airvpn_username
+OPENVPN_PASSWORD=your_airvpn_password
+```
+
+> Docker: OpenVPN requires `NET_ADMIN` and `/dev/net/tun` access (see `docker-compose.yml`). Device access must be granted at runtime; it cannot be baked into the image.
+
 **Supported env vars**
 
 - `WIREGUARD_ENABLED` (default `false`)
@@ -400,8 +425,7 @@ WIREGUARD_PERSISTENT_KEEPALIVE=15
 WIREGUARD_FORCE_RESTART=false
 ```
 
-> Docker: WireGuard requires `NET_ADMIN` and `/dev/net/tun` access (see `docker-compose.yml`) and a writable
-> `/proc/sys/net/ipv4/conf/all/src_valid_mark` (set via `--sysctl net.ipv4.conf.all.src_valid_mark=1` when needed).
+> Docker: WireGuard requires `NET_ADMIN` and `/dev/net/tun` access (see `docker-compose.yml`). Device access must be granted at runtime; it cannot be baked into the image.
 > Ensure `ip6tables-restore` is available in the container if you use IPv6 addresses/allowed IPs; otherwise remove IPv6 entries.
 
 ### Presets

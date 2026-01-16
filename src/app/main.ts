@@ -8,11 +8,15 @@ import { getUsdBalanceApprox, getPolBalance } from '../utils/get-balance.util';
 import { startArbitrageEngine } from '../arbitrage/runtime';
 import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
 import { startWireguard } from '../utils/wireguard.util';
+import { startOpenvpn } from '../utils/openvpn.util';
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
   suppressClobOrderbookErrors(logger);
-  await startWireguard(logger);
+  const openvpnStarted = await startOpenvpn(logger);
+  if (!openvpnStarted) {
+    await startWireguard(logger);
+  }
   const cliOverrides = parseCliOverrides(process.argv.slice(2));
   const mode = String(process.env.MODE ?? process.env.mode ?? 'mempool').toLowerCase();
   logger.info(`Starting Polymarket runtime mode=${mode}`);
