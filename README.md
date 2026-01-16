@@ -168,24 +168,18 @@ npm run build
 
 ### Configuration
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (preset-first quick start):
 
 ```env
-# Required
-TARGET_ADDRESSES=0xabc...,0xdef...    # Target addresses to frontrun (comma-separated)
-PUBLIC_KEY=your_bot_wallet             # Public address of your bot wallet
-PRIVATE_KEY=your_bot_wallet_privatekey # Private key of above address
-RPC_URL=https://polygon-mainnet...     # Polygon RPC endpoint
-
-# Optional
-FETCH_INTERVAL=1                       # Polling interval (seconds)
-MIN_TRADE_SIZE_USD=100                 # Minimum trade size to frontrun (USD)
-# Legacy (supported with warning): MIN_TRADE_SIZE, MIN_TRADE_USDC, MIN_TRADE_SIZE_USDC
-FRONTRUN_SIZE_MULTIPLIER=0.5           # Frontrun size as % of target (0.0-1.0)
-GAS_PRICE_MULTIPLIER=1.2               # Gas price multiplier for priority
-COLLATERAL_TOKEN_ADDRESS=0x2791...     # USDC / USDC.e contract
-COLLATERAL_TOKEN_DECIMALS=6           # Collateral token decimals
+RPC_URL=https://polygon-mainnet...
+PRIVATE_KEY=your_bot_wallet_privatekey
+COLLATERAL_TOKEN_ADDRESS=0x2791...
+MODE=both
+ARB_PRESET=safe_small
+MONITOR_PRESET=balanced
 ```
+
+> ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES` and `PUBLIC_KEY`. The quick start above is intentionally minimal to highlight presets.
 
 ## 🧮 Arbitrage Mode (RAM + tmpfs)
 
@@ -206,50 +200,19 @@ MODE=both npm run dev
 
 `MODE` controls whether the arbitrage engine is enabled; `MODE=arb` or `MODE=both` turns it on.
 
-### Example `.env` for Arbitrage
+### Example `.env` for Arbitrage (Preset-based)
 
 ```env
 MODE=arb
 RPC_URL=https://polygon-mainnet...
 PRIVATE_KEY=your_wallet_private_key
 PUBLIC_KEY=your_wallet_public_key
-POLYMARKET_API_KEY=optional_api_key
-POLYMARKET_API_SECRET=optional_api_secret
-POLYMARKET_API_PASSPHRASE=optional_api_passphrase
+COLLATERAL_TOKEN_ADDRESS=0x2791...
+ARB_PRESET=classic
 
-# Collateral configuration
-COLLATERAL_TOKEN_ADDRESS=0x2791...     # USDC or USDC.e
-COLLATERAL_TOKEN_DECIMALS=6
-
-# Arbitrage controls
+# Optional safe overrides (see Advanced Overrides)
 ARB_DRY_RUN=true
-ARB_LIVE_TRADING=                     # must equal I_UNDERSTAND_THE_RISKS to trade
-ARB_SCAN_INTERVAL_MS=3000
-ARB_MIN_EDGE_BPS=300
-ARB_MIN_PROFIT_USD=1
-ARB_MIN_LIQUIDITY_USD=10000
-ARB_MAX_SPREAD_BPS=100
-ARB_MAX_HOLD_MINUTES=120
-ARB_TRADE_BASE_USD=3
-ARB_MAX_POSITION_USD=15
 ARB_MAX_WALLET_EXPOSURE_USD=50
-ARB_SIZE_SCALING=sqrt
-ARB_SLIPPAGE_BPS=30
-ARB_FEE_BPS=10
-ARB_STARTUP_COOLDOWN_SECONDS=120
-ARB_MARKET_COOLDOWN_SECONDS=900
-ARB_MAX_TRADES_PER_HOUR=4
-ARB_MAX_CONSECUTIVE_FAILURES=2
-ARB_MAX_CONCURRENT_TRADES=1
-ARB_MIN_POL_GAS=3
-ARB_APPROVE_UNLIMITED=false
-ARB_STATE_DIR=/data
-ARB_DECISIONS_LOG=/data/arb_decisions.jsonl  # set empty to disable
-ARB_KILL_SWITCH_FILE=/data/KILL
-ARB_SNAPSHOT_STATE=true
-ARB_DEBUG_TOP_N=0                          # set >0 to print top-N candidate markets
-ARB_UNITS_AUTO_FIX=true                   # auto-fix cents -> probability units
-ARB_LOG_EVERY_MARKET=false                # log every market decision to JSONL
 ```
 
 ### How to Find Your Collateral Token (USDC vs USDC.e)
@@ -315,12 +278,15 @@ If you don’t set this, the bot defaults to Polygon USDC, which **may not match
 
 ### Docker Compose (tmpfs `/data`)
 
+`/data` can be mounted as a **tmpfs** for faster, volatile state. Contents are **ephemeral** and cleared on container restart.
+
 ```yaml
 services:
   polymarket-arb:
     build: .
     environment:
       - MODE=arb
+      - ARB_PRESET=safe_small
       - ARB_DRY_RUN=true
       - RPC_URL=${RPC_URL}
       - PRIVATE_KEY=${PRIVATE_KEY}
@@ -371,27 +337,70 @@ docker run --env-file .env polymarket-sniper-bot
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `TARGET_ADDRESSES` | Comma-separated target addresses to frontrun | `0xabc...,0xdef...` |
-| `PUBLIC_KEY` | Your Polygon wallet address | `your_wallet_address` |
-| `PRIVATE_KEY` | Your wallet private key | `your_private_key` |
 | `RPC_URL` | Polygon RPC endpoint (must support pending tx monitoring) | `https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID` |
+| `PRIVATE_KEY` | Your wallet private key | `your_private_key` |
+| `COLLATERAL_TOKEN_ADDRESS` | USDC / USDC.e contract | `0x2791...` |
+| `MODE` | `mempool`, `arb`, or `both` | `both` |
+| `ARB_PRESET` | Arbitrage preset name | `safe_small` |
+| `MONITOR_PRESET` | Monitor preset name | `balanced` |
+| `TARGET_ADDRESSES` | (Monitor only) Comma-separated addresses to monitor | `0xabc...,0xdef...` |
+| `PUBLIC_KEY` | (Monitor only) Your Polygon wallet address | `your_wallet_address` |
 
-### Optional Configuration
+### Presets
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FETCH_INTERVAL` | `1` | Polling frequency in seconds |
-| `MIN_TRADE_SIZE_USD` | `100` | Minimum trade size to frontrun (USD) |
-| `MIN_TRADE_SIZE` | (legacy) | Legacy minimum trade size (warns; prefer `MIN_TRADE_SIZE_USD`) |
-| `MIN_TRADE_USDC` | (legacy) | Legacy minimum trade size (warns; prefer `MIN_TRADE_SIZE_USD`) |
-| `MIN_TRADE_SIZE_USDC` | (legacy) | Legacy minimum trade size (warns; prefer `MIN_TRADE_SIZE_USD`) |
-| `FRONTRUN_SIZE_MULTIPLIER` | `0.5` | Frontrun size as % of target (0.0-1.0) |
-| `GAS_PRICE_MULTIPLIER` | `1.2` | Gas price multiplier for priority (e.g., 1.2 = 20% higher) |
-| `RETRY_LIMIT` | `3` | Maximum retry attempts for failed orders |
-| `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC contract on Polygon |
-| `ARB_DEBUG_TOP_N` | `0` | Log top-N pre-filter arbitrage candidates per scan |
-| `ARB_UNITS_AUTO_FIX` | `true` | Auto-fix cents vs probability unit mismatches |
-| `ARB_LOG_EVERY_MARKET` | `false` | Write decisions for every market to JSONL |
+Defaults: `ARB_PRESET=safe_small` and `MONITOR_PRESET=balanced`.
+
+**Arbitrage presets**
+
+| Name | What it does | Frequency | Risk |
+|------|---------------|-----------|------|
+| `off` | Disables arbitrage loop | N/A | None |
+| `safe_small` | Small sizing + conservative caps | 2s scan | Low |
+| `classic` | Balanced sizing and caps | 2s scan | Medium |
+| `micro` | Faster scans, lower edge threshold | 1.5s scan | Medium |
+| `quality` | Higher edge + liquidity filters | 2.5s scan | Low |
+| `late` | Faster scans, more spread tolerance | 1s scan | Medium |
+
+**Monitor presets**
+
+| Name | What it does | Frequency | Risk |
+|------|---------------|-----------|------|
+| `off` | Disables mempool monitor | N/A | None |
+| `conservative` | Higher minimum trade size | 2s poll | Low |
+| `balanced` | Default hybrid thresholds | 2s poll | Medium |
+| `active` | Lower minimum trade size | 1s poll | Higher |
+| `test` | Very low thresholds for testing | 2s poll | Highest |
+
+### Advanced Overrides (Allowlist)
+
+Presets are the default. Only a short list of overrides are allowed unless you explicitly enable unsafe overrides.
+
+**Arbitrage safe overrides**
+- `ARB_DRY_RUN`
+- `ARB_LIVE_TRADING`
+- `ARB_MAX_WALLET_EXPOSURE_USD`
+- `ARB_MAX_POSITION_USD`
+- `ARB_MAX_TRADES_PER_HOUR`
+- `ARB_KILL_SWITCH_FILE`
+- `ARB_DECISIONS_LOG`
+- `ARB_MIN_POL_GAS`
+- `ARB_SCAN_INTERVAL_MS`
+
+**Monitor safe overrides**
+- `MIN_TRADE_SIZE_USD`
+- `TRADE_MULTIPLIER`
+- `FETCH_INTERVAL`
+- `GAS_PRICE_MULTIPLIER`
+
+To override anything else, set `ARB_ALLOW_UNSAFE_OVERRIDES=true`. The bot will warn when unsafe or legacy overrides are used.
+
+### Legacy Environment Variables
+
+Legacy `ARB_*` and monitor thresholds still work, but the README intentionally steers you to presets. If legacy vars are detected without a preset, the bot switches to `preset=custom` and logs a warning.
+
+### Changelog (Recent)
+
+- Added preset-based configuration for arbitrage + monitor modes to reduce env tuning.
 
 ### Finding Target Wallets
 

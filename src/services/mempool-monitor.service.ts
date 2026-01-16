@@ -45,8 +45,9 @@ export class MempoolMonitorService {
   async start(): Promise<void> {
     const { logger, env } = this.deps;
     logger.info('Starting Polymarket Frontrun Bot - Mempool Monitor');
+    const overridesInfo = env.overridesApplied.length ? ` overrides=${env.overridesApplied.join(',')}` : '';
     logger.info(
-      `[Monitor] Config min_trade_usd=${env.minTradeSizeUsd.toFixed(2)} recent_window=${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s fetch_interval=${env.fetchIntervalSeconds}s targets=${env.targetAddresses.length}`,
+      `[Monitor] Preset=${env.presetName} min_trade_usd=${env.minTradeSizeUsd.toFixed(2)} recent_window=${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s fetch_interval=${env.fetchIntervalSeconds}s trade_multiplier=${env.tradeMultiplier} gas_multiplier=${env.gasPriceMultiplier} targets=${env.targetAddresses.length}${overridesInfo}`,
     );
     logger.debug(`Target addresses: ${env.targetAddresses.map((addr) => addr.toLowerCase()).join(', ') || 'none'}`);
     

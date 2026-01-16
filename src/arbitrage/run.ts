@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { parseCliOverrides } from './config';
+import { parseCliOverrides } from '../config/loadConfig';
 import { startArbitrageEngine } from './runtime';
 
 async function run(): Promise<void> {

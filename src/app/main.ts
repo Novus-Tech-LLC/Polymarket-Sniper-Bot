@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { loadEnv } from '../config/env';
+import { loadMonitorConfig, parseCliOverrides } from '../config/loadConfig';
 import { createPolymarketClient } from '../infrastructure/clob-client.factory';
 import { MempoolMonitorService } from '../services/mempool-monitor.service';
 import { TradeExecutorService } from '../services/trade-executor.service';
@@ -11,18 +11,24 @@ import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
   suppressClobOrderbookErrors(logger);
+  const cliOverrides = parseCliOverrides(process.argv.slice(2));
   const mode = String(process.env.MODE ?? process.env.mode ?? 'mempool').toLowerCase();
   logger.info(`Starting Polymarket runtime mode=${mode}`);
 
   if (mode === 'arb' || mode === 'both') {
-    await startArbitrageEngine();
+    await startArbitrageEngine(cliOverrides);
   }
 
   if (mode !== 'mempool' && mode !== 'both') {
     return;
   }
 
-  const env = loadEnv();
+  const env = loadMonitorConfig(cliOverrides);
+
+  if (!env.enabled) {
+    logger.info(`[Monitor] Preset=${env.presetName} disabled; skipping monitor runtime.`);
+    return;
+  }
 
   const client = await createPolymarketClient({
     rpcUrl: env.rpcUrl,
