@@ -297,7 +297,7 @@ export const runClobAuthPreflight = async (params: {
 
   try {
     const response = await params.client.getBalanceAllowance();
-    const status = response?.status;
+    const status = response ? 200 : undefined;
     if (status === 200) {
       params.logger.info('[CLOB][Preflight] OK');
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
