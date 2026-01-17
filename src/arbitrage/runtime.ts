@@ -28,7 +28,7 @@ export async function startArbitrageEngine(
     return null;
   }
 
-  if (!config.clobCredsComplete) {
+  if (!config.clobCredsComplete && !config.clobDeriveEnabled) {
     logger.warn('CLOB creds incomplete');
   }
 
@@ -81,10 +81,9 @@ export async function startArbitrageEngine(
           privateKeyPresent: Boolean(config.privateKey),
           force: process.env.CLOB_AUTH_FORCE === 'true',
         });
-        if (preflight && !preflight.ok && !preflight.forced) {
+        if (preflight && !preflight.ok) {
           config.detectOnly = true;
           logger.warn('[CLOB] Auth preflight failed; switching to detect-only.');
-          logger.warn('[CLOB] Set CLOB_AUTH_FORCE=true to override detect-only.');
           logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
         }
       }

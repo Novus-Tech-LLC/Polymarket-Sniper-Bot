@@ -177,13 +177,14 @@ COLLATERAL_TOKEN_ADDRESS=0x2791...
 MODE=both
 ARB_PRESET=safe_small
 MONITOR_PRESET=balanced
+CLOB_DERIVE_CREDS=true
 POLYMARKET_API_KEY=your_clob_api_key
 POLYMARKET_API_SECRET=your_clob_api_secret
 POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
 ```
 
 > ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES` and `PUBLIC_KEY`. The quick start above is intentionally minimal to highlight presets.
-> ✅ **Note:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` are required for CLOB access.
+> ✅ **Note:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` are required for CLOB access unless `CLOB_DERIVE_CREDS=true` is set to derive credentials from `PRIVATE_KEY`.
 
 ## CLOB Auth Diagnostics
 
@@ -206,7 +207,7 @@ If preflight fails with 401, the logs will classify the likely root cause as one
 - `MESSAGE_CANONICALIZATION` (path/body mismatch in signature inputs)
 - `SERVER_REJECTED_CREDS` (credentials rejected server-side)
 
-When a 401 occurs, the runtime automatically switches to detect-only mode. Set `CLOB_AUTH_FORCE=true` if you need to override this behavior for debugging.
+When a 401 occurs, the runtime automatically switches to detect-only mode.
 
 ## 🧮 Arbitrage Mode (RAM + tmpfs)
 
@@ -236,6 +237,7 @@ PRIVATE_KEY=your_wallet_private_key
 PUBLIC_KEY=your_wallet_public_key
 COLLATERAL_TOKEN_ADDRESS=0x2791...
 ARB_PRESET=classic
+CLOB_DERIVE_CREDS=true
 POLYMARKET_API_KEY=your_clob_api_key
 POLYMARKET_API_SECRET=your_clob_api_secret
 POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase

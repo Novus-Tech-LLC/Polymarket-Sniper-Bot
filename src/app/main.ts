@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!env.clobCredsComplete) {
+  if (!env.clobCredsComplete && !env.clobDeriveEnabled) {
     logger.warn('CLOB creds incomplete');
   }
 
@@ -90,10 +90,9 @@ async function main(): Promise<void> {
           privateKeyPresent: Boolean(env.privateKey),
           force: process.env.CLOB_AUTH_FORCE === 'true',
         });
-        if (preflight && !preflight.ok && !preflight.forced) {
+        if (preflight && !preflight.ok) {
           env.detectOnly = true;
           logger.warn('[CLOB] Auth preflight failed; switching to detect-only.');
-          logger.warn('[CLOB] Set CLOB_AUTH_FORCE=true to override detect-only.');
           logger.warn(formatClobAuthFailureHint(env.clobDeriveEnabled));
         }
       }

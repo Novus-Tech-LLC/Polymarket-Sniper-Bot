@@ -312,7 +312,13 @@ const CLOB_DERIVE_KEYS = [
   'POLY_DERIVE_API_KEY',
 ];
 
-const readClobCreds = (overrides?: Overrides): { key?: string; secret?: string; passphrase?: string } => {
+const readClobCreds = (
+  overrides?: Overrides,
+  options?: { deriveEnabled?: boolean },
+): { key?: string; secret?: string; passphrase?: string } => {
+  if (options?.deriveEnabled) {
+    return {};
+  }
   const keyEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.key, overrides);
   const secretEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.secret, overrides);
   const passphraseEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.passphrase, overrides);
@@ -325,10 +331,18 @@ const readClobCreds = (overrides?: Overrides): { key?: string; secret?: string; 
 
 const readClobDeriveEnabled = (overrides?: Overrides): boolean => readBoolFromKeys(CLOB_DERIVE_KEYS, overrides);
 
-const buildClobCredsChecklist = (overrides?: Overrides): ClobCredsChecklist => {
+const buildClobCredsChecklist = (overrides?: Overrides, deriveEnabled?: boolean): ClobCredsChecklist => {
   const keyEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.key, overrides);
   const secretEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.secret, overrides);
   const passphraseEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.passphrase, overrides);
+  if (deriveEnabled) {
+    return {
+      key: { present: false, source: keyEntry.source ? `${keyEntry.source} (ignored)` : undefined },
+      secret: { present: false, source: secretEntry.source ? `${secretEntry.source} (ignored)` : undefined },
+      passphrase: { present: false, source: passphraseEntry.source ? `${passphraseEntry.source} (ignored)` : undefined },
+      deriveEnabled: true,
+    };
+  }
   return {
     key: { present: Boolean(keyEntry.value), source: keyEntry.source },
     secret: { present: Boolean(secretEntry.value), source: secretEntry.source },
@@ -469,10 +483,10 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
   const presetLookup = getPresetName('ARB_PRESET', DEFAULT_ARB_PRESET, ARB_LEGACY_KEYS, overrides);
   let presetName = presetLookup.presetName;
   const { legacyKeysDetected } = presetLookup;
-  const clobCreds = readClobCreds(overrides);
-  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
   const clobDeriveEnabled = readClobDeriveEnabled(overrides);
-  const clobCredsChecklist = buildClobCredsChecklist(overrides);
+  const clobCreds = readClobCreds(overrides, { deriveEnabled: clobDeriveEnabled });
+  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
+  const clobCredsChecklist = buildClobCredsChecklist(overrides, clobDeriveEnabled);
 
   if (presetName === 'custom') {
     warnLegacyKeys('ARB', legacyKeysDetected);
@@ -526,7 +540,7 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
     rpcUrl: required('RPC_URL', overrides),
     privateKey: required('PRIVATE_KEY', overrides),
     proxyWallet: readEnv('PUBLIC_KEY', overrides),
-    detectOnly: !clobCredsComplete,
+    detectOnly: !clobCredsComplete && !clobDeriveEnabled,
     clobCredsComplete,
     clobDeriveEnabled,
     clobCredsChecklist,
@@ -585,10 +599,10 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
   );
   let presetName = monitorPresetLookup.presetName;
   const { legacyKeysDetected } = monitorPresetLookup;
-  const clobCreds = readClobCreds(overrides);
-  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
   const clobDeriveEnabled = readClobDeriveEnabled(overrides);
-  const clobCredsChecklist = buildClobCredsChecklist(overrides);
+  const clobCreds = readClobCreds(overrides, { deriveEnabled: clobDeriveEnabled });
+  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
+  const clobCredsChecklist = buildClobCredsChecklist(overrides, clobDeriveEnabled);
 
   if (presetName === 'custom') {
     warnLegacyKeys('MONITOR', legacyKeysDetected);
@@ -610,7 +624,7 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     privateKey: '',
     mongoUri: readEnv('MONGO_URI', overrides),
     rpcUrl: '',
-    detectOnly: !clobCredsComplete,
+    detectOnly: !clobCredsComplete && !clobDeriveEnabled,
     clobCredsComplete,
     clobDeriveEnabled,
     clobCredsChecklist,

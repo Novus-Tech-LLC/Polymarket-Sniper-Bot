@@ -93,9 +93,9 @@ Create a `.env` file in the project root with the following variables:
 | `PUBLIC_KEY` | Your Polygon wallet address | `your_wallet_address` |
 | `PRIVATE_KEY` | Your wallet private key | `your_private_key` |
 | `RPC_URL` | Polygon RPC endpoint (must support pending tx monitoring) | `https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID`|
-| `POLYMARKET_API_KEY` | Polymarket CLOB API key | `your_clob_api_key` |
-| `POLYMARKET_API_SECRET` | Polymarket CLOB API secret | `your_clob_api_secret` |
-| `POLYMARKET_API_PASSPHRASE` | Polymarket CLOB API passphrase | `your_clob_api_passphrase` |
+| `POLYMARKET_API_KEY` | Polymarket CLOB API key (omit if deriving) | `your_clob_api_key` |
+| `POLYMARKET_API_SECRET` | Polymarket CLOB API secret (omit if deriving) | `your_clob_api_secret` |
+| `POLYMARKET_API_PASSPHRASE` | Polymarket CLOB API passphrase (omit if deriving) | `your_clob_api_passphrase` |
 
 #### Optional
 
@@ -109,6 +109,7 @@ Create a `.env` file in the project root with the following variables:
 | `RETRY_LIMIT` | `3` | Maximum retry attempts for failed orders |
 | `TRADE_AGGREGATION_ENABLED` | `false` | Enable trade aggregation |
 | `TRADE_AGGREGATION_WINDOW_SECONDS` | `300` | Time window for aggregating trades (seconds) |
+| `CLOB_DERIVE_CREDS` | `false` | Derive CLOB credentials from `PRIVATE_KEY` (ignores manual API keys) |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC contract on Polygon |
 | `MONGO_URI` | - | MongoDB connection string (optional) |
 | `OPENVPN_ENABLED` | `false` | Enable OpenVPN setup on startup |

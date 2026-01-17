@@ -16,6 +16,7 @@ services:
       - RPC_URL=https://polygon-mainnet.infura.io/v3/your_project_id
       - COLLATERAL_TOKEN_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
       - COLLATERAL_TOKEN_DECIMALS=6
+      - CLOB_DERIVE_CREDS=true
       - POLYMARKET_API_KEY=your_clob_api_key
       - POLYMARKET_API_SECRET=your_clob_api_secret
       - POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase

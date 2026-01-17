@@ -232,7 +232,7 @@ export async function createPolymarketClient(
         creds = derived;
         derivedCreds = derived;
         const { apiKeyDigest, keyIdSuffix } = getApiKeyDiagnostics(derived.key);
-        input.logger?.info(`[CLOB] derived creds apiKeyDigest=${apiKeyDigest} keyIdSuffix=${keyIdSuffix}`);
+        input.logger?.info(`[CLOB] derived creds derivedKeyDigest=${apiKeyDigest} derivedKeySuffix=${keyIdSuffix}`);
       }
     } catch (err) {
       input.logger?.warn(`[CLOB] Failed to derive API creds: ${sanitizeErrorMessage(err)}`);
