@@ -131,8 +131,25 @@ export const fetchApprovalSnapshot = async (params: {
   );
 
   params.logger.info(
-    `[Preflight][Approvals] USDC balance=${utils.formatUnits(usdcBalance, 6)} owner=${params.owner} spenders=${usdcSpenders.join(',') || 'none'} operators=${erc1155Operators.join(',') || 'none'}`,
+    `[Preflight][Approvals] USDC balance=${utils.formatUnits(usdcBalance, 6)} owner=${params.owner}`,
   );
+  
+  // Log detailed allowance state for each spender
+  allowances.forEach(({ spender, allowance }) => {
+    const allowanceFormatted = utils.formatUnits(allowance, 6);
+    const sufficient = allowance.gt(0) ? '✅' : '❌';
+    params.logger.info(
+      `[Preflight][Approvals][USDC] ${sufficient} spender=${spender} allowance=${allowanceFormatted}`,
+    );
+  });
+  
+  // Log detailed ERC1155 approval state for each operator
+  erc1155Approvals.forEach(({ operator, approved }) => {
+    const status = approved ? '✅' : '❌';
+    params.logger.info(
+      `[Preflight][Approvals][ERC1155] ${status} operator=${operator} approvedForAll=${approved}`,
+    );
+  });
 
   return {
     usdcBalance,

@@ -160,20 +160,38 @@ const fetchBalanceAllowance = async (
     tokenId,
   });
   logBalanceAllowanceRequest({ logger, endpoint: BALANCE_ALLOWANCE_ENDPOINT, signedPath, paramsKeys });
-  const response = await client.getBalanceAllowance(requestParams);
-  const snapshot = {
-    assetType,
-    tokenId,
-    balanceUsd: parseUsdValue((response as { balance?: string }).balance),
-    allowanceUsd: parseUsdValue((response as { allowance?: string }).allowance),
-  };
-  balanceAllowanceCache.set(cacheKey, { snapshot, fetchedAt: now });
-  if (snapshot.allowanceUsd <= 0 && assetType === AssetType.COLLATERAL) {
-    zeroAllowanceCooldown.set(cacheKey, { until: now + ZERO_ALLOWANCE_COOLDOWN_MS, lastLogged: now });
-  } else if (assetType === AssetType.COLLATERAL) {
-    zeroAllowanceCooldown.delete(cacheKey);
+  
+  try {
+    const response = await client.getBalanceAllowance(requestParams);
+    const snapshot = {
+      assetType,
+      tokenId,
+      balanceUsd: parseUsdValue((response as { balance?: string }).balance),
+      allowanceUsd: parseUsdValue((response as { allowance?: string }).allowance),
+    };
+    balanceAllowanceCache.set(cacheKey, { snapshot, fetchedAt: now });
+    if (snapshot.allowanceUsd <= 0 && assetType === AssetType.COLLATERAL) {
+      zeroAllowanceCooldown.set(cacheKey, { until: now + ZERO_ALLOWANCE_COOLDOWN_MS, lastLogged: now });
+    } else if (assetType === AssetType.COLLATERAL) {
+      zeroAllowanceCooldown.delete(cacheKey);
+    }
+    return snapshot;
+  } catch (error) {
+    // Check for invalid asset type error (400 bad request)
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    const message = (error as { response?: { data?: unknown } })?.response?.data;
+    const messageStr = typeof message === 'string' ? message : JSON.stringify(message);
+    
+    if (status === 400 && messageStr?.toLowerCase().includes('invalid asset type')) {
+      logger.error(
+        `[CLOB] Invalid asset_type parameter: asset_type=${requestParams.asset_type} token_id=${requestParams.token_id ?? 'none'}. This is a configuration error.`,
+      );
+      throw new Error(`Invalid asset_type: ${requestParams.asset_type}. Check CLOB API documentation.`);
+    }
+    
+    // Re-throw other errors
+    throw error;
   }
-  return snapshot;
 };
 
 const isSnapshotSufficient = (snapshot: BalanceAllowanceSnapshot, requiredUsd: number): boolean =>
