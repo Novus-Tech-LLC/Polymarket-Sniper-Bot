@@ -69,6 +69,7 @@ export const ensureTradingReady = async (
     params.logger.warn('[Preflight] ARB_LIVE_TRADING not enabled; trading disabled.');
   }
 
+  let authOk = false;
   if (params.clobCredsComplete || params.clobDeriveEnabled) {
     try {
       const matrixEnabled = readEnv('CLOB_PREFLIGHT_MATRIX') === 'true'
@@ -82,6 +83,9 @@ export const ensureTradingReady = async (
         });
         if (matrix && !matrix.ok) {
           detectOnly = true;
+          authOk = false;
+        } else if (matrix && matrix.ok) {
+          authOk = true;
         }
       } else {
         const preflight = await runClobAuthPreflight({
@@ -96,10 +100,14 @@ export const ensureTradingReady = async (
         });
         if (preflight && !preflight.ok && (preflight.status === 401 || preflight.status === 403)) {
           detectOnly = true;
+          authOk = false;
           params.logger.warn('[CLOB] Auth preflight failed; switching to detect-only.');
           params.logger.warn(formatClobAuthFailureHint(params.clobDeriveEnabled));
         } else if (preflight && !preflight.ok) {
+          authOk = false;
           params.logger.warn('[CLOB] Auth preflight failed; continuing with order submissions.');
+        } else if (preflight && preflight.ok) {
+          authOk = true;
         }
       }
     } catch (err) {
@@ -108,6 +116,7 @@ export const ensureTradingReady = async (
         params.logger.warn(`[CLOB] Auth preflight transient failure; continuing. ${sanitizeErrorMessage(err)}`);
       } else if (isAuthError(err)) {
         detectOnly = true;
+        authOk = false;
         params.logger.warn(`[CLOB] Auth preflight failed; switching to detect-only. ${sanitizeErrorMessage(err)}`);
         params.logger.warn(formatClobAuthFailureHint(params.clobDeriveEnabled));
       } else {
@@ -144,7 +153,7 @@ export const ensureTradingReady = async (
       effectiveTradingAddress: tradingAddress,
       relayerEnabled: relayer.enabled,
       approvalsOk: false,
-      authOk: params.clobCredsComplete || params.clobDeriveEnabled,
+      authOk,
       readyToTrade: false,
     });
     (params.client as ClobClient & { relayerContext?: ReturnType<typeof createRelayerContext> }).relayerContext = relayer;
@@ -188,7 +197,6 @@ export const ensureTradingReady = async (
     approvalsOk = false;
   }
 
-  const authOk = params.clobCredsComplete || params.clobDeriveEnabled;
   const readyToTrade = !detectOnly && approvalsOk && authOk;
 
   params.logger.info(

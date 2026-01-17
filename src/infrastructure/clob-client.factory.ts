@@ -165,6 +165,33 @@ const canDetectCreateApiKeyFailure = (error: unknown): boolean => {
   return message.toLowerCase().includes('could not create api key');
 };
 
+const verifyCredsWithClient = async (
+  creds: ApiKeyCreds,
+  wallet: Wallet,
+  logger?: Logger
+): Promise<boolean> => {
+  try {
+    const verifyClient = new ClobClient(
+      POLYMARKET_API.BASE_URL,
+      Chain.POLYGON,
+      wallet,
+      creds,
+      SignatureType.EOA,
+    );
+    await verifyClient.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+    return true;
+  } catch (error) {
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    if (status === 401 || status === 403) {
+      logger?.warn(`[CLOB] Credential verification failed: ${status} Unauthorized/Invalid api key`);
+      return false;
+    }
+    // For other errors (network issues, etc.), assume credentials might be valid
+    logger?.warn(`[CLOB] Credential verification encountered error: ${sanitizeErrorMessage(error)}`);
+    throw error;
+  }
+};
+
 const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCreds | undefined> => {
   const signerAddress = await wallet.getAddress();
   
@@ -176,9 +203,28 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
   
   const diskCached = loadCachedCreds({ signerAddress, logger });
   if (diskCached) {
-    cachedDerivedCreds = diskCached;
-    logger?.info('[CLOB] Using disk-cached derived credentials.');
-    return diskCached;
+    // Verify cached credentials before using them
+    logger?.info('[CLOB] Verifying disk-cached credentials...');
+    try {
+      const isValid = await verifyCredsWithClient(diskCached, wallet, logger);
+      if (isValid) {
+        cachedDerivedCreds = diskCached;
+        logger?.info('[CLOB] Using disk-cached derived credentials (verified).');
+        return diskCached;
+      } else {
+        // Cached credentials are invalid (401/403), clear cache and retry
+        logger?.warn('[CLOB] Cached credentials invalid; clearing cache and retrying derive.');
+        const { clearCachedCreds } = await import('../utils/credential-storage.util');
+        clearCachedCreds(logger);
+        cachedDerivedCreds = null;
+        // Fall through to derive new credentials
+      }
+    } catch (error) {
+      // Verification error (not 401/403), treat as transient and use cached creds
+      logger?.warn('[CLOB] Credential verification error; using cached credentials anyway.');
+      cachedDerivedCreds = diskCached;
+      return diskCached;
+    }
   }
   
   const deriveClient = new ClobClient(
@@ -233,25 +279,42 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
     const derived = deriveFn.create_or_derive_api_creds
       ? await deriveFn.create_or_derive_api_creds()
       : await deriveFn.createOrDeriveApiKey?.();
-    if (derived?.key && derived?.secret && derived?.passphrase) {
-      cachedDerivedCreds = derived;
-      saveCachedCreds({ creds: derived, signerAddress, logger });
-      logger?.info('[CLOB] Successfully created/derived API credentials.');
+    
+    // Validate response contains valid credentials before marking success
+    if (!derived || !derived.key || !derived.secret || !derived.passphrase) {
+      logger?.error('[CLOB] API key creation returned incomplete credentials (missing key/secret/passphrase)');
+      logger?.error(`[CLOB] Response: key=${Boolean(derived?.key)} secret=${Boolean(derived?.secret)} passphrase=${Boolean(derived?.passphrase)}`);
+      return attemptLocalDerive();
     }
-    return cachedDerivedCreds ?? derived;
+    
+    // Valid credentials received, save and return
+    cachedDerivedCreds = derived;
+    saveCachedCreds({ creds: derived, signerAddress, logger });
+    logger?.info('[CLOB] Successfully created/derived API credentials.');
+    return cachedDerivedCreds;
   } catch (error) {
     // Log detailed error information
     const errorDetails = extractDeriveErrorMessage(error);
     const status = (error as { response?: { status?: number } })?.response?.status;
+    const responseData = (error as { response?: { data?: unknown } })?.response?.data;
+    
+    // Log error with full details (excluding secrets)
     logger?.error(
       `[CLOB] API key creation failed: status=${status ?? 'unknown'} error=${errorDetails}`,
     );
+    if (responseData) {
+      logger?.error(`[CLOB] Response data: ${JSON.stringify(responseData)}`);
+    }
     
-    if (canDetectCreateApiKeyFailure(error)) {
-      createApiKeyBlocked = true;
-      const retrySeconds = parseInt(readEnvValue('AUTH_DERIVE_RETRY_SECONDS') || '600', 10); // Default 10 minutes
-      createApiKeyBlockedUntil = Date.now() + retrySeconds * 1000;
-      logger?.warn(`[CLOB] Failed to create API key (400 error); falling back to local derive. Will retry in ${retrySeconds}s.`);
+    // Treat 400/401 as definite failures - don't save credentials
+    if (status === 400 || status === 401) {
+      logger?.error('[CLOB] API key creation failed with 400/401; credentials NOT saved.');
+      if (canDetectCreateApiKeyFailure(error)) {
+        createApiKeyBlocked = true;
+        const retrySeconds = parseInt(readEnvValue('AUTH_DERIVE_RETRY_SECONDS') || '600', 10); // Default 10 minutes
+        createApiKeyBlockedUntil = Date.now() + retrySeconds * 1000;
+        logger?.warn(`[CLOB] Failed to create API key (400 error); falling back to local derive. Will retry in ${retrySeconds}s.`);
+      }
       return attemptLocalDerive();
     }
     
