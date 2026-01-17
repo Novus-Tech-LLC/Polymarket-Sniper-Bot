@@ -423,6 +423,7 @@ const extractPreflightErrorDetails = (error: unknown): {
   code?: string | null;
   message: string;
   data?: unknown;
+  url?: string;
 } => {
   const maybeError = error as {
     response?: { status?: number; data?: unknown };
@@ -430,11 +431,22 @@ const extractPreflightErrorDetails = (error: unknown): {
     code?: string;
     message?: string;
   };
+  let url: string | undefined;
+  if (axios.isAxiosError(error)) {
+    const baseUrl = error.config?.baseURL ?? '';
+    const configUrl = error.config?.url ?? '';
+    if (configUrl) {
+      url = configUrl.startsWith('http') || !baseUrl ? configUrl : `${baseUrl}${configUrl}`;
+    } else if (baseUrl) {
+      url = baseUrl;
+    }
+  }
   return {
     status: maybeError?.status ?? maybeError?.response?.status,
     code: maybeError?.code ?? null,
     message: maybeError?.message ?? String(error),
     data: maybeError?.response?.data,
+    url,
   };
 };
 
@@ -445,10 +457,12 @@ const logPreflightFailure = (params: {
   code?: string | null;
   message?: string;
   data?: unknown;
+  url?: string;
 }): void => {
   const message = params.message?.trim() ? params.message : 'unknown_error';
+  const urlPart = params.url ? ` url=${params.url}` : '';
   params.logger.warn(
-    `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? 'none'} code=${params.code ?? 'none'} message=${message}`,
+    `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? 'none'} code=${params.code ?? 'none'} message=${message}${urlPart}`,
   );
   const dataText = truncatePreflightData(params.data);
   if (dataText) {
@@ -484,6 +498,7 @@ const runConnectivityCheck = async (logger: Logger): Promise<'ok' | 'transient' 
         code: details.code,
         message: details.message,
         data: details.data,
+        url: details.url,
       });
       if (details.code && PREFLIGHT_TRANSIENT_CODES.has(details.code)) {
         if (attempt === PREFLIGHT_CONNECTIVITY_MAX_TRIES) {
@@ -677,6 +692,7 @@ export const runClobAuthPreflight = async (params: {
       code: details.code,
       message: details.message,
       data: details.data,
+      url: details.url,
     });
     logPreflightHint(
       params.logger,

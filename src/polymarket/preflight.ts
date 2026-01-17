@@ -129,6 +129,12 @@ export const ensureTradingReady = async (
 
   let detectOnly = params.detectOnly;
   const liveTradingEnabled = isLiveTradingEnabled();
+  const contracts = resolvePolymarketContracts();
+  if (liveTradingEnabled && (!contracts.ctfExchangeAddress || !contracts.ctfErc1155Address)) {
+    throw new Error(
+      'Live trading requires POLY_CTF_EXCHANGE_ADDRESS and POLY_CTF_ERC1155_ADDRESS. Set them and restart.',
+    );
+  }
   if (!liveTradingEnabled) {
     detectOnly = true;
     params.logger.warn('[Preflight] ARB_LIVE_TRADING not enabled; trading disabled.');
@@ -184,7 +190,6 @@ export const ensureTradingReady = async (
   }
 
   const approvalsConfig = readApprovalsConfig();
-  const contracts = resolvePolymarketContracts();
   const wallet = params.client.wallet;
   const spender = contracts.ctfExchangeAddress;
   const ctfErc1155Address = contracts.ctfErc1155Address;
@@ -320,7 +325,9 @@ export const ensureTradingReady = async (
   const refreshedApproval = await new Contract(ctfErc1155Address, ERC1155_ABI, wallet)
     .isApprovedForAll(wallet.address, spender);
   if (refreshedAllowance.lt(minAllowanceRaw) || !refreshedApproval) {
-    params.logger.error('[Preflight][Approvals] Approvals still insufficient after tx confirmation.');
+    params.logger.error(
+      '[Preflight][Approvals] Approvals still insufficient after tx confirmation; switching to detect-only.',
+    );
     return { detectOnly: true };
   }
 

@@ -202,6 +202,13 @@ Approvals flow (startup preflight):
 - `APPROVALS_AUTO=dryrun`: prints the calldata/tx params it would send and stays detect-only.
 - `APPROVALS_AUTO=true`: sends approval txs once, then continues if confirmed.
 
+#### How to find the required addresses
+
+1. Use Polygonscan to inspect a **manual Polymarket trade** from your wallet.
+2. Find the **USDC approval** transaction and copy the `spender` address (this is `POLY_CTF_EXCHANGE_ADDRESS`).
+3. Find the **ERC1155 approval** transaction from the same trade and copy the token contract address (this is `POLY_CTF_ERC1155_ADDRESS`).
+4. Set both env vars (`POLY_CTF_EXCHANGE_ADDRESS` and `POLY_CTF_ERC1155_ADDRESS`) and restart the bot.
+
 Dry-run approvals example:
 
 ```env
