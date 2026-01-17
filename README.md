@@ -178,13 +178,102 @@ MODE=both
 ARB_PRESET=safe_small
 MONITOR_PRESET=balanced
 CLOB_DERIVE_CREDS=true
-POLYMARKET_API_KEY=your_clob_api_key
-POLYMARKET_API_SECRET=your_clob_api_secret
-POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
+# Note: Do NOT set POLYMARKET_API_KEY/SECRET/PASSPHRASE when using CLOB_DERIVE_CREDS=true
+# Builder credentials (POLY_BUILDER_*) are optional and different from CLOB credentials
 ```
 
 > ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES`. `PUBLIC_KEY` is optional and will be derived from `PRIVATE_KEY` when omitted.
-> ✅ **Note:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` are required for CLOB access unless `CLOB_DERIVE_CREDS=true` is set to derive credentials from `PRIVATE_KEY`.
+> ✅ **Recommended:** Use `CLOB_DERIVE_CREDS=true` to automatically derive CLOB API credentials from your `PRIVATE_KEY`. This is the official Polymarket recommendation.
+> ⚠️ **Important:** Builder API keys (`POLY_BUILDER_*`) are NOT the same as CLOB API keys (`POLYMARKET_API_*`). See [Understanding API Credentials](#%EF%B8%8F-understanding-api-credentials-important) for details.
+
+### ⚠️ Understanding API Credentials (IMPORTANT)
+
+Polymarket uses **TWO DIFFERENT credential systems** - confusing them will cause authentication failures:
+
+#### 1. CLOB API Credentials (Required for Trading)
+
+These credentials are used to place and manage orders on the Polymarket CLOB (Central Limit Order Book).
+
+**Environment Variables:**
+- `POLYMARKET_API_KEY`
+- `POLYMARKET_API_SECRET`
+- `POLYMARKET_API_PASSPHRASE`
+
+**How to get them:**
+- **Recommended Method:** Set `CLOB_DERIVE_CREDS=true` to automatically derive credentials from your private key. This is the official Polymarket recommendation.
+- **Manual Method:** Use the Polymarket CLOB client to create credentials programmatically (see Polymarket docs).
+
+> ⚠️ **Common Mistake:** Using Builder API credentials as CLOB credentials. They are NOT interchangeable!
+
+#### 2. Builder API Credentials (Optional - For Gasless Transactions)
+
+These credentials are for the Polymarket Builder/Relayer system to execute gasless transactions (like token approvals).
+
+**Environment Variables:**
+- `POLY_BUILDER_API_KEY`
+- `POLY_BUILDER_API_SECRET`
+- `POLY_BUILDER_API_PASSPHRASE`
+
+**When to use:**
+- Only needed if you want gasless approval transactions via the relayer
+- Not required for basic trading functionality
+- Can be obtained from the Polymarket Builder profile page
+
+#### Credential Setup Guide
+
+**Option A: Derived Credentials (Recommended)**
+```env
+# Let the bot derive CLOB credentials from your wallet
+CLOB_DERIVE_CREDS=true
+PRIVATE_KEY=your_64_hex_char_private_key
+# Remove any POLYMARKET_API_* variables
+```
+
+**Option B: Explicit CLOB Credentials**
+```env
+# Use explicit CLOB credentials (NOT builder credentials!)
+POLYMARKET_API_KEY=your_clob_api_key
+POLYMARKET_API_SECRET=your_clob_api_secret
+POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
+PRIVATE_KEY=your_64_hex_char_private_key
+```
+
+**Option C: Both Systems (Full Feature Set)**
+```env
+# CLOB credentials for trading (derived automatically)
+CLOB_DERIVE_CREDS=true
+PRIVATE_KEY=your_64_hex_char_private_key
+
+# Builder credentials for gasless approvals (optional)
+POLY_BUILDER_API_KEY=your_builder_api_key
+POLY_BUILDER_API_SECRET=your_builder_api_secret
+POLY_BUILDER_API_PASSPHRASE=your_builder_api_passphrase
+```
+
+#### Troubleshooting 401 "Unauthorized/Invalid api key" Errors
+
+If you see this error, check the following:
+
+1. **Are you using the right credential type?**
+   - Builder keys (`POLY_BUILDER_*`) cannot be used as CLOB keys (`POLYMARKET_API_*`)
+   - The 401 error from `/balance-allowance` means CLOB credentials are invalid
+
+2. **Try derived credentials instead:**
+   ```env
+   CLOB_DERIVE_CREDS=true
+   # Comment out or remove POLYMARKET_API_* variables
+   ```
+
+3. **Verify your wallet has traded on Polymarket:**
+   - The CLOB may reject credentials if the wallet has never interacted with Polymarket
+   - Try making a small trade via the Polymarket website first
+
+4. **Check the preflight summary:**
+   ```
+   [Preflight][Summary] ... auth_ok=false ready_to_trade=false
+   ```
+   - `auth_ok=false` means CLOB authentication failed
+   - `relayer_enabled=false` means Builder credentials are missing (this is OK for basic trading)
 
 ### Quickstart (AirVPN/WireGuard already handled), enable builder relayer + approvals
 
@@ -196,8 +285,12 @@ Live trading is locked behind an explicit opt-in and on-chain approvals. The bot
 - `PRIVATE_KEY` (64 hex chars or 0x + 64 hex chars, whitespace is trimmed)
 - `RPC_URL`
 - `COLLATERAL_TOKEN_ADDRESS` (USDC.e on Polygon)
-- `POLY_CTF_ADDRESS` (CTF ERC1155 contract)
-- `POLY_CTF_EXCHANGE_ADDRESS` (spender for USDC + ERC1155 approvals)
+- `CLOB_DERIVE_CREDS=true` (recommended - derive CLOB credentials from private key)
+
+**Optional but recommended:**
+
+- `POLY_CTF_ADDRESS` (CTF ERC1155 contract, defaults to official address)
+- `POLY_CTF_EXCHANGE_ADDRESS` (spender for USDC + ERC1155 approvals, defaults to official address)
 - `APPROVALS_AUTO=true` (auto-approve on startup)
 - `APPROVAL_MIN_USDC=1000` (minimum allowance target)
 - `APPROVAL_MAX_UINT=true` (approve max uint256)
@@ -209,7 +302,7 @@ Live trading is locked behind an explicit opt-in and on-chain approvals. The bot
 - `POLY_GAS_MULTIPLIER=1.2` (gas fee multiplier, default 1.2)
 - `APPROVALS_MAX_RETRY_ATTEMPTS=3` (max retry attempts for approval txs, default 3)
 
-**Relayer signing (recommended, gasless approvals)**
+**Relayer signing (optional - for gasless approvals)**
 
 - `SIGNER_URL=http://signer:8080/sign` (optional, for remote signer)
 - `RELAYER_URL=https://relayer-v2.polymarket.com/` (default)

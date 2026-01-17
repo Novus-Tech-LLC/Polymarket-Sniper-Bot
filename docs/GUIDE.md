@@ -85,22 +85,37 @@ npm run build
 
 Create a `.env` file in the project root with the following variables:
 
+### ⚠️ API Credentials (Important!)
+
+There are TWO different credential systems in Polymarket:
+
+1. **CLOB Credentials** (for trading): `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
+2. **Builder Credentials** (for gasless transactions): `POLY_BUILDER_API_KEY`, etc.
+
+**These are NOT interchangeable!** The most common error is using Builder keys as CLOB keys.
+
+**Recommended Setup:** Use `CLOB_DERIVE_CREDS=true` to automatically derive CLOB credentials from your private key. This is the official Polymarket recommendation.
+
 #### Required
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `TARGET_ADDRESSES` | Comma-separated target addresses to frontrun | `0xabc...,0xdef...` |
-| `PUBLIC_KEY` | Your Polygon wallet address | `your_wallet_address` |
 | `PRIVATE_KEY` | Your wallet private key | `your_private_key` |
 | `RPC_URL` | Polygon RPC endpoint (must support pending tx monitoring) | `https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID`|
-| `POLYMARKET_API_KEY` | Polymarket CLOB API key (omit if deriving) | `your_clob_api_key` |
-| `POLYMARKET_API_SECRET` | Polymarket CLOB API secret (omit if deriving) | `your_clob_api_secret` |
-| `POLYMARKET_API_PASSPHRASE` | Polymarket CLOB API passphrase (omit if deriving) | `your_clob_api_passphrase` |
+| `CLOB_DERIVE_CREDS` | Set to `true` to derive CLOB keys from private key (recommended) | `true` |
 
 #### Optional
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PUBLIC_KEY` | (derived) | Your Polygon wallet address (auto-derived if omitted) |
+| `POLYMARKET_API_KEY` | - | CLOB API key (omit if using `CLOB_DERIVE_CREDS=true`) |
+| `POLYMARKET_API_SECRET` | - | CLOB API secret (omit if using `CLOB_DERIVE_CREDS=true`) |
+| `POLYMARKET_API_PASSPHRASE` | - | CLOB API passphrase (omit if using `CLOB_DERIVE_CREDS=true`) |
+| `POLY_BUILDER_API_KEY` | - | Builder API key (for gasless transactions, optional) |
+| `POLY_BUILDER_API_SECRET` | - | Builder API secret (for gasless transactions, optional) |
+| `POLY_BUILDER_API_PASSPHRASE` | - | Builder API passphrase (for gasless transactions, optional) |
 | `FETCH_INTERVAL` | `1` | Polling frequency in seconds |
 | `MIN_TRADE_SIZE_USD` | `100` | Minimum trade size to frontrun (USD) |
 | `FRONTRUN_SIZE_MULTIPLIER` | `0.5` | Frontrun size as % of target (0.0-1.0) |
@@ -109,7 +124,6 @@ Create a `.env` file in the project root with the following variables:
 | `RETRY_LIMIT` | `3` | Maximum retry attempts for failed orders |
 | `TRADE_AGGREGATION_ENABLED` | `false` | Enable trade aggregation |
 | `TRADE_AGGREGATION_WINDOW_SECONDS` | `300` | Time window for aggregating trades (seconds) |
-| `CLOB_DERIVE_CREDS` | `false` | Derive CLOB credentials from `PRIVATE_KEY` (ignores manual API keys) |
 | `USDC_CONTRACT_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC contract on Polygon |
 | `MONGO_URI` | - | MongoDB connection string (optional) |
 | `OPENVPN_ENABLED` | `false` | Enable OpenVPN setup on startup |
@@ -134,22 +148,49 @@ Create a `.env` file in the project root with the following variables:
 | `WIREGUARD_PERSISTENT_KEEPALIVE` | - | Persistent keepalive interval (seconds) |
 | `WIREGUARD_FORCE_RESTART` | `false` | Force `wg-quick down` before `up` |
 
-### Example `.env` File
+### Example `.env` File (Recommended - Derived Credentials)
 
 ```env
+# Required
 TARGET_ADDRESSES=0x1234567890abcdef1234567890abcdef12345678,0xabcdef1234567890abcdef1234567890abcdef12
-PUBLIC_KEY=your_wallet_address_here
 PRIVATE_KEY=your_privatekey_key_here
 RPC_URL=https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID
+
+# CLOB Authentication (recommended: derive from private key)
+CLOB_DERIVE_CREDS=true
+# Do NOT set POLYMARKET_API_* when using CLOB_DERIVE_CREDS=true
+
+# Trading settings
+ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 FETCH_INTERVAL=1
 MIN_TRADE_SIZE_USD=100
 FRONTRUN_SIZE_MULTIPLIER=0.5
 GAS_PRICE_MULTIPLIER=1.2
 RETRY_LIMIT=3
-USDC_CONTRACT_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
-POLYMARKET_API_KEY=your_clob_api_key
-POLYMARKET_API_SECRET=your_clob_api_secret
-POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
+
+# Token contract (usually don't need to change)
+COLLATERAL_TOKEN_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+```
+
+### Example `.env` File (With Builder Credentials for Gasless Approvals)
+
+```env
+# Required
+TARGET_ADDRESSES=0x1234567890abcdef1234567890abcdef12345678
+PRIVATE_KEY=your_privatekey_key_here
+RPC_URL=https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID
+
+# CLOB Authentication (derive from private key)
+CLOB_DERIVE_CREDS=true
+
+# Builder credentials (optional - for gasless approval transactions)
+# Get these from: https://docs.polymarket.com/developers/builders/builder-profile
+POLY_BUILDER_API_KEY=your_builder_key
+POLY_BUILDER_API_SECRET=your_builder_secret
+POLY_BUILDER_API_PASSPHRASE=your_builder_passphrase
+
+# Trading settings
+ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 
 # OpenVPN (optional)
 OPENVPN_ENABLED=true
@@ -378,6 +419,40 @@ To implement full backtesting:
 ---
 
 ## Troubleshooting
+
+### 401 "Unauthorized/Invalid api key" Error
+
+**Symptoms:** Bot shows `ready_to_trade=false` and logs `401 Unauthorized/Invalid api key`
+
+**Most Common Cause:** Using Builder API keys instead of CLOB API keys.
+
+**Solutions:**
+
+1. **Use derived credentials (recommended):**
+   ```env
+   CLOB_DERIVE_CREDS=true
+   # Remove or comment out POLYMARKET_API_* variables
+   ```
+
+2. **Verify you're using the right credential type:**
+   - `POLYMARKET_API_*` = CLOB credentials (for trading)
+   - `POLY_BUILDER_*` = Builder credentials (for gasless transactions)
+   - These are NOT interchangeable!
+
+3. **Check the preflight summary in logs:**
+   ```
+   [Preflight][Summary] ... auth_ok=false ...
+   ```
+   - `auth_ok=false` means CLOB authentication failed
+   - `relayer_enabled=false` means Builder credentials are missing (this is OK for basic trading)
+
+4. **Ensure your wallet has interacted with Polymarket:**
+   - The CLOB may reject credentials if the wallet has never traded
+   - Try making a small trade via the Polymarket website first
+
+5. **If using explicit CLOB credentials:**
+   - Verify they were created using the `@polymarket/clob-client` library
+   - They should NOT be from the Builder profile page
 
 ### Bot Not Detecting Trades
 
