@@ -1,0 +1,15 @@
+{
+  "name": "polymarket-relayer-signer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@polymarket/builder-signing-sdk": "^0.0.8",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

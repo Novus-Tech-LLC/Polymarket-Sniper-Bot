@@ -67,6 +67,7 @@ async function main(): Promise<void> {
     logger,
     privateKey: env.privateKey,
     configuredPublicKey: env.proxyWallet,
+    rpcUrl: env.rpcUrl,
     detectOnly: env.detectOnly,
     clobCredsComplete: env.clobCredsComplete,
     clobDeriveEnabled: env.clobDeriveEnabled,

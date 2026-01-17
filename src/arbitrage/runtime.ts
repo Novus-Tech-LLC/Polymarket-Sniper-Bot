@@ -59,6 +59,7 @@ export async function startArbitrageEngine(
     logger,
     privateKey: config.privateKey,
     configuredPublicKey: config.proxyWallet,
+    rpcUrl: config.rpcUrl,
     detectOnly: config.detectOnly,
     clobCredsComplete: config.clobCredsComplete,
     clobDeriveEnabled: config.clobDeriveEnabled,

@@ -1,6 +1,6 @@
 import type { ApiKeyCreds, ClobClient } from '@polymarket/clob-client';
-import { Contract, constants, utils } from 'ethers';
-import type { BigNumber, Wallet } from 'ethers';
+import { utils } from 'ethers';
+import type { Wallet } from 'ethers';
 import { isAuthError } from '../infrastructure/clob-auth';
 import { runClobAuthMatrixPreflight, runClobAuthPreflight } from '../clob/diagnostics';
 import { formatClobAuthFailureHint } from '../utils/clob-auth-hint.util';
@@ -8,34 +8,15 @@ import type { Logger } from '../utils/logger.util';
 import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 import { publicKeyMatchesDerived, deriveSignerAddress } from '../clob/diagnostics';
 import { resolvePolymarketContracts } from './contracts';
-
-const ERC20_ABI = [
-  'function balanceOf(address owner) view returns (uint256)',
-  'function allowance(address owner, address spender) view returns (uint256)',
-  'function approve(address spender, uint256 amount) returns (bool)',
-];
-
-const ERC1155_ABI = [
-  'function isApprovedForAll(address owner, address operator) view returns (bool)',
-  'function setApprovalForAll(address operator, bool approved)',
-];
-
-export type ApprovalMode = 'true' | 'false' | 'dryrun';
-
-export type ApprovalsConfig = {
-  mode: ApprovalMode;
-  minUsdcAllowanceRaw: string;
-  minUsdcAllowanceUsd: number;
-  gasBumpBps: number;
-  force: boolean;
-  confirmations: number;
-};
+import { ensureApprovals, readApprovalsConfig } from './approvals';
+import { createRelayerContext, deployIfNeeded } from './relayer';
 
 export type TradingReadyParams = {
   client: ClobClient & { wallet: Wallet; derivedCreds?: ApiKeyCreds };
   logger: Logger;
   privateKey: string;
   configuredPublicKey?: string;
+  rpcUrl: string;
   detectOnly: boolean;
   clobCredsComplete: boolean;
   clobDeriveEnabled: boolean;
@@ -49,69 +30,10 @@ const parseBool = (raw: string | undefined, fallback: boolean): boolean => {
   return String(raw).toLowerCase() === 'true';
 };
 
-const parseNumber = (raw: string | undefined, fallback: number): number => {
-  if (!raw) return fallback;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed;
-};
-
-export const readApprovalsConfig = (): ApprovalsConfig => {
-  const modeRaw = readEnv('APPROVALS_AUTO');
-  const modeValue = (modeRaw ?? 'false').toLowerCase();
-  const mode: ApprovalMode = modeValue === 'true' || modeValue === 'dryrun' ? modeValue : 'false';
-  const minUsdcAllowanceRaw = readEnv('APPROVALS_MIN_USDC_ALLOWANCE') ?? '1000';
-  return {
-    mode,
-    minUsdcAllowanceRaw,
-    minUsdcAllowanceUsd: parseNumber(minUsdcAllowanceRaw, 1000),
-    gasBumpBps: parseNumber(readEnv('APPROVALS_GAS_BUMP_BPS'), 0),
-    force: parseBool(readEnv('APPROVALS_FORCE'), false),
-    confirmations: Math.max(1, Math.floor(parseNumber(readEnv('APPROVALS_CONFIRMATIONS'), 1))),
-  };
-};
-
 const isLiveTradingEnabled = (): boolean => readEnv('ARB_LIVE_TRADING') === 'I_UNDERSTAND_THE_RISKS';
 
-const formatUnits = (value: BigNumber, decimals: number): string =>
+const formatUnits = (value: utils.BigNumberish, decimals: number): string =>
   Number(utils.formatUnits(value, decimals)).toFixed(2);
-
-const formatGasGwei = (value: BigNumber): string => Number(utils.formatUnits(value, 'gwei')).toFixed(2);
-
-const buildTxOverrides = async (
-  wallet: Wallet,
-  gasBumpBps: number,
-): Promise<{ gasPrice?: BigNumber }> => {
-  if (!wallet.provider) return {};
-  if (gasBumpBps <= 0) return {};
-  const gasPrice = await wallet.provider.getGasPrice();
-  const bumped = gasPrice.mul(10000 + gasBumpBps).div(10000);
-  return { gasPrice: bumped };
-};
-
-const logApprovalInstruction = (params: {
-  logger: Logger;
-  usdcAddress: string;
-  spender: string;
-  ctfErc1155Address: string;
-}): void => {
-  params.logger.warn('[Preflight][Approvals] Approvals required for live trading:');
-  params.logger.warn(`[Preflight][Approvals] ERC20 approve token=${params.usdcAddress} spender=${params.spender} amount=MAX_UINT256`);
-  params.logger.warn(`[Preflight][Approvals] ERC1155 setApprovalForAll token=${params.ctfErc1155Address} operator=${params.spender} approved=true`);
-};
-
-const logDryRunTx = (params: {
-  logger: Logger;
-  label: string;
-  to: string;
-  data: string;
-  gasEstimate?: BigNumber;
-  gasPrice?: BigNumber;
-}): void => {
-  const gasPart = params.gasEstimate ? ` gasEstimate=${params.gasEstimate.toString()}` : '';
-  const gasPricePart = params.gasPrice ? ` gasPrice=${formatGasGwei(params.gasPrice)} gwei` : '';
-  params.logger.info(`[Preflight][Approvals][DryRun] ${params.label} to=${params.to} value=0 data=${params.data}${gasPart}${gasPricePart}`);
-};
 
 export const ensureTradingReady = async (
   params: TradingReadyParams,
@@ -130,10 +52,15 @@ export const ensureTradingReady = async (
   let detectOnly = params.detectOnly;
   const liveTradingEnabled = isLiveTradingEnabled();
   const contracts = resolvePolymarketContracts();
-  if (liveTradingEnabled && (!contracts.ctfExchangeAddress || !contracts.ctfErc1155Address)) {
-    throw new Error(
-      'Live trading requires POLY_CTF_EXCHANGE_ADDRESS and POLY_CTF_ERC1155_ADDRESS. Set them and restart.',
-    );
+  let relayer = { enabled: false, signerAddress: derivedSignerAddress };
+  try {
+    relayer = createRelayerContext({
+      privateKey: params.privateKey,
+      rpcUrl: params.rpcUrl,
+      logger: params.logger,
+    });
+  } catch (error) {
+    params.logger.warn(`[Relayer] Failed to initialize relayer client. ${sanitizeErrorMessage(error)}`);
   }
   if (!liveTradingEnabled) {
     detectOnly = true;
@@ -191,146 +118,62 @@ export const ensureTradingReady = async (
 
   const approvalsConfig = readApprovalsConfig();
   const wallet = params.client.wallet;
-  const spender = contracts.ctfExchangeAddress;
-  const ctfErc1155Address = contracts.ctfErc1155Address;
-  const negRiskEnabled = parseBool(readEnv('POLY_NEG_RISK_ENABLED'), false);
-  if (negRiskEnabled && !contracts.negRiskExchangeAddress) {
-    params.logger.warn('[Preflight][Approvals] POLY_NEG_RISK_ENABLED=true but POLY_NEG_RISK_EXCHANGE_ADDRESS missing.');
+  if (relayer.enabled) {
+    try {
+      await deployIfNeeded({ relayer, logger: params.logger });
+    } catch (error) {
+      params.logger.warn(`[Relayer] Deploy check failed; falling back to EOA approvals. ${sanitizeErrorMessage(error)}`);
+    }
   }
 
+  const tradingAddress = relayer.tradingAddress ?? derivedSignerAddress;
   params.logger.info(
-    `[Preflight][Approvals] Checking allowances spender=${spender ?? 'missing'} ctfErc1155=${ctfErc1155Address ?? 'missing'} usdc=${contracts.usdcAddress}`,
+    `[Preflight] signer=${derivedSignerAddress} effective_trading_address=${tradingAddress} public_key=${params.configuredPublicKey ?? 'none'}`,
   );
-
-  const usdcContract = new Contract(contracts.usdcAddress, ERC20_ABI, wallet);
-  const usdcBalance = await usdcContract.balanceOf(wallet.address);
-
-  let usdcAllowance = constants.Zero;
-  if (spender) {
-    usdcAllowance = await usdcContract.allowance(wallet.address, spender);
-  }
-
-  let ctfIsApprovedForAll = false;
-  if (spender && ctfErc1155Address) {
-    const ctfContract = new Contract(ctfErc1155Address, ERC1155_ABI, wallet);
-    ctfIsApprovedForAll = await ctfContract.isApprovedForAll(wallet.address, spender);
-  }
-
   params.logger.info(
-    `[Preflight][Approvals] USDC balance=${formatUnits(usdcBalance, params.collateralTokenDecimals)} allowance=${formatUnits(usdcAllowance, params.collateralTokenDecimals)} min=${approvalsConfig.minUsdcAllowanceUsd.toFixed(2)} approvedForAll=${ctfIsApprovedForAll}`,
+    `[Preflight] contracts usdc=${contracts.usdcAddress} ctf=${contracts.ctfAddress ?? 'n/a'} ctf_exchange=${contracts.ctfExchangeAddress ?? 'n/a'} neg_risk_exchange=${contracts.negRiskExchangeAddress ?? 'n/a'} neg_risk_adapter=${contracts.negRiskAdapterAddress ?? 'n/a'}`,
   );
-
-  if (!spender || !ctfErc1155Address) {
-    params.logger.warn(
-      '[Preflight][Approvals] Missing POLY_CTF_EXCHANGE_ADDRESS or POLY_CTF_ERC1155_ADDRESS; approvals cannot be performed.',
-    );
-    return { detectOnly: true };
-  }
-
-  const minAllowanceRaw = utils.parseUnits(approvalsConfig.minUsdcAllowanceRaw, params.collateralTokenDecimals);
-  const needsApproveErc20 = approvalsConfig.force || usdcAllowance.lt(minAllowanceRaw);
-  const needsApproveErc1155 = approvalsConfig.force || !ctfIsApprovedForAll;
-
-  if (!needsApproveErc20 && !needsApproveErc1155) {
-    return { detectOnly };
-  }
 
   if (!liveTradingEnabled) {
-    params.logger.warn('[Preflight][Approvals] Approvals needed but live trading disabled; staying detect-only.');
+    params.logger.info('[Preflight] READY_TO_TRADE=false reason=LIVE_TRADING_DISABLED');
+    (params.client as ClobClient & { relayerContext?: ReturnType<typeof createRelayerContext> }).relayerContext = relayer;
     return { detectOnly: true };
   }
 
-  if (approvalsConfig.mode === 'false') {
-    logApprovalInstruction({
+  let approvalResult;
+  try {
+    approvalResult = await ensureApprovals({
+      wallet,
+      owner: tradingAddress,
+      relayer: relayer.enabled ? relayer : undefined,
       logger: params.logger,
-      usdcAddress: contracts.usdcAddress,
-      spender,
-      ctfErc1155Address,
+      config: approvalsConfig,
     });
-    params.logger.warn('[Preflight][Approvals] APPROVALS_AUTO=false; staying detect-only.');
-    return { detectOnly: true };
+  } catch (error) {
+    params.logger.warn(`[Preflight][Approvals] Failed to ensure approvals. ${sanitizeErrorMessage(error)}`);
+    detectOnly = true;
   }
 
-  const erc20Interface = new utils.Interface(ERC20_ABI);
-  const erc1155Interface = new utils.Interface(ERC1155_ABI);
-  const approvals = [
-    {
-      label: 'ERC20.approve',
-      needed: needsApproveErc20,
-      to: contracts.usdcAddress,
-      data: erc20Interface.encodeFunctionData('approve', [spender, constants.MaxUint256]),
-      send: (overridesToUse?: { gasPrice?: BigNumber }) =>
-        usdcContract.approve(spender, constants.MaxUint256, overridesToUse ?? {}),
-      estimate: () => usdcContract.estimateGas.approve(spender, constants.MaxUint256),
-    },
-    {
-      label: 'ERC1155.setApprovalForAll',
-      needed: needsApproveErc1155,
-      to: ctfErc1155Address,
-      data: erc1155Interface.encodeFunctionData('setApprovalForAll', [spender, true]),
-      send: (overridesToUse?: { gasPrice?: BigNumber }) =>
-        new Contract(ctfErc1155Address, ERC1155_ABI, wallet).setApprovalForAll(
-          spender,
-          true,
-          overridesToUse ?? {},
-        ),
-      estimate: () => new Contract(ctfErc1155Address, ERC1155_ABI, wallet).estimateGas.setApprovalForAll(spender, true),
-    },
-  ];
-
-  const overrides = await buildTxOverrides(wallet, approvalsConfig.gasBumpBps);
-  if (overrides.gasPrice) {
+  if (approvalResult) {
+    const balanceDisplay = formatUnits(approvalResult.snapshot.usdcBalance, params.collateralTokenDecimals);
+    const allowanceDetails = approvalResult.snapshot.allowances
+      .map(({ spender, allowance }) => `${spender}=${formatUnits(allowance, params.collateralTokenDecimals)}`)
+      .join(' ');
+    const approvedForAll = approvalResult.snapshot.erc1155Approvals.every(({ approved }) => approved);
     params.logger.info(
-      `[Preflight][Approvals] Gas bump applied bps=${approvalsConfig.gasBumpBps} gasPrice=${formatGasGwei(overrides.gasPrice)} gwei`,
+      `[Preflight][Approvals] USDC balance=${balanceDisplay} allowances=[${allowanceDetails || 'none'}] approvedForAll=${approvedForAll}`,
     );
-  }
 
-  if (approvalsConfig.mode === 'dryrun') {
-    for (const approval of approvals) {
-      if (!approval.needed) continue;
-      let gasEstimate: BigNumber | undefined;
-      try {
-        gasEstimate = await approval.estimate();
-      } catch {
-        gasEstimate = undefined;
-      }
-      logDryRunTx({
-        logger: params.logger,
-        label: approval.label,
-        to: approval.to,
-        data: approval.data,
-        gasEstimate,
-        gasPrice: overrides.gasPrice,
-      });
+    if (!approvalResult.ok) {
+      detectOnly = true;
     }
-    params.logger.warn('[Preflight][Approvals] APPROVALS_AUTO=dryrun; staying detect-only.');
-    return { detectOnly: true };
   }
 
-  if (approvalsConfig.mode !== 'true') {
-    params.logger.warn('[Preflight][Approvals] Approvals required but APPROVALS_AUTO disabled.');
-    return { detectOnly: true };
-  }
+  params.logger.info(
+    `[Preflight] READY_TO_TRADE=${!detectOnly} reason=${detectOnly ? 'CHECKS_FAILED' : 'OK'}`,
+  );
 
-  for (const approval of approvals) {
-    if (!approval.needed) continue;
-    params.logger.info(`[Preflight][Approvals] Sending ${approval.label} spender=${spender}`);
-    const tx = await approval.send(overrides);
-    params.logger.info(`[Preflight][Approvals] Tx submitted ${approval.label} to=${approval.to} hash=${tx.hash}`);
-    await tx.wait(approvalsConfig.confirmations);
-    params.logger.info(`[Preflight][Approvals] Tx confirmed ${approval.label}`);
-  }
+  (params.client as ClobClient & { relayerContext?: ReturnType<typeof createRelayerContext> }).relayerContext = relayer;
 
-  const refreshedAllowance = await usdcContract.allowance(wallet.address, spender);
-  const refreshedApproval = await new Contract(ctfErc1155Address, ERC1155_ABI, wallet)
-    .isApprovedForAll(wallet.address, spender);
-  if (refreshedAllowance.lt(minAllowanceRaw) || !refreshedApproval) {
-    params.logger.error(
-      '[Preflight][Approvals] Approvals still insufficient after tx confirmation; switching to detect-only.',
-    );
-    return { detectOnly: true };
-  }
-
-  params.logger.info('[Preflight][Approvals] Approvals satisfied.');
   return { detectOnly };
 };

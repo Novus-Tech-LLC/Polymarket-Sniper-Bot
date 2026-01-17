@@ -8,10 +8,11 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    depends_on:
+      - signer
     environment:
       - MODE=arb
       - TARGET_ADDRESSES=0xabc0000000000000000000000000000000000001,0xabc0000000000000000000000000000000000002
-      - PUBLIC_KEY=0xdef0000000000000000000000000000000000000
       - PRIVATE_KEY=your_private_key
       - RPC_URL=https://polygon-mainnet.infura.io/v3/your_project_id
       - COLLATERAL_TOKEN_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
@@ -20,6 +21,17 @@ services:
       - POLYMARKET_API_KEY=your_clob_api_key
       - POLYMARKET_API_SECRET=your_clob_api_secret
       - POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
+      - POLY_USDCE_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+      - POLY_CTF_ADDRESS=0x4d97dcd97ec945f40cf65f87097ace5ea0476045
+      - POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
+      - POLY_NEG_RISK_CTF_EXCHANGE_ADDRESS=0xC5d563A36AE78145C45a50134d48A1215220f80a
+      - POLY_NEG_RISK_ADAPTER_ADDRESS=0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296
+      - APPROVAL_MIN_USDC=1000
+      - APPROVAL_MAX_UINT=true
+      - APPROVALS_AUTO=true
+      - RELAYER_URL=https://relayer-v2.polymarket.com/
+      - SIGNER_URL=http://signer:8080/sign
+      - SIGNER_AUTH_TOKEN=
       - FETCH_INTERVAL=1
       - TRADE_MULTIPLIER=1.0
       - RETRY_LIMIT=3
@@ -71,3 +83,13 @@ services:
       - WIREGUARD_FORCE_RESTART=false
     tmpfs:
       - /data:size=32m,mode=0700
+
+  signer:
+    build: ./signer
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - POLY_BUILDER_API_KEY=your_builder_api_key
+      - POLY_BUILDER_API_SECRET=your_builder_api_secret
+      - POLY_BUILDER_API_PASSPHRASE=your_builder_api_passphrase
+      - SIGNER_AUTH_TOKEN=
