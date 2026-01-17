@@ -437,7 +437,7 @@ export const runClobAuthPreflight = async (params: {
     preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
     return { ok: false, status, forced: Boolean(params.force) };
   } catch (error) {
-    const status = (error as { response?: { status?: number } })?.response?.status ?? null;
+    const status = (error as { response?: { status?: number } })?.response?.status;
     const code = (error as { code?: string })?.code ?? null;
     const message = (error as { message?: string })?.message ?? String(error);
     const data = (error as { response?: { data?: unknown } })?.response?.data ?? null;
