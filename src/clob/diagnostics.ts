@@ -36,6 +36,10 @@ const PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE = 'base64,base64url,raw';
 const PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING = 'base64url,base64';
 const PREFLIGHT_MATRIX_DEFAULT_ENDPOINT = '/balance-allowance';
 const PREFLIGHT_MATRIX_ERROR_TRUNCATE = 160;
+const PREFLIGHT_DATA_TRUNCATE = 200;
+const PREFLIGHT_CONNECTIVITY_MAX_TRIES = 5;
+const PREFLIGHT_CONNECTIVITY_BACKOFF_BASE_MS = 500;
+const PREFLIGHT_TRANSIENT_CODES = new Set(['ECONNRESET', 'ETIMEDOUT']);
 
 let headerKeysLogged = false;
 let preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
@@ -335,6 +339,101 @@ const extractStatus = (error: unknown): number | undefined => {
   return maybeError?.status ?? maybeError?.response?.status;
 };
 
+const truncatePreflightData = (data: unknown): string | null => {
+  if (data === null || data === undefined) return null;
+  let dataText = typeof data === 'string' ? data : JSON.stringify(data);
+  if (dataText === undefined) {
+    dataText = String(data);
+  }
+  dataText = dataText.replace(/\s+/g, ' ');
+  if (dataText.length > PREFLIGHT_DATA_TRUNCATE) {
+    dataText = dataText.slice(0, PREFLIGHT_DATA_TRUNCATE);
+  }
+  return dataText;
+};
+
+const extractPreflightErrorDetails = (error: unknown): {
+  status?: number;
+  code?: string | null;
+  message: string;
+  data?: unknown;
+} => {
+  const maybeError = error as {
+    response?: { status?: number; data?: unknown };
+    status?: number;
+    code?: string;
+    message?: string;
+  };
+  return {
+    status: maybeError?.status ?? maybeError?.response?.status,
+    code: maybeError?.code ?? null,
+    message: maybeError?.message ?? String(error),
+    data: maybeError?.response?.data,
+  };
+};
+
+const logPreflightFailure = (params: {
+  logger: Logger;
+  stage: string;
+  status?: number;
+  code?: string | null;
+  message?: string;
+  data?: unknown;
+}): void => {
+  const message = params.message ?? 'unknown';
+  params.logger.warn(
+    `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? 'none'} code=${params.code ?? 'none'} message=${message}`,
+  );
+  const dataText = truncatePreflightData(params.data);
+  if (dataText) {
+    params.logger.warn(`[CLOB][Preflight] data=${dataText}`);
+  }
+};
+
+const delay = async (ms: number): Promise<void> => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+const runConnectivityCheck = async (logger: Logger): Promise<'ok' | 'transient' | 'fail'> => {
+  for (let attempt = 1; attempt <= PREFLIGHT_CONNECTIVITY_MAX_TRIES; attempt += 1) {
+    try {
+      const response = await axios.get(`${POLYMARKET_API.BASE_URL}/markets`, { timeout: 10000 });
+      if (response?.status === 200) {
+        return 'ok';
+      }
+      logPreflightFailure({
+        logger,
+        stage: 'connectivity',
+        status: response?.status,
+        message: response?.statusText ?? 'non_200',
+        data: (response as { data?: unknown })?.data,
+      });
+      return 'fail';
+    } catch (error) {
+      const details = extractPreflightErrorDetails(error);
+      logPreflightFailure({
+        logger,
+        stage: 'connectivity',
+        status: details.status,
+        code: details.code,
+        message: details.message,
+        data: details.data,
+      });
+      if (details.code && PREFLIGHT_TRANSIENT_CODES.has(details.code)) {
+        if (attempt === PREFLIGHT_CONNECTIVITY_MAX_TRIES) {
+          return 'transient';
+        }
+        const backoffMs = PREFLIGHT_CONNECTIVITY_BACKOFF_BASE_MS * (2 ** (attempt - 1));
+        const jitterMs = Math.floor(Math.random() * backoffMs * 0.2);
+        await delay(backoffMs + jitterMs);
+        continue;
+      }
+      return 'fail';
+    }
+  }
+  return 'transient';
+};
+
 export const setupClobHeaderKeyLogging = (logger?: Logger): void => {
   if (!logger || headerKeysLogged) return;
   axios.interceptors.request.use((config) => {
@@ -377,10 +476,20 @@ export const runClobAuthPreflight = async (params: {
   const signatureType = orderBuilder?.signatureType ?? SignatureType.EOA;
   const funderAddress = orderBuilder?.funderAddress;
 
+  const connectivity = await runConnectivityCheck(params.logger);
+  if (connectivity === 'transient') {
+    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+    return null;
+  }
+  if (connectivity === 'fail') {
+    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+    return { ok: false, forced: Boolean(params.force) };
+  }
+
   const timestamp = Math.floor(Date.now() / 1000);
-  const endpoint = params.derivedCredsEnabled ? '/auth/api-keys' : '/balance-allowance';
+  const endpoint = '/balance-allowance';
   params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
-  const requestParams = endpoint === '/balance-allowance' ? { signature_type: signatureType } : undefined;
+  const requestParams = { signature_type: signatureType };
   const { signedPath, paramsKeys } = buildSignedPath(endpoint, requestParams);
   params.logger.info(
     `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'}`,
@@ -394,9 +503,7 @@ export const runClobAuthPreflight = async (params: {
   });
 
   try {
-    const response = endpoint === '/balance-allowance'
-      ? await params.client.getBalanceAllowance()
-      : await (params.client as ClobClient & { getApiKeys?: () => Promise<unknown> }).getApiKeys?.();
+    const response = await params.client.getBalanceAllowance();
     const status = (response as { status?: number })?.status;
     const responseErrorMessage = extractPreflightResponseErrorMessage(response);
     if (status === 200) {
@@ -404,12 +511,14 @@ export const runClobAuthPreflight = async (params: {
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return { ok: true, status, forced: Boolean(params.force) };
     }
-    if (status === 400 && responseErrorMessage.includes('Invalid asset type')) {
-      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
-      preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
-      return { ok: true, status, forced: Boolean(params.force) };
-    }
     if (status === 401 || status === 403) {
+      logPreflightFailure({
+        logger: params.logger,
+        stage: 'auth',
+        status,
+        message: responseErrorMessage || 'unauthorized',
+        data: (response as { data?: unknown })?.data,
+      });
       const secretFormat = detectSecretDecodingMode(params.creds.secret);
       const reason = classifyAuthFailure({
         configuredPublicKey: params.configuredPublicKey,
@@ -433,36 +542,54 @@ export const runClobAuthPreflight = async (params: {
       preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
       return { ok: false, status, reason, forced: Boolean(params.force) };
     }
-    params.logger.warn(`[CLOB][Preflight] FAIL status=${status ?? 'unknown'}`);
+    if (status && status >= 500) {
+      logPreflightFailure({
+        logger: params.logger,
+        stage: 'auth',
+        status,
+        message: responseErrorMessage || 'server_error',
+        data: (response as { data?: unknown })?.data,
+      });
+      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      return null;
+    }
+    if (status && status >= 400 && status < 500) {
+      logPreflightFailure({
+        logger: params.logger,
+        stage: 'auth',
+        status,
+        message: responseErrorMessage || 'bad_request',
+        data: (response as { data?: unknown })?.data,
+      });
+      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
+      preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
+      return { ok: true, status, forced: Boolean(params.force) };
+    }
+    logPreflightFailure({
+      logger: params.logger,
+      stage: 'auth',
+      status,
+      message: responseErrorMessage || 'unknown_error',
+      data: (response as { data?: unknown })?.data,
+    });
     preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
     return { ok: false, status, forced: Boolean(params.force) };
   } catch (error) {
-    const status = (error as { response?: { status?: number } })?.response?.status;
-    const code = (error as { code?: string })?.code ?? null;
-    const message = (error as { message?: string })?.message ?? String(error);
-    const data = (error as { response?: { data?: unknown } })?.response?.data ?? null;
+    const details = extractPreflightErrorDetails(error);
     params.logger.warn(`[CLOB][Preflight] request GET ${endpoint}`);
-    params.logger.warn(
-      `[CLOB][Preflight] FAIL status=${status ?? 'none'} code=${code ?? 'none'} message=${message}`,
-    );
-    if (data !== null && data !== undefined) {
-      let dataText = typeof data === 'string' ? data : JSON.stringify(data);
-      if (dataText === undefined) {
-        dataText = String(data);
-      }
-      dataText = dataText.replace(/\s+/g, ' ');
-      if (dataText.length > 200) {
-        dataText = dataText.slice(0, 200);
-      }
-      params.logger.warn(`[CLOB][Preflight] data=${dataText}`);
+    logPreflightFailure({
+      logger: params.logger,
+      stage: 'auth',
+      status: details.status,
+      code: details.code,
+      message: details.message,
+      data: details.data,
+    });
+    if (details.code && PREFLIGHT_TRANSIENT_CODES.has(details.code)) {
+      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      return null;
     }
-    const errorMessage = extractPreflightErrorMessage(error);
-    if (status === 400 && errorMessage.includes('Invalid asset type')) {
-      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
-      preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
-      return { ok: true, status, forced: Boolean(params.force) };
-    }
-    if (status === 401 || status === 403) {
+    if (details.status === 401 || details.status === 403) {
       const secretFormat = detectSecretDecodingMode(params.creds.secret);
       const reason = classifyAuthFailure({
         configuredPublicKey: params.configuredPublicKey,
@@ -477,17 +604,26 @@ export const runClobAuthPreflight = async (params: {
         pathIncludesQuery: messageComponents.path.includes('?'),
       });
 
-      params.logger.warn(`[CLOB][Preflight] FAIL ${status}`);
+      params.logger.warn(`[CLOB][Preflight] FAIL ${details.status}`);
       params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
       params.logger.warn(
         `[CLOB][401] address=${params.derivedSignerAddress ?? 'n/a'} sigType=${signatureType} funder=${funderAddress ?? 'none'} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
       );
 
       preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
-      return { ok: false, status, reason, forced: Boolean(params.force) };
+      return { ok: false, status: details.status, reason, forced: Boolean(params.force) };
+    }
+    if (details.status && details.status >= 500) {
+      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      return null;
+    }
+    if (details.status && details.status >= 400 && details.status < 500) {
+      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
+      preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
+      return { ok: true, status: details.status, forced: Boolean(params.force) };
     }
     preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
-    return { ok: false, status, forced: Boolean(params.force) };
+    return { ok: false, status: details.status, forced: Boolean(params.force) };
   }
 };
 

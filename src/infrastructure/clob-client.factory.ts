@@ -152,6 +152,10 @@ const extractDeriveErrorMessage = (error: unknown): string => {
 };
 
 const canDetectCreateApiKeyFailure = (error: unknown): boolean => {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status !== 400) {
+    return false;
+  }
   const message = extractDeriveErrorMessage(error) || sanitizeErrorMessage(error);
   return message.toLowerCase().includes('could not create api key');
 };
