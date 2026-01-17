@@ -130,7 +130,8 @@ const isResolvconfError = (err: unknown): boolean => {
   return (
     message.includes("resolvconf") ||
     message.includes("signature mismatch") ||
-    message.includes("useable init system")
+    message.includes("useable init system") ||
+    message.includes("unable to set dns")
   );
 };
 
@@ -180,6 +181,83 @@ const hasResolvconf = async (): Promise<boolean> => {
     }
   }
   return false;
+};
+
+/**
+ * Directly applies DNS configuration to /etc/resolv.conf as a fallback when
+ * resolvconf-based DNS setup fails. This handles cases where resolvconf is
+ * installed but fails due to container restrictions (e.g., Docker's management
+ * of /etc/resolv.conf).
+ *
+ * @param logger - Logger instance for status messages
+ * @param dns - DNS server addresses from WIREGUARD_DNS (comma-separated)
+ * @returns true if DNS was successfully applied, false otherwise
+ */
+const applyDnsFallback = async (
+  logger: Logger,
+  dns: string | undefined,
+): Promise<boolean> => {
+  if (!dns) {
+    return false;
+  }
+
+  const RESOLV_CONF = "/etc/resolv.conf";
+  const dnsServers = dns
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  if (dnsServers.length === 0) {
+    return false;
+  }
+
+  try {
+    // Read existing resolv.conf to preserve search/domain entries
+    let existingContent = "";
+    try {
+      existingContent = await fs.readFile(RESOLV_CONF, "utf-8");
+    } catch (readErr) {
+      // File not found is expected; other errors are logged but not fatal
+      const isNotFound =
+        readErr instanceof Error &&
+        "code" in readErr &&
+        readErr.code === "ENOENT";
+      if (!isNotFound) {
+        logger.warn(`Could not read ${RESOLV_CONF}: ${(readErr as Error).message}`);
+      }
+    }
+
+    // Preserve non-nameserver lines (search, domain, options)
+    // Also filter out any existing WireGuard DNS markers (case-insensitive)
+    const wgMarkerPattern = /^#\s*wireguard\s*dns\s*$/i;
+    const preservedLines = existingContent
+      .split(/\r?\n/)
+      .filter(
+        (line) =>
+          !line.trim().startsWith("nameserver") &&
+          !wgMarkerPattern.test(line.trim()) &&
+          line.trim().length > 0,
+      );
+
+    // Build new content with WireGuard DNS servers at the top
+    const wgMarker = "# WireGuard DNS";
+    const nameserverLines = dnsServers.map((s) => `nameserver ${s}`);
+    const newContent = [wgMarker, ...nameserverLines, ...preservedLines].join(
+      "\n",
+    );
+
+    await fs.writeFile(RESOLV_CONF, `${newContent}\n`);
+    logger.info(
+      `DNS applied directly to ${RESOLV_CONF}: ${dnsServers.join(", ")}`,
+    );
+    return true;
+  } catch (err) {
+    // /etc/resolv.conf may be read-only in some container configurations
+    logger.warn(
+      `Failed to apply DNS directly to ${RESOLV_CONF}: ${(err as Error).message}`,
+    );
+    return false;
+  }
 };
 
 const ensureResolvconfAvailable = async (
@@ -253,18 +331,23 @@ export async function startWireguard(logger: Logger): Promise<void> {
       logger.info(`WireGuard interface ${env.interfaceName} is up.`);
     } catch (err) {
       if (isResolvconfError(err)) {
-        const dnsHint = env.dns
-          ? ` DNS from WIREGUARD_DNS (${env.dns}) will be ignored unless resolvconf/openresolv is installed.`
-          : "";
         logger.warn(
-          `WireGuard DNS setup failed via resolvconf; retrying without DNS.${dnsHint}`,
+          `WireGuard DNS setup failed via resolvconf (this may happen when /etc/resolv.conf is managed by the container runtime).`,
         );
         await writeConfig(env, false);
         try {
           await execFileAsync("wg-quick", ["up", env.interfaceName]);
-          logger.info(
-            `WireGuard interface ${env.interfaceName} is up (DNS disabled).`,
-          );
+          // WireGuard is up without DNS, try to apply DNS directly
+          const dnsFallbackApplied = await applyDnsFallback(logger, env.dns);
+          if (dnsFallbackApplied) {
+            logger.info(
+              `WireGuard interface ${env.interfaceName} is up (DNS applied directly).`,
+            );
+          } else {
+            logger.info(
+              `WireGuard interface ${env.interfaceName} is up (DNS disabled).`,
+            );
+          }
         } catch (retryErr) {
           if (isMissingIp6tablesRestore(retryErr)) {
             logger.error(
