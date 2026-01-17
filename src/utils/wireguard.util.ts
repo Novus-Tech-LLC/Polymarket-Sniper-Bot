@@ -308,6 +308,19 @@ const ensureResolvconfAvailable = async (
   );
 };
 
+/**
+ * Checks if /etc/resolv.conf appears to be writable, indicating we can apply
+ * DNS directly without needing resolvconf.
+ */
+const canWriteResolvConf = async (): Promise<boolean> => {
+  try {
+    await fs.access("/etc/resolv.conf", fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export async function startWireguard(logger: Logger): Promise<void> {
   const env = getWireguardEnv();
   if (!env.enabled) {
@@ -315,8 +328,17 @@ export async function startWireguard(logger: Logger): Promise<void> {
   }
 
   try {
-    await ensureResolvconfAvailable(logger, env.dns);
-    await writeConfig(env, true);
+    // In container environments, /etc/resolv.conf is often managed by the runtime
+    // and writable. In such cases, we can skip resolvconf entirely and apply DNS
+    // directly, avoiding unnecessary warnings.
+    const preferDirectDns = env.dns && (await canWriteResolvConf());
+
+    if (!preferDirectDns) {
+      await ensureResolvconfAvailable(logger, env.dns);
+    }
+
+    // Write config without DNS if we'll apply it directly
+    await writeConfig(env, !preferDirectDns);
 
     if (env.forceRestart) {
       try {
@@ -328,7 +350,21 @@ export async function startWireguard(logger: Logger): Promise<void> {
 
     try {
       await execFileAsync("wg-quick", ["up", env.interfaceName]);
-      logger.info(`WireGuard interface ${env.interfaceName} is up.`);
+      // If we preferred direct DNS, apply it now
+      if (preferDirectDns) {
+        const dnsFallbackApplied = await applyDnsFallback(logger, env.dns);
+        if (dnsFallbackApplied) {
+          logger.info(
+            `WireGuard interface ${env.interfaceName} is up (DNS applied directly).`,
+          );
+        } else {
+          logger.info(
+            `WireGuard interface ${env.interfaceName} is up (DNS disabled).`,
+          );
+        }
+      } else {
+        logger.info(`WireGuard interface ${env.interfaceName} is up.`);
+      }
     } catch (err) {
       if (isResolvconfError(err)) {
         logger.warn(
