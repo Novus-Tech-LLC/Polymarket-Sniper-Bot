@@ -8,6 +8,9 @@ export default [
   eslint.configs.recommended,
   configPrettier,
   {
+    ignores: ['dist/**', 'node_modules/**', 'signer/**'],
+  },
+  {
     files: ['**/*.ts'],
     languageOptions: {
       parser: tsParser,
@@ -25,5 +28,4 @@ export default [
     },
   },
 ];
-
 

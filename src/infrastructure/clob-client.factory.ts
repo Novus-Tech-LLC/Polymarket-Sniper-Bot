@@ -337,9 +337,9 @@ const deriveApiCreds = async (
   if (createApiKeyBlocked && createApiKeyBlockedUntil > now) {
     const remainingSeconds = Math.ceil((createApiKeyBlockedUntil - now) / 1000);
     logger?.info(
-      `[CLOB] API key creation blocked; retry in ${remainingSeconds}s.`,
+      `[CLOB] API key creation blocked; retry in ${remainingSeconds}s. Skipping local derive.`,
     );
-    return attemptLocalDerive();
+    return undefined;
   } else if (createApiKeyBlocked && createApiKeyBlockedUntil <= now) {
     // Retry period expired, reset block
     logger?.info(
@@ -349,8 +349,12 @@ const deriveApiCreds = async (
     createApiKeyBlockedUntil = 0;
   }
 
+  // Defensive check: if blocked flag is set but timer expired, we should have reset above
   if (createApiKeyBlocked) {
-    return attemptLocalDerive();
+    logger?.warn(
+      "[CLOB] Unexpected state: API key creation blocked without timer. Skipping derive.",
+    );
+    return undefined;
   }
 
   try {
@@ -369,7 +373,9 @@ const deriveApiCreds = async (
       logger?.error(
         `[CLOB] Response: key=${Boolean(derived?.key)} secret=${Boolean(derived?.secret)} passphrase=${Boolean(derived?.passphrase)}`,
       );
-      return attemptLocalDerive();
+      // Do NOT call attemptLocalDerive() - incomplete server response means credentials
+      // were not properly registered, so local derive would produce unregistered credentials
+      return undefined;
     }
 
     // Valid credentials received, save and return
@@ -406,9 +412,15 @@ const deriveApiCreds = async (
         ); // Default 10 minutes
         createApiKeyBlockedUntil = Date.now() + retrySeconds * 1000;
         logger?.warn(
-          `[CLOB] Failed to create API key (400 error); falling back to local derive. Will retry in ${retrySeconds}s.`,
+          `[CLOB] Server rejected API key creation; will retry in ${retrySeconds}s. Skipping local derive.`,
         );
+        // Local derivation would produce credentials not registered with the server,
+        // causing 401 errors. The server must register credentials first.
+        return undefined;
       }
+      // For other 400/401 errors (e.g., auth issues with existing credentials),
+      // try local derive since credentials may already be registered on the server
+      // and just need to be re-derived locally to match
       return attemptLocalDerive();
     }
 
