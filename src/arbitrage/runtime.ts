@@ -1,7 +1,5 @@
 import { ConsoleLogger } from '../utils/logger.util';
 import { createPolymarketClient } from '../infrastructure/clob-client.factory';
-import { isAuthError } from '../infrastructure/clob-auth';
-import { runClobAuthMatrixPreflight, runClobAuthPreflight } from '../clob/diagnostics';
 import { loadArbConfig } from '../config/loadConfig';
 import { ArbitrageEngine } from './engine';
 import { PolymarketMarketDataProvider } from './provider/polymarket.provider';
@@ -11,9 +9,8 @@ import { ArbRiskManager } from './risk/risk-manager';
 import { ArbTradeExecutor } from './executor/trade-executor';
 import { DecisionLogger } from './utils/decision-logger';
 import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
-import { sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
 import { formatClobCredsChecklist, isApiKeyCreds } from '../utils/clob-credentials.util';
-import { formatClobAuthFailureHint } from '../utils/clob-auth-hint.util';
+import { ensureTradingReady } from '../polymarket/preflight';
 
 export async function startArbitrageEngine(
   overrides: Record<string, string | undefined> = {},
@@ -57,52 +54,17 @@ export async function startArbitrageEngine(
   const credsComplete = Boolean(clientCreds);
   config.clobCredsComplete = credsComplete;
   config.detectOnly = !credsComplete || config.detectOnly;
-  if (credsComplete) {
-    try {
-      const matrixEnabled = process.env.CLOB_PREFLIGHT_MATRIX === 'true'
-        || process.env.clob_preflight_matrix === 'true';
-      if (matrixEnabled) {
-        const matrix = await runClobAuthMatrixPreflight({
-          client,
-          logger,
-          creds: clientCreds,
-          derivedCreds: client.derivedCreds,
-        });
-        if (matrix && !matrix.ok) {
-          config.detectOnly = true;
-        }
-      } else {
-        const preflight = await runClobAuthPreflight({
-          client,
-          logger,
-          creds: clientCreds,
-          derivedSignerAddress: client.derivedSignerAddress,
-          configuredPublicKey: config.proxyWallet,
-          privateKeyPresent: Boolean(config.privateKey),
-          derivedCredsEnabled: config.clobDeriveEnabled,
-          force: process.env.CLOB_AUTH_FORCE === 'true',
-        });
-        if (preflight && !preflight.ok && (preflight.status === 401 || preflight.status === 403)) {
-          config.detectOnly = true;
-          logger.warn('[CLOB] Auth preflight failed; switching to detect-only.');
-          logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
-        } else if (preflight && !preflight.ok) {
-          logger.warn('[CLOB] Auth preflight failed; continuing with order submissions.');
-        }
-      }
-    } catch (err) {
-      const maybeError = err as { code?: string; message?: string };
-      if (maybeError?.code === 'ECONNRESET') {
-        logger.warn(`[CLOB] Auth preflight transient failure; continuing. ${sanitizeErrorMessage(err)}`);
-      } else if (isAuthError(err)) {
-        config.detectOnly = true;
-        logger.warn(`[CLOB] Auth preflight failed; switching to detect-only. ${sanitizeErrorMessage(err)}`);
-        logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
-      } else {
-        logger.warn(`[CLOB] Auth preflight failed; continuing. ${sanitizeErrorMessage(err)}`);
-      }
-    }
-  }
+  const tradingReady = await ensureTradingReady({
+    client,
+    logger,
+    privateKey: config.privateKey,
+    configuredPublicKey: config.proxyWallet,
+    detectOnly: config.detectOnly,
+    clobCredsComplete: config.clobCredsComplete,
+    clobDeriveEnabled: config.clobDeriveEnabled,
+    collateralTokenDecimals: config.collateralTokenDecimals,
+  });
+  config.detectOnly = tradingReady.detectOnly;
 
   const stateStore = new InMemoryStateStore(config.stateDir, config.snapshotState);
   await stateStore.load();

@@ -6,7 +6,7 @@ import type { Logger } from '../../utils/logger.util';
 import type { ArbConfig } from '../config';
 import type { MarketDataProvider, TradeExecutionResult, TradeExecutor, TradePlan } from '../types';
 import { calculateEdgeBps, estimateProfitUsd } from '../utils/bps';
-import { POLYMARKET_CONTRACTS } from '../../constants/polymarket.constants';
+import { resolvePolymarketContracts } from '../../polymarket/contracts';
 import { withAuthRetry } from '../../infrastructure/clob-auth';
 import {
   getOrderSubmissionController,
@@ -18,6 +18,7 @@ import {
   formatCollateralLabel,
   resolveSignerAddress,
 } from '../../utils/funds-allowance.util';
+import { readApprovalsConfig } from '../../polymarket/preflight';
 
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -72,6 +73,13 @@ class AllowanceManager {
       throw new Error('approval_cooldown');
     }
 
+    const approvalsConfig = readApprovalsConfig();
+    const liveTradingEnabled = process.env.ARB_LIVE_TRADING === 'I_UNDERSTAND_THE_RISKS';
+    if (!liveTradingEnabled || approvalsConfig.mode !== 'true') {
+      this.logger.warn('[ARB] Approval blocked (live trading disabled or APPROVALS_AUTO!=true).');
+      throw new Error('approval_blocked');
+    }
+
     const approveAmount = this.approveUnlimited ? constants.MaxUint256 : requiredAmount;
     this.logger.info(`[ARB] Approving collateral allowance ${approveAmount.toString()}`);
     const tx = await this.contract.approve(this.spender, approveAmount);
@@ -99,10 +107,16 @@ export class ArbTradeExecutor implements TradeExecutor {
     this.provider = params.provider;
     this.config = params.config;
     this.logger = params.logger;
+    const contracts = resolvePolymarketContracts();
+    const spender = contracts.ctfExchangeAddress ?? constants.AddressZero;
+    if (!contracts.ctfExchangeAddress) {
+      this.logger.warn('[ARB] Missing POLY_CTF_EXCHANGE_ADDRESS; forcing detect-only.');
+      this.config.detectOnly = true;
+    }
     this.allowanceManager = new AllowanceManager({
       wallet: params.client.wallet,
       tokenAddress: this.config.collateralTokenAddress,
-      spender: POLYMARKET_CONTRACTS[1],
+      spender,
       logger: params.logger,
       approveUnlimited: this.config.approveUnlimited,
     });

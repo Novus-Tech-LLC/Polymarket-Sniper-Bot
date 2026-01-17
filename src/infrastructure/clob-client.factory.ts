@@ -114,7 +114,11 @@ const logAuthHeaderPresence = async (
   try {
     const signer = (client as ClobClient & { signer?: Wallet | providers.JsonRpcSigner }).signer;
     if (!signer) return;
-    const params = { asset_type: AssetType.COLLATERAL };
+    const signatureType = (client as { orderBuilder?: { signatureType?: number } }).orderBuilder?.signatureType;
+    const params = {
+      asset_type: AssetType.COLLATERAL,
+      ...(signatureType !== undefined ? { signature_type: signatureType } : {}),
+    };
     const { signedPath, paramsKeys } = buildSignedPath('/balance-allowance', params);
     const timestamp = Math.floor(Date.now() / 1000);
     const headers = await createL2Headers(signer, creds, {
@@ -124,7 +128,7 @@ const logAuthHeaderPresence = async (
     const presence = getAuthHeaderPresence(headers, { secretConfigured: Boolean(creds?.secret) });
     logger.info(`[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`);
     logger.info(
-      `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'}`,
+      `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'} signatureIncludesQuery=${signedPath.includes('?')}`,
     );
     logAuthSigningDiagnostics({
       logger,

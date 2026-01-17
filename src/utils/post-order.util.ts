@@ -40,6 +40,11 @@ const missingOrderbooks = new Set<string>();
 
 export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionResult> {
   const { client, marketId, tokenId, outcome, side, sizeUsd, maxAcceptablePrice, logger } = input;
+  const liveTradingEnabled = process.env.ARB_LIVE_TRADING === 'I_UNDERSTAND_THE_RISKS';
+  if (!liveTradingEnabled) {
+    logger.warn('[CLOB] Live trading disabled; skipping order submission.');
+    return { status: 'skipped', reason: 'LIVE_TRADING_DISABLED' };
+  }
   const settings = toOrderSubmissionSettings({
     minOrderUsd: input.orderConfig?.minOrderUsd,
     orderSubmitMinIntervalMs: input.orderConfig?.orderSubmitMinIntervalMs,

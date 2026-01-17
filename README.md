@@ -186,6 +186,32 @@ POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
 > ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES` and `PUBLIC_KEY`. The quick start above is intentionally minimal to highlight presets.
 > ✅ **Note:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` are required for CLOB access unless `CLOB_DERIVE_CREDS=true` is set to derive credentials from `PRIVATE_KEY`.
 
+### Quickstart for Live Trading
+
+Live trading is locked behind an explicit opt-in and on-chain approvals. Minimum required environment variables:
+
+- `ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS`
+- `PRIVATE_KEY`, `PUBLIC_KEY`, `RPC_URL`
+- `COLLATERAL_TOKEN_ADDRESS` (USDC on Polygon)
+- `POLY_CTF_EXCHANGE_ADDRESS` (spender for USDC approvals)
+- `POLY_CTF_ERC1155_ADDRESS` (CTF ERC1155 contract)
+
+Approvals flow (startup preflight):
+
+- `APPROVALS_AUTO=false` (default): prints exact approval instructions and stays detect-only.
+- `APPROVALS_AUTO=dryrun`: prints the calldata/tx params it would send and stays detect-only.
+- `APPROVALS_AUTO=true`: sends approval txs once, then continues if confirmed.
+
+Dry-run approvals example:
+
+```env
+ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
+APPROVALS_AUTO=dryrun
+APPROVALS_MIN_USDC_ALLOWANCE=1000
+POLY_CTF_EXCHANGE_ADDRESS=0x...
+POLY_CTF_ERC1155_ADDRESS=0x...
+```
+
 ## CLOB Auth Diagnostics
 
 The bot ships with safe diagnostics to help debug persistent `401 Unauthorized/Invalid api key` errors **without logging secrets**. The diagnostics are logged at startup and during the preflight auth call.

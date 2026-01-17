@@ -556,9 +556,12 @@ export const runClobAuthPreflight = async (params: {
   const endpoint = '/balance-allowance';
   params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
   const requestParams = { asset_type: AssetType.COLLATERAL };
-  const { signedPath, paramsKeys } = buildSignedPath(endpoint, requestParams);
+  const signedParams = signatureType !== undefined
+    ? { ...requestParams, signature_type: signatureType }
+    : requestParams;
+  const { signedPath, paramsKeys } = buildSignedPath(endpoint, signedParams);
   params.logger.info(
-    `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'}`,
+    `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'} signatureIncludesQuery=${signedPath.includes('?')}`,
   );
   const messageComponents = buildAuthMessageComponents(timestamp, 'GET', signedPath);
   const { messageDigest, secretDecodingUsed, signatureEncoding } = logAuthSigningDiagnostics({

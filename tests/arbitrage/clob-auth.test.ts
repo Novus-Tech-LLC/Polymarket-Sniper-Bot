@@ -14,6 +14,8 @@ afterEach(() => {
 });
 
 test('postOrder applies cached API creds before placing orders', async () => {
+  const previousLiveTrading = process.env.ARB_LIVE_TRADING;
+  process.env.ARB_LIVE_TRADING = 'I_UNDERSTAND_THE_RISKS';
   const callOrder: string[] = [];
   let appliedCreds: { key: string; secret: string; passphrase: string } | undefined;
 
@@ -36,26 +38,30 @@ test('postOrder applies cached API creds before placing orders', async () => {
 
   await initializeApiCreds(client, { key: 'key', secret: 'secret', passphrase: 'pass' });
 
-  await postOrder({
-    client,
-    tokenId: 'token-1',
-    outcome: 'YES',
-    side: 'BUY',
-    sizeUsd: 1,
-    logger: {
-      info: () => undefined,
-      warn: () => undefined,
-      error: () => undefined,
-      debug: () => undefined,
-    },
-    orderConfig: {
-      minOrderUsd: 0,
-      orderSubmitMinIntervalMs: 0,
-      orderSubmitMaxPerHour: 1000,
-      orderSubmitMarketCooldownSeconds: 0,
-      cloudflareCooldownSeconds: 0,
-    },
-  });
+  try {
+    await postOrder({
+      client,
+      tokenId: 'token-1',
+      outcome: 'YES',
+      side: 'BUY',
+      sizeUsd: 1,
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+        debug: () => undefined,
+      },
+      orderConfig: {
+        minOrderUsd: 0,
+        orderSubmitMinIntervalMs: 0,
+        orderSubmitMaxPerHour: 1000,
+        orderSubmitMarketCooldownSeconds: 0,
+        cloudflareCooldownSeconds: 0,
+      },
+    });
+  } finally {
+    process.env.ARB_LIVE_TRADING = previousLiveTrading;
+  }
 
   assert.ok(callOrder.indexOf('set') !== -1);
   assert.ok(callOrder.indexOf('post') !== -1);
@@ -64,6 +70,8 @@ test('postOrder applies cached API creds before placing orders', async () => {
 });
 
 test('postOrder re-applies API creds and retries once on auth failure', async () => {
+  const previousLiveTrading = process.env.ARB_LIVE_TRADING;
+  process.env.ARB_LIVE_TRADING = 'I_UNDERSTAND_THE_RISKS';
   let postAttempts = 0;
   const setCalls: string[] = [];
 
@@ -91,26 +99,30 @@ test('postOrder re-applies API creds and retries once on auth failure', async ()
   await initializeApiCreds(client, { key: 'key', secret: 'secret', passphrase: 'pass' });
   setCalls.length = 0;
 
-  await postOrder({
-    client,
-    tokenId: 'token-2',
-    outcome: 'YES',
-    side: 'BUY',
-    sizeUsd: 1,
-    logger: {
-      info: () => undefined,
-      warn: () => undefined,
-      error: () => undefined,
-      debug: () => undefined,
-    },
-    orderConfig: {
-      minOrderUsd: 0,
-      orderSubmitMinIntervalMs: 0,
-      orderSubmitMaxPerHour: 1000,
-      orderSubmitMarketCooldownSeconds: 0,
-      cloudflareCooldownSeconds: 0,
-    },
-  });
+  try {
+    await postOrder({
+      client,
+      tokenId: 'token-2',
+      outcome: 'YES',
+      side: 'BUY',
+      sizeUsd: 1,
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+        debug: () => undefined,
+      },
+      orderConfig: {
+        minOrderUsd: 0,
+        orderSubmitMinIntervalMs: 0,
+        orderSubmitMaxPerHour: 1000,
+        orderSubmitMarketCooldownSeconds: 0,
+        cloudflareCooldownSeconds: 0,
+      },
+    });
+  } finally {
+    process.env.ARB_LIVE_TRADING = previousLiveTrading;
+  }
 
   assert.equal(postAttempts, 2);
   assert.equal(setCalls.length, 2);
