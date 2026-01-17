@@ -2,6 +2,9 @@ FROM node:20-alpine AS base
 WORKDIR /app
 
 COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* ./
+COPY patches ./patches
+
+# Install all dependencies including devDependencies (needed for TypeScript build)
 RUN npm ci || npm install
 
 COPY tsconfig.json ./
