@@ -111,9 +111,14 @@ const fetchBalanceAllowance = async (
 const isSnapshotSufficient = (snapshot: BalanceAllowanceSnapshot, requiredUsd: number): boolean =>
   snapshot.balanceUsd >= requiredUsd && snapshot.allowanceUsd >= requiredUsd;
 
-const getBalanceUpdater = (client: ClobClient): (() => Promise<void>) | null => {
+const getBalanceUpdater = (client?: ClobClient): (() => Promise<void>) | null => {
+  if (!client) return null;
   const updater = (client as { updateBalanceAllowance?: () => Promise<void> }).updateBalanceAllowance;
-  return typeof updater === 'function' ? updater : null;
+  const canL2Auth = (client as { canL2Auth?: () => void }).canL2Auth;
+  if (typeof updater !== 'function' || typeof canL2Auth !== 'function') {
+    return null;
+  }
+  return updater.bind(client);
 };
 
 export const checkFundsAndAllowance = async (params: FundsAllowanceParams): Promise<FundsAllowanceResult> => {
@@ -218,7 +223,7 @@ export const checkFundsAndAllowance = async (params: FundsAllowanceParams): Prom
       `[CLOB] Balance/allowance check failed (BALANCE_ALLOWANCE_UNAVAILABLE): required=${formatUsd(requiredUsd)} signer=${signerAddress} collateral=${collateralLabel} error=${message}`,
     );
     return {
-      ok: false,
+      ok: true,
       requiredUsd,
       balanceUsd: 0,
       allowanceUsd: 0,

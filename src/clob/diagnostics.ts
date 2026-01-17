@@ -39,7 +39,7 @@ const PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE = 'base64,base64url,raw';
 const PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING = 'base64url,base64';
 const PREFLIGHT_MATRIX_DEFAULT_ENDPOINT = '/balance-allowance';
 const PREFLIGHT_MATRIX_ERROR_TRUNCATE = 160;
-const PREFLIGHT_DATA_TRUNCATE = 200;
+const PREFLIGHT_DATA_TRUNCATE = 300;
 const PREFLIGHT_CONNECTIVITY_MAX_TRIES = 5;
 const PREFLIGHT_CONNECTIVITY_BACKOFF_BASE_MS = 500;
 const PREFLIGHT_TRANSIENT_CODES = new Set(['ECONNRESET', 'ETIMEDOUT']);
@@ -446,7 +446,7 @@ const logPreflightFailure = (params: {
   message?: string;
   data?: unknown;
 }): void => {
-  const message = params.message ?? 'unknown';
+  const message = params.message?.trim() ? params.message : 'unknown_error';
   params.logger.warn(
     `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? 'none'} code=${params.code ?? 'none'} message=${message}`,
   );
