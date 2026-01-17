@@ -1,6 +1,7 @@
 import { BigNumber, Contract, constants, utils } from 'ethers';
 import type { Wallet } from 'ethers';
 import type { Logger } from '../utils/logger.util';
+import { estimateGasFees, retryTxWithBackoff } from '../utils/gas';
 import { resolvePolymarketContracts } from './contracts';
 import type { RelayerContext } from './relayer';
 import { executeRelayerTxs } from './relayer';
@@ -219,7 +220,10 @@ export const ensureApprovals = async (params: {
     return { ok: false, snapshot };
   }
 
-  if (params.relayer?.enabled && params.relayer.client) {
+  const useRelayerForApprovals = readEnv('USE_RELAYER_FOR_APPROVALS') !== 'false'; // Default true
+  
+  if (params.relayer?.enabled && params.relayer.client && useRelayerForApprovals) {
+    params.logger.info('[Preflight][Approvals] Using relayer for gasless approvals.');
     const relayerTxs = approvalsToSend.map((approval) => ({
       to: approval.to,
       data: approval.data,
@@ -237,20 +241,30 @@ export const ensureApprovals = async (params: {
     const overrides = await buildTxOverrides(params.wallet, params.config.gasBumpBps, params.logger);
     for (const approval of approvalsToSend) {
       params.logger.info(`[Preflight][Approvals] Sending ${approval.label}`);
-      if (approval.type === 'erc20') {
-        const tx = await new Contract(contracts.usdcAddress, ERC20_ABI, params.wallet).approve(
-          approval.spender,
-          approvalAmount,
-          overrides,
-        );
-        params.logger.info(`[Preflight][Approvals] Tx submitted ${tx.hash}`);
-        await tx.wait(params.config.confirmations);
-      } else {
-        const tx = await new Contract(contracts.ctfErc1155Address!, ERC1155_ABI, params.wallet)
-          .setApprovalForAll(approval.spender, true, overrides);
-        params.logger.info(`[Preflight][Approvals] Tx submitted ${tx.hash}`);
-        await tx.wait(params.config.confirmations);
-      }
+      
+      // Retry approval tx with exponential backoff
+      await retryTxWithBackoff(
+        async () => {
+          if (approval.type === 'erc20') {
+            const tx = await new Contract(contracts.usdcAddress, ERC20_ABI, params.wallet).approve(
+              approval.spender,
+              approvalAmount,
+              overrides,
+            );
+            params.logger.info(`[Preflight][Approvals] Tx submitted ${tx.hash}`);
+            await tx.wait(params.config.confirmations);
+          } else {
+            const tx = await new Contract(contracts.ctfErc1155Address!, ERC1155_ABI, params.wallet)
+              .setApprovalForAll(approval.spender, true, overrides);
+            params.logger.info(`[Preflight][Approvals] Tx submitted ${tx.hash}`);
+            await tx.wait(params.config.confirmations);
+          }
+        },
+        {
+          logger: params.logger,
+          description: approval.label,
+        },
+      );
     }
   }
 
@@ -276,10 +290,19 @@ const buildTxOverrides = async (
   wallet: Wallet,
   gasBumpBps: number,
   logger: Logger,
-): Promise<{ gasPrice?: BigNumber }> => {
-  if (!wallet.provider || gasBumpBps <= 0) return {};
-  const gasPrice = await wallet.provider.getGasPrice();
-  const bumped = gasPrice.mul(10000 + gasBumpBps).div(10000);
-  logger.info(`[Preflight][Approvals] Gas bump applied bps=${gasBumpBps} gasPrice=${utils.formatUnits(bumped, 'gwei')} gwei`);
-  return { gasPrice: bumped };
+): Promise<{ maxPriorityFeePerGas?: BigNumber; maxFeePerGas?: BigNumber }> => {
+  if (!wallet.provider) return {};
+  
+  // Use EIP-1559 gas estimation with proper floors for Polygon
+  const multiplier = gasBumpBps > 0 ? 1 + gasBumpBps / 10000 : undefined;
+  const gasEstimate = await estimateGasFees({
+    provider: wallet.provider,
+    logger,
+    multiplier,
+  });
+  
+  return {
+    maxPriorityFeePerGas: gasEstimate.maxPriorityFeePerGas,
+    maxFeePerGas: gasEstimate.maxFeePerGas,
+  };
 };

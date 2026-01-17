@@ -43,6 +43,7 @@ const SERVER_TIME_SKEW_THRESHOLD_SECONDS = 30;
 let polyAddressDiagLogged = false;
 let cachedDerivedCreds: ApiKeyCreds | null = null;
 let createApiKeyBlocked = false;
+let createApiKeyBlockedUntil = 0; // Timestamp for retry backoff
 let deriveFallbackAttempted = false;
 
 const readEnvValue = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
@@ -167,6 +168,7 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
   if (cachedDerivedCreds) {
     return cachedDerivedCreds;
   }
+  
   const deriveClient = new ClobClient(
     POLYMARKET_API.BASE_URL,
     Chain.POLYGON,
@@ -184,12 +186,30 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
     if (deriveFallbackAttempted) return cachedDerivedCreds ?? undefined;
     deriveFallbackAttempted = true;
     if (!deriveFn.deriveApiKey) return undefined;
-    const derived = await deriveFn.deriveApiKey();
-    if (derived?.key && derived?.secret && derived?.passphrase) {
-      cachedDerivedCreds = derived;
+    try {
+      const derived = await deriveFn.deriveApiKey();
+      if (derived?.key && derived?.secret && derived?.passphrase) {
+        cachedDerivedCreds = derived;
+      }
+      return cachedDerivedCreds ?? derived;
+    } catch (err) {
+      logger?.warn(`[CLOB] Local derive failed: ${sanitizeErrorMessage(err)}`);
+      return undefined;
     }
-    return cachedDerivedCreds ?? derived;
   };
+  
+  // Check backoff timer
+  const now = Date.now();
+  if (createApiKeyBlocked && createApiKeyBlockedUntil > now) {
+    const remainingSeconds = Math.ceil((createApiKeyBlockedUntil - now) / 1000);
+    logger?.info(`[CLOB] API key creation blocked; retry in ${remainingSeconds}s.`);
+    return attemptLocalDerive();
+  } else if (createApiKeyBlocked && createApiKeyBlockedUntil <= now) {
+    // Retry period expired, reset block
+    logger?.info('[CLOB] API key creation retry period expired; attempting again.');
+    createApiKeyBlocked = false;
+    createApiKeyBlockedUntil = 0;
+  }
 
   if (createApiKeyBlocked) {
     return attemptLocalDerive();
@@ -206,7 +226,9 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
   } catch (error) {
     if (canDetectCreateApiKeyFailure(error)) {
       createApiKeyBlocked = true;
-      logger?.warn('[CLOB] Failed to create API key; falling back to local derive.');
+      const retrySeconds = parseInt(readEnvValue('AUTH_DERIVE_RETRY_SECONDS') || '600', 10); // Default 10 minutes
+      createApiKeyBlockedUntil = Date.now() + retrySeconds * 1000;
+      logger?.warn(`[CLOB] Failed to create API key (400 error); falling back to local derive. Will retry in ${retrySeconds}s. Error: ${extractDeriveErrorMessage(error)}`);
       return attemptLocalDerive();
     }
     throw error;

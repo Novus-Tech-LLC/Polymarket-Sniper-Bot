@@ -193,7 +193,8 @@ Live trading is locked behind an explicit opt-in and on-chain approvals. The bot
 **Minimum required environment variables**
 
 - `ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS`
-- `PRIVATE_KEY`, `RPC_URL`
+- `PRIVATE_KEY` (64 hex chars or 0x + 64 hex chars, whitespace is trimmed)
+- `RPC_URL`
 - `COLLATERAL_TOKEN_ADDRESS` (USDC.e on Polygon)
 - `POLY_CTF_ADDRESS` (CTF ERC1155 contract)
 - `POLY_CTF_EXCHANGE_ADDRESS` (spender for USDC + ERC1155 approvals)
@@ -201,16 +202,41 @@ Live trading is locked behind an explicit opt-in and on-chain approvals. The bot
 - `APPROVAL_MIN_USDC=1000` (minimum allowance target)
 - `APPROVAL_MAX_UINT=true` (approve max uint256)
 
+**Gas fee configuration (EIP-1559 for Polygon)**
+
+- `POLY_MAX_PRIORITY_FEE_GWEI=30` (minimum priority fee in gwei, default 30)
+- `POLY_MAX_FEE_GWEI=60` (minimum max fee in gwei, default 60)
+- `POLY_GAS_MULTIPLIER=1.2` (gas fee multiplier, default 1.2)
+- `APPROVALS_MAX_RETRY_ATTEMPTS=3` (max retry attempts for approval txs, default 3)
+
 **Relayer signing (recommended, gasless approvals)**
 
-- `SIGNER_URL=http://signer:8080/sign`
-- `RELAYER_URL=https://relayer-v2.polymarket.com/`
+- `SIGNER_URL=http://signer:8080/sign` (optional, for remote signer)
+- `RELAYER_URL=https://relayer-v2.polymarket.com/` (default)
+- `USE_RELAYER_FOR_APPROVALS=true` (default true when builder creds are present)
+- `RELAYER_TX_TYPE=SAFE` (default SAFE, can be PROXY)
 
-The signer container reads these builder credentials:
+The bot can use builder credentials directly (no signer container needed):
 
 - `POLY_BUILDER_API_KEY`
 - `POLY_BUILDER_API_SECRET`
 - `POLY_BUILDER_API_PASSPHRASE`
+
+Or use a remote signer container (legacy method):
+
+- `SIGNER_URL=http://signer:8080/sign`
+- `SIGNER_AUTH_TOKEN` (optional)
+
+**CLOB API credentials**
+
+- `CLOB_DERIVE_CREDS=true` (derive API key from private key, recommended)
+- `AUTH_DERIVE_RETRY_SECONDS=600` (retry delay after 400 error, default 600s/10min)
+
+Or provide explicit credentials:
+
+- `POLYMARKET_API_KEY`
+- `POLYMARKET_API_SECRET`
+- `POLYMARKET_API_PASSPHRASE`
 
 Approvals flow (startup preflight):
 
@@ -238,7 +264,7 @@ POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
 POLY_CTF_ADDRESS=0x4d97dcd97ec945f40cf65f87097ace5ea0476045
 ```
 
-If `SIGNER_URL` is not provided (or the signer is unavailable), the bot falls back to **on-chain approvals via your EOA** using the configured `RPC_URL`.
+If builder credentials are provided or a signer is configured, the bot can use **gasless approvals via the Polymarket relayer**. Otherwise, it falls back to **on-chain approvals via your EOA** using the configured `RPC_URL` with proper EIP-1559 gas estimation.
 
 ### Preflight CLI
 
@@ -249,12 +275,33 @@ npm run build
 node dist/tools/preflight.js
 ```
 
+**Preflight Summary Output**
+
+The preflight process now outputs a comprehensive summary at the end:
+
+```
+[Preflight][Summary] signer=0x... effective_trading_address=0x... relayer_enabled=true approvals_ok=true auth_ok=true ready_to_trade=true
+```
+
+Where:
+- `signer`: Your EOA address derived from PRIVATE_KEY
+- `effective_trading_address`: The address that will be used for trading (EOA or Safe proxy)
+- `relayer_enabled`: Whether relayer/builder credentials are configured
+- `approvals_ok`: Whether all required token approvals are in place
+- `auth_ok`: Whether CLOB API credentials are available (explicit or derived)
+- `ready_to_trade`: Overall readiness status (true = can execute trades)
+
 ## CLOB Auth Diagnostics
 
 The bot ships with safe diagnostics to help debug persistent `401 Unauthorized/Invalid api key` errors **without logging secrets**. The diagnostics are logged at startup and during the preflight auth call.
 
 **What you’ll see**
 
+
+- `[Keys]` private key format validation (no key exposure)
+- `[Gas]` RPC feeData and selected gas parameters for EIP-1559
+- `[Relayer]` relayer/builder configuration status
+- `[CLOB]` API key creation backoff timer (for derived credentials)
 - `[CLOB][Diag]` identity summary: derived signer address, configured public key, match status, chain ID, host, signature type, funder/maker addresses, masked API key ID, and key/secret/passphrase presence booleans.
 - `[CLOB][Diag][AuthFunds]` auth+funds summary: derived signer, configured public key match, effective `POLY_ADDRESS`, signature type, funder/proxy address, and credential mode (`explicit` vs `derived`).
 - `[CLOB][Diag][Sign]` signing summary: method/path/body flags, message hash (sha256 prefix), secret hash (sha256 prefix of decoded bytes), and the signature/secret encoding modes.

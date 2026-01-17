@@ -138,11 +138,21 @@ export const ensureTradingReady = async (
 
   if (!liveTradingEnabled) {
     params.logger.info('[Preflight] READY_TO_TRADE=false reason=LIVE_TRADING_DISABLED');
+    logPreflightSummary({
+      logger: params.logger,
+      signer: derivedSignerAddress,
+      effectiveTradingAddress: tradingAddress,
+      relayerEnabled: relayer.enabled,
+      approvalsOk: false,
+      authOk: params.clobCredsComplete || params.clobDeriveEnabled,
+      readyToTrade: false,
+    });
     (params.client as ClobClient & { relayerContext?: ReturnType<typeof createRelayerContext> }).relayerContext = relayer;
     return { detectOnly: true };
   }
 
   let approvalResult;
+  let approvalsOk = false;
   try {
     approvalResult = await ensureApprovals({
       wallet,
@@ -151,9 +161,11 @@ export const ensureTradingReady = async (
       logger: params.logger,
       config: approvalsConfig,
     });
+    approvalsOk = approvalResult?.ok ?? false;
   } catch (error) {
     params.logger.warn(`[Preflight][Approvals] Failed to ensure approvals. ${sanitizeErrorMessage(error)}`);
     detectOnly = true;
+    approvalsOk = false;
   }
 
   if (approvalResult) {
@@ -168,14 +180,46 @@ export const ensureTradingReady = async (
 
     if (!approvalResult.ok) {
       detectOnly = true;
+      approvalsOk = false;
     }
+  } else {
+    // If no approval result, approvals failed
+    detectOnly = true;
+    approvalsOk = false;
   }
 
+  const authOk = params.clobCredsComplete || params.clobDeriveEnabled;
+  const readyToTrade = !detectOnly && approvalsOk && authOk;
+
   params.logger.info(
-    `[Preflight] READY_TO_TRADE=${!detectOnly} reason=${detectOnly ? 'CHECKS_FAILED' : 'OK'}`,
+    `[Preflight] READY_TO_TRADE=${readyToTrade} reason=${detectOnly ? 'CHECKS_FAILED' : 'OK'}`,
   );
+
+  logPreflightSummary({
+    logger: params.logger,
+    signer: derivedSignerAddress,
+    effectiveTradingAddress: tradingAddress,
+    relayerEnabled: relayer.enabled,
+    approvalsOk,
+    authOk,
+    readyToTrade,
+  });
 
   (params.client as ClobClient & { relayerContext?: ReturnType<typeof createRelayerContext> }).relayerContext = relayer;
 
   return { detectOnly };
+};
+
+const logPreflightSummary = (params: {
+  logger: Logger;
+  signer: string;
+  effectiveTradingAddress: string;
+  relayerEnabled: boolean;
+  approvalsOk: boolean;
+  authOk: boolean;
+  readyToTrade: boolean;
+}): void => {
+  params.logger.info(
+    `[Preflight][Summary] signer=${params.signer} effective_trading_address=${params.effectiveTradingAddress} relayer_enabled=${params.relayerEnabled} approvals_ok=${params.approvalsOk} auth_ok=${params.authOk} ready_to_trade=${params.readyToTrade}`,
+  );
 };
