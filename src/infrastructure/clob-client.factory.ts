@@ -40,6 +40,9 @@ export type CreateClientInput = {
 
 const SERVER_TIME_SKEW_THRESHOLD_SECONDS = 30;
 let polyAddressDiagLogged = false;
+let cachedDerivedCreds: ApiKeyCreds | null = null;
+let createApiKeyBlocked = false;
+let deriveFallbackAttempted = false;
 
 const readEnvValue = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
 
@@ -134,7 +137,29 @@ const logAuthHeaderPresence = async (
   }
 };
 
+const extractErrorPayloadMessage = (payload: unknown): string => {
+  if (typeof payload === 'string') return payload;
+  if (payload && typeof payload === 'object') return JSON.stringify(payload);
+  return '';
+};
+
+const extractDeriveErrorMessage = (error: unknown): string => {
+  const maybeError = error as { response?: { data?: unknown }; message?: string };
+  const responseMessage = extractErrorPayloadMessage(maybeError?.response?.data);
+  if (responseMessage) return responseMessage;
+  if (typeof maybeError?.message === 'string') return maybeError.message;
+  return '';
+};
+
+const canDetectCreateApiKeyFailure = (error: unknown): boolean => {
+  const message = extractDeriveErrorMessage(error) || sanitizeErrorMessage(error);
+  return message.toLowerCase().includes('could not create api key');
+};
+
 const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCreds | undefined> => {
+  if (cachedDerivedCreds) {
+    return cachedDerivedCreds;
+  }
   const deriveClient = new ClobClient(
     POLYMARKET_API.BASE_URL,
     Chain.POLYGON,
@@ -145,12 +170,40 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
   const deriveFn = deriveClient as ClobClient & {
     create_or_derive_api_creds?: () => Promise<ApiKeyCreds>;
     createOrDeriveApiKey?: () => Promise<ApiKeyCreds>;
+    deriveApiKey?: () => Promise<ApiKeyCreds>;
   };
 
-  if (deriveFn.create_or_derive_api_creds) {
-    return deriveFn.create_or_derive_api_creds();
+  const attemptLocalDerive = async (): Promise<ApiKeyCreds | undefined> => {
+    if (deriveFallbackAttempted) return cachedDerivedCreds ?? undefined;
+    deriveFallbackAttempted = true;
+    if (!deriveFn.deriveApiKey) return undefined;
+    const derived = await deriveFn.deriveApiKey();
+    if (derived?.key && derived?.secret && derived?.passphrase) {
+      cachedDerivedCreds = derived;
+    }
+    return cachedDerivedCreds ?? derived;
+  };
+
+  if (createApiKeyBlocked) {
+    return attemptLocalDerive();
   }
-  return deriveFn.createOrDeriveApiKey?.();
+
+  try {
+    const derived = deriveFn.create_or_derive_api_creds
+      ? await deriveFn.create_or_derive_api_creds()
+      : await deriveFn.createOrDeriveApiKey?.();
+    if (derived?.key && derived?.secret && derived?.passphrase) {
+      cachedDerivedCreds = derived;
+    }
+    return cachedDerivedCreds ?? derived;
+  } catch (error) {
+    if (canDetectCreateApiKeyFailure(error)) {
+      createApiKeyBlocked = true;
+      logger?.warn('[CLOB] Failed to create API key; falling back to local derive.');
+      return attemptLocalDerive();
+    }
+    throw error;
+  }
 };
 
 export async function createPolymarketClient(

@@ -79,6 +79,7 @@ export async function startArbitrageEngine(
           derivedSignerAddress: client.derivedSignerAddress,
           configuredPublicKey: config.proxyWallet,
           privateKeyPresent: Boolean(config.privateKey),
+          derivedCredsEnabled: config.clobDeriveEnabled,
           force: process.env.CLOB_AUTH_FORCE === 'true',
         });
         if (preflight && !preflight.ok) {

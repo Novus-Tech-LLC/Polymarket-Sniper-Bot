@@ -362,6 +362,7 @@ export const runClobAuthPreflight = async (params: {
   derivedSignerAddress?: string;
   configuredPublicKey?: string;
   privateKeyPresent: boolean;
+  derivedCredsEnabled?: boolean;
   force?: boolean;
 }): Promise<{ ok: boolean; status?: number; reason?: AuthFailureReason; forced: boolean } | null> => {
   if (!params.logger || !params.creds) return null;
@@ -377,9 +378,9 @@ export const runClobAuthPreflight = async (params: {
   const funderAddress = orderBuilder?.funderAddress;
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const endpoint = '/balance-allowance';
+  const endpoint = params.derivedCredsEnabled ? '/auth/api-keys' : '/balance-allowance';
   params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
-  const requestParams = { signature_type: signatureType };
+  const requestParams = endpoint === '/balance-allowance' ? { signature_type: signatureType } : undefined;
   const { signedPath, paramsKeys } = buildSignedPath(endpoint, requestParams);
   params.logger.info(
     `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'}`,
@@ -393,19 +394,22 @@ export const runClobAuthPreflight = async (params: {
   });
 
   try {
-    const response = await params.client.getBalanceAllowance();
+    const response = endpoint === '/balance-allowance'
+      ? await params.client.getBalanceAllowance()
+      : await (params.client as ClobClient & { getApiKeys?: () => Promise<unknown> }).getApiKeys?.();
     const status = (response as { status?: number })?.status;
+    const responseErrorMessage = extractPreflightResponseErrorMessage(response);
     if (status === 200) {
       params.logger.info('[CLOB][Preflight] OK');
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return { ok: true, status, forced: Boolean(params.force) };
     }
-    params.logger.warn(`[CLOB][Preflight] FAIL status=${status ?? 'unknown'}`);
-    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
-    return { ok: false, status, forced: Boolean(params.force) };
-  } catch (error) {
-    const status = extractStatus(error);
-    if (status === 401) {
+    if (status === 400 && responseErrorMessage.includes('Invalid asset type')) {
+      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
+      preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
+      return { ok: true, status, forced: Boolean(params.force) };
+    }
+    if (status === 401 || status === 403) {
       const secretFormat = detectSecretDecodingMode(params.creds.secret);
       const reason = classifyAuthFailure({
         configuredPublicKey: params.configuredPublicKey,
@@ -420,7 +424,42 @@ export const runClobAuthPreflight = async (params: {
         pathIncludesQuery: messageComponents.path.includes('?'),
       });
 
-      params.logger.warn('[CLOB][Preflight] FAIL 401');
+      params.logger.warn(`[CLOB][Preflight] FAIL ${status}`);
+      params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
+      params.logger.warn(
+        `[CLOB][401] address=${params.derivedSignerAddress ?? 'n/a'} sigType=${signatureType} funder=${funderAddress ?? 'none'} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
+      );
+
+      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      return { ok: false, status, reason, forced: Boolean(params.force) };
+    }
+    params.logger.warn(`[CLOB][Preflight] FAIL status=${status ?? 'unknown'}`);
+    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+    return { ok: false, status, forced: Boolean(params.force) };
+  } catch (error) {
+    const status = extractStatus(error);
+    const errorMessage = extractPreflightErrorMessage(error);
+    if (status === 400 && errorMessage.includes('Invalid asset type')) {
+      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
+      preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
+      return { ok: true, status, forced: Boolean(params.force) };
+    }
+    if (status === 401 || status === 403) {
+      const secretFormat = detectSecretDecodingMode(params.creds.secret);
+      const reason = classifyAuthFailure({
+        configuredPublicKey: params.configuredPublicKey,
+        derivedSignerAddress: params.derivedSignerAddress,
+        signatureType,
+        privateKeyPresent: params.privateKeyPresent,
+        secretFormat,
+        secretDecodingUsed,
+        expectedBodyIncluded: false,
+        bodyIncluded: messageComponents.bodyIncluded,
+        expectedQueryPresent: paramsKeys.length > 0,
+        pathIncludesQuery: messageComponents.path.includes('?'),
+      });
+
+      params.logger.warn(`[CLOB][Preflight] FAIL ${status}`);
       params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
       params.logger.warn(
         `[CLOB][401] address=${params.derivedSignerAddress ?? 'n/a'} sigType=${signatureType} funder=${funderAddress ?? 'none'} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
@@ -438,15 +477,7 @@ export const runClobAuthPreflight = async (params: {
 
 const formatPreflightError = (error: unknown): string => {
   const status = extractStatus(error);
-  const maybeError = error as { response?: { data?: unknown }; message?: string };
-  let message = '';
-  if (typeof maybeError?.response?.data === 'string') {
-    message = maybeError.response.data;
-  } else if (maybeError?.response?.data && typeof maybeError.response.data === 'object') {
-    message = JSON.stringify(maybeError.response.data);
-  } else if (typeof maybeError?.message === 'string') {
-    message = maybeError.message;
-  }
+  let message = extractPreflightErrorMessage(error);
   if (!message) {
     message = status ? `status_${status}` : 'unknown_error';
   }
@@ -454,6 +485,31 @@ const formatPreflightError = (error: unknown): string => {
     return `${message.slice(0, PREFLIGHT_MATRIX_ERROR_TRUNCATE)}…`;
   }
   return message;
+};
+
+const extractPreflightErrorMessage = (error: unknown): string => {
+  const maybeError = error as { response?: { data?: unknown }; message?: string };
+  if (typeof maybeError?.response?.data === 'string') {
+    return maybeError.response.data;
+  }
+  if (maybeError?.response?.data && typeof maybeError.response.data === 'object') {
+    return JSON.stringify(maybeError.response.data);
+  }
+  if (typeof maybeError?.message === 'string') {
+    return maybeError.message;
+  }
+  return '';
+};
+
+const extractPreflightResponseErrorMessage = (response: unknown): string => {
+  const responseError = (response as { error?: unknown })?.error;
+  if (typeof responseError === 'string') {
+    return responseError;
+  }
+  if (responseError && typeof responseError === 'object') {
+    return JSON.stringify(responseError);
+  }
+  return '';
 };
 
 const formatMatrixTable = (rows: string[][]): string => {

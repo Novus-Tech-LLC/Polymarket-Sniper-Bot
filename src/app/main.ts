@@ -88,6 +88,7 @@ async function main(): Promise<void> {
           derivedSignerAddress: client.derivedSignerAddress,
           configuredPublicKey: env.proxyWallet,
           privateKeyPresent: Boolean(env.privateKey),
+          derivedCredsEnabled: env.clobDeriveEnabled,
           force: process.env.CLOB_AUTH_FORCE === 'true',
         });
         if (preflight && !preflight.ok) {
