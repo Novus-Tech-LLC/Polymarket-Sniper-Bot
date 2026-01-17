@@ -13,8 +13,12 @@ RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
+# Install wireguard and networking tools. openresolv provides resolvconf for DNS updates.
+# The symlink ensures resolvconf is found in /sbin which some tools expect.
+# Using ln -sf to force symlink creation; errors are suppressed since the target
+# may already exist or the source may not be present (both are acceptable states).
 RUN apk add --no-cache wireguard-tools openvpn iproute2 iptables openresolv \
-    && if [ ! -x /sbin/resolvconf ] && [ -x /usr/sbin/resolvconf ]; then ln -s /usr/sbin/resolvconf /sbin/resolvconf; fi
+    && ln -sf /usr/sbin/resolvconf /sbin/resolvconf 2>/dev/null || true
 ENV NODE_ENV=production
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/dist ./dist

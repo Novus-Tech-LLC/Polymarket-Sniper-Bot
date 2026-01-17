@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import { promisify } from "node:util";
 import type { Logger } from "./logger.util";
 
@@ -154,6 +154,34 @@ const hasCommand = async (command: string): Promise<boolean> => {
   }
 };
 
+/**
+ * Known installation paths for resolvconf across different Linux distributions.
+ * Order matters: /sbin is checked first as it's the standard location where
+ * our Dockerfile creates a symlink. Alpine's openresolv installs to /usr/sbin.
+ */
+const RESOLVCONF_PATHS = [
+  "/sbin/resolvconf",
+  "/usr/sbin/resolvconf",
+  "/usr/bin/resolvconf",
+];
+
+const hasResolvconf = async (): Promise<boolean> => {
+  // First try command -v which searches PATH
+  if (await hasCommand("resolvconf")) {
+    return true;
+  }
+  // Fallback: check known installation paths directly
+  for (const path of RESOLVCONF_PATHS) {
+    try {
+      await fs.access(path, fsConstants.X_OK);
+      return true;
+    } catch {
+      // Path not found or not executable, try next
+    }
+  }
+  return false;
+};
+
 const ensureResolvconfAvailable = async (
   logger: Logger,
   dns: string | undefined,
@@ -162,7 +190,7 @@ const ensureResolvconfAvailable = async (
     return;
   }
 
-  if (await hasCommand("resolvconf")) {
+  if (await hasResolvconf()) {
     return;
   }
 
