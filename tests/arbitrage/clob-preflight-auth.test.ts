@@ -144,10 +144,7 @@ test("bot stays in detect-only mode when auth fails", () => {
 });
 
 test("preflight tool exits with non-zero code when not ready", () => {
-  const toolCode = fs.readFileSync(
-    "./src/tools/preflight.ts",
-    "utf-8",
-  );
+  const toolCode = fs.readFileSync("./src/tools/preflight.ts", "utf-8");
 
   // Check that exit code is set when not ready
   assert.ok(
