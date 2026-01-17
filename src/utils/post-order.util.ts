@@ -9,6 +9,11 @@ import {
   type OrderSubmissionConfig,
   type OrderSubmissionResult,
 } from './order-submission.util';
+import {
+  checkFundsAndAllowance,
+  formatCollateralLabel,
+  resolveSignerAddress,
+} from './funds-allowance.util';
 
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderOutcome = 'YES' | 'NO';
@@ -20,6 +25,9 @@ export type PostOrderInput = {
   outcome: OrderOutcome;
   side: OrderSide;
   sizeUsd: number;
+  collateralTokenAddress?: string;
+  collateralTokenDecimals?: number;
+  collateralTokenId?: string;
   maxAcceptablePrice?: number;
   priority?: boolean; // For frontrunning - execute with higher priority
   targetGasPrice?: string; // Gas price of target transaction for frontrunning
@@ -41,6 +49,8 @@ export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionR
     authCooldownSeconds: input.orderConfig?.authCooldownSeconds,
   });
   const submissionController = getOrderSubmissionController(settings);
+  const signerAddress = resolveSignerAddress(client);
+  const collateralLabel = formatCollateralLabel(input.collateralTokenAddress, input.collateralTokenId);
 
   if (missingOrderbooks.has(tokenId)) {
     throw new Error(`No orderbook exists for token ${tokenId} (cached)`);
@@ -120,13 +130,31 @@ export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionR
     };
     const orderFingerprint = `${tokenId}:${orderSide}:${levelPrice}:${orderSize}`;
 
+    const readiness = await checkFundsAndAllowance({
+      client,
+      sizeUsd: orderValue,
+      balanceBufferBps: input.orderConfig?.balanceBufferBps,
+      collateralTokenAddress: input.collateralTokenAddress,
+      collateralTokenDecimals: input.collateralTokenDecimals,
+      collateralTokenId: input.collateralTokenId,
+      autoApprove: input.orderConfig?.autoApprove,
+      autoApproveMaxUsd: input.orderConfig?.autoApproveMaxUsd,
+      logger,
+    });
+    if (!readiness.ok) {
+      return { status: 'skipped', reason: readiness.reason ?? 'INSUFFICIENT_BALANCE_OR_ALLOWANCE' };
+    }
+
     const result = await submissionController.submit({
       sizeUsd: orderValue,
       marketId,
+      tokenId,
       orderFingerprint,
       logger,
       now: input.now,
       skipRateLimit: retryCount > 0,
+      signerAddress,
+      collateralLabel,
       submit: async () => {
         const signedOrder = await client.createMarketOrder(orderArgs);
         return withAuthRetry(client, () => client.postOrder(signedOrder, OrderType.FOK));
@@ -140,15 +168,24 @@ export async function postOrder(input: PostOrderInput): Promise<OrderSubmissionR
     }
 
     if (result.status === 'skipped') {
+      logger.warn(
+        `[CLOB] Order skipped (${result.reason ?? 'unknown'}): required=${orderValue.toFixed(2)} signer=${signerAddress} collateral=${collateralLabel}`,
+      );
       return result;
     }
 
     if (result.statusCode === 403) {
+      logger.warn(
+        `[CLOB] Order failed (403): required=${orderValue.toFixed(2)} signer=${signerAddress} collateral=${collateralLabel}`,
+      );
       return result;
     }
 
     retryCount++;
     if (retryCount >= maxRetries) {
+      logger.warn(
+        `[CLOB] Order failed (${result.reason ?? 'unknown'}): required=${orderValue.toFixed(2)} signer=${signerAddress} collateral=${collateralLabel}`,
+      );
       return result;
     }
   }

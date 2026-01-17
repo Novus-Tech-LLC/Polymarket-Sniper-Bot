@@ -13,6 +13,11 @@ import {
   toOrderSubmissionSettings,
   type OrderSubmissionSettings,
 } from '../../utils/order-submission.util';
+import {
+  checkFundsAndAllowance,
+  formatCollateralLabel,
+  resolveSignerAddress,
+} from '../../utils/funds-allowance.util';
 
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -176,6 +181,25 @@ export class ArbTradeExecutor implements TradeExecutor {
       throw new Error('slippage_guard');
     }
 
+    const balanceBufferBps = this.config.orderBalanceBufferBps > 0
+      ? this.config.orderBalanceBufferBps
+      : this.config.slippageBps + this.config.feeBps;
+    const signerAddress = resolveSignerAddress(this.client);
+    const collateralLabel = formatCollateralLabel(this.config.collateralTokenAddress);
+    const readiness = await checkFundsAndAllowance({
+      client: this.client,
+      sizeUsd,
+      balanceBufferBps,
+      collateralTokenAddress: this.config.collateralTokenAddress,
+      collateralTokenDecimals: this.config.collateralTokenDecimals,
+      autoApprove: this.config.autoApprove,
+      autoApproveMaxUsd: this.config.autoApproveMaxUsd,
+      logger: this.logger,
+    });
+    if (!readiness.ok) {
+      throw new Error(readiness.reason ?? 'INSUFFICIENT_BALANCE_OR_ALLOWANCE');
+    }
+
     const amount = sizeUsd / top.bestAsk;
     const orderArgs = {
       side: Side.BUY,
@@ -188,7 +212,10 @@ export class ArbTradeExecutor implements TradeExecutor {
     const result = await submissionController.submit({
       sizeUsd,
       marketId,
+      tokenId,
       logger: this.logger,
+      signerAddress,
+      collateralLabel,
       submit: async () => {
         const signedOrder = await this.client.createMarketOrder(orderArgs);
         return withAuthRetry(this.client, () => this.client.postOrder(signedOrder, OrderType.FOK));
@@ -196,6 +223,9 @@ export class ArbTradeExecutor implements TradeExecutor {
     });
 
     if (result.status !== 'submitted') {
+      this.logger.warn(
+        `[CLOB] Order ${result.status} (${result.reason ?? 'unknown'}): required=${sizeUsd.toFixed(2)} signer=${signerAddress} collateral=${collateralLabel}`,
+      );
       throw new Error(result.reason ?? 'order_rejected');
     }
     return result.orderId || '';

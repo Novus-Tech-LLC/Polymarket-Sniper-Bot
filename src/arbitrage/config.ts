@@ -42,6 +42,9 @@ export type ArbConfig = {
   collateralTokenAddress: string;
   collateralTokenDecimals: number;
   minOrderUsd: number;
+  orderBalanceBufferBps: number;
+  autoApprove: boolean;
+  autoApproveMaxUsd?: number;
   orderSubmitMinIntervalMs: number;
   orderSubmitMaxPerHour: number;
   orderSubmitMarketCooldownSeconds: number;

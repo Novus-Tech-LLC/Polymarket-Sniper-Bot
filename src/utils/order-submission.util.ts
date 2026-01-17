@@ -21,6 +21,8 @@ export type OrderSubmissionResult = {
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const CLOUDFLARE_REGEX = /cloudflare|blocked/i;
 const RAY_ID_REGEX = /ray id\s*[:#]?\s*([a-z0-9-]+)/i;
+const BALANCE_ALLOWANCE_REGEX = /not enough balance|insufficient balance|allowance/i;
+const BALANCE_ALLOWANCE_COOLDOWN_MS = 10 * 60 * 1000;
 
 const DEFAULT_SETTINGS: OrderSubmissionSettings = {
   minOrderUsd: DEFAULT_CONFIG.MIN_ORDER_USD,
@@ -38,6 +40,9 @@ export type OrderSubmissionConfig = {
   orderSubmitMarketCooldownSeconds?: number;
   cloudflareCooldownSeconds?: number;
   authCooldownSeconds?: number;
+  balanceBufferBps?: number;
+  autoApprove?: boolean;
+  autoApproveMaxUsd?: number;
 };
 
 export const toOrderSubmissionSettings = (config: OrderSubmissionConfig): OrderSubmissionSettings => ({
@@ -54,11 +59,14 @@ export class OrderSubmissionController {
   private lastSubmitAt = 0;
   private submitHistory: number[] = [];
   private marketLastSubmit = new Map<string, number>();
+  private marketBalanceCooldownUntil = new Map<string, number>();
+  private tokenBalanceCooldownUntil = new Map<string, number>();
   private blockedUntil = 0;
   private lastBlockedLogAt = Number.NEGATIVE_INFINITY;
   private authBlockedUntil = 0;
   private lastAuthBlockedLogAt = Number.NEGATIVE_INFINITY;
   private lastFingerprintSubmit = new Map<string, number>();
+  private fingerprintCooldownUntil = new Map<string, number>();
   private lastRayId?: string;
 
   constructor(settings: OrderSubmissionSettings) {
@@ -72,20 +80,26 @@ export class OrderSubmissionController {
   async submit(params: {
     sizeUsd: number;
     marketId?: string;
+    tokenId?: string;
     orderFingerprint?: string;
     logger: Logger;
     submit: () => Promise<unknown>;
     now?: number;
     skipRateLimit?: boolean;
+    signerAddress?: string;
+    collateralLabel?: string;
   }): Promise<OrderSubmissionResult> {
     const now = params.now ?? Date.now();
     const preflight = this.checkPreflight({
       sizeUsd: params.sizeUsd,
       marketId: params.marketId,
+      tokenId: params.tokenId,
       orderFingerprint: params.orderFingerprint,
       logger: params.logger,
       now,
       skipRateLimit: params.skipRateLimit,
+      signerAddress: params.signerAddress,
+      collateralLabel: params.collateralLabel,
     });
     if (preflight) {
       return preflight;
@@ -117,6 +131,9 @@ export class OrderSubmissionController {
       }
 
       const reason = normalizeReason(extractReason(response) || 'order_rejected');
+      if (statusCode === 400 && isBalanceOrAllowanceReason(reason)) {
+        this.applyBalanceCooldown(now, params.marketId, params.tokenId, params.logger, params.sizeUsd, params.signerAddress, params.collateralLabel);
+      }
       logFailure(params.logger, statusCode, reason);
       return { status: 'failed', reason, statusCode };
     } catch (error) {
@@ -137,6 +154,9 @@ export class OrderSubmissionController {
       }
 
       const reason = normalizeReason(extractReason(error) || 'request_error');
+      if (statusCode === 400 && isBalanceOrAllowanceReason(reason)) {
+        this.applyBalanceCooldown(now, params.marketId, params.tokenId, params.logger, params.sizeUsd, params.signerAddress, params.collateralLabel);
+      }
       logFailure(params.logger, statusCode, reason);
       return { status: 'failed', reason, statusCode };
     }
@@ -145,16 +165,27 @@ export class OrderSubmissionController {
   private checkPreflight(params: {
     sizeUsd: number;
     marketId?: string;
+    tokenId?: string;
     orderFingerprint?: string;
     logger: Logger;
     now: number;
     skipRateLimit?: boolean;
+    signerAddress?: string;
+    collateralLabel?: string;
   }): OrderSubmissionResult | null {
     if (params.sizeUsd < this.settings.minOrderUsd) {
       params.logger.info(
         `[CLOB] Order skipped (SKIP_MIN_ORDER_SIZE): size=${params.sizeUsd.toFixed(2)} USD < min=${this.settings.minOrderUsd.toFixed(2)} USD`,
       );
       return { status: 'skipped', reason: 'SKIP_MIN_ORDER_SIZE' };
+    }
+
+    const balanceCooldown = this.resolveBalanceCooldown(params.marketId, params.tokenId);
+    if (balanceCooldown && balanceCooldown > params.now) {
+      params.logger.warn(
+        `[CLOB] Order skipped (INSUFFICIENT_BALANCE_OR_ALLOWANCE): required=${params.sizeUsd.toFixed(2)} signer=${params.signerAddress ?? 'unknown'} collateral=${params.collateralLabel ?? 'unknown'} cooldownUntil=${new Date(balanceCooldown).toISOString()}`,
+      );
+      return { status: 'skipped', reason: 'INSUFFICIENT_BALANCE_OR_ALLOWANCE', blockedUntil: balanceCooldown };
     }
 
     if (this.blockedUntil > params.now) {
@@ -178,10 +209,19 @@ export class OrderSubmissionController {
     }
 
     if (this.settings.marketCooldownMs > 0 && params.orderFingerprint) {
+      const fingerprintCooldown = this.fingerprintCooldownUntil.get(params.orderFingerprint);
+      if (fingerprintCooldown && params.now < fingerprintCooldown) {
+        params.logger.warn('[CLOB] Order skipped (RATE_LIMIT_DUPLICATE_ORDER)');
+        return { status: 'skipped', reason: 'RATE_LIMIT_DUPLICATE_ORDER', blockedUntil: fingerprintCooldown };
+      }
       const lastFingerprint = this.lastFingerprintSubmit.get(params.orderFingerprint);
       if (lastFingerprint && params.now - lastFingerprint < this.settings.marketCooldownMs) {
+        const jitteredMs = this.settings.marketCooldownMs
+          + Math.floor(Math.random() * this.settings.marketCooldownMs * 0.2);
+        const blockedUntil = params.now + jitteredMs;
+        this.fingerprintCooldownUntil.set(params.orderFingerprint, blockedUntil);
         params.logger.warn('[CLOB] Order skipped (RATE_LIMIT_DUPLICATE_ORDER)');
-        return { status: 'skipped', reason: 'RATE_LIMIT_DUPLICATE_ORDER' };
+        return { status: 'skipped', reason: 'RATE_LIMIT_DUPLICATE_ORDER', blockedUntil };
       }
     }
 
@@ -218,6 +258,36 @@ export class OrderSubmissionController {
     if (fingerprint) {
       this.lastFingerprintSubmit.set(fingerprint, now);
     }
+  }
+
+  private resolveBalanceCooldown(marketId?: string, tokenId?: string): number | undefined {
+    const marketCooldown = marketId ? this.marketBalanceCooldownUntil.get(marketId) : undefined;
+    const tokenCooldown = tokenId ? this.tokenBalanceCooldownUntil.get(tokenId) : undefined;
+    if (marketCooldown && tokenCooldown) {
+      return Math.max(marketCooldown, tokenCooldown);
+    }
+    return marketCooldown ?? tokenCooldown;
+  }
+
+  private applyBalanceCooldown(
+    now: number,
+    marketId: string | undefined,
+    tokenId: string | undefined,
+    logger: Logger,
+    sizeUsd: number,
+    signerAddress?: string,
+    collateralLabel?: string,
+  ): void {
+    const cooldownUntil = now + BALANCE_ALLOWANCE_COOLDOWN_MS;
+    if (marketId) {
+      this.marketBalanceCooldownUntil.set(marketId, cooldownUntil);
+    }
+    if (tokenId) {
+      this.tokenBalanceCooldownUntil.set(tokenId, cooldownUntil);
+    }
+    logger.warn(
+      `[CLOB] Balance/allowance cooldown set: required=${sizeUsd.toFixed(2)} signer=${signerAddress ?? 'unknown'} collateral=${collateralLabel ?? 'unknown'} until=${new Date(cooldownUntil).toISOString()}`,
+    );
   }
 
   shouldLogRayId(rayId: string): boolean {
@@ -316,4 +386,8 @@ function logCloudflare(
 function logFailure(logger: Logger, statusCode: number | undefined, reason: string): void {
   const statusLabel = statusCode ?? 'unknown';
   logger.warn(`[CLOB] Order submission failed (${statusLabel}): ${reason}`);
+}
+
+function isBalanceOrAllowanceReason(reason: string): boolean {
+  return BALANCE_ALLOWANCE_REGEX.test(reason.toLowerCase());
 }

@@ -82,17 +82,24 @@ export async function startArbitrageEngine(
           derivedCredsEnabled: config.clobDeriveEnabled,
           force: process.env.CLOB_AUTH_FORCE === 'true',
         });
-        if (preflight && !preflight.ok) {
+        if (preflight && !preflight.ok && (preflight.status === 401 || preflight.status === 403)) {
           config.detectOnly = true;
           logger.warn('[CLOB] Auth preflight failed; switching to detect-only.');
           logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
+        } else if (preflight && !preflight.ok) {
+          logger.warn('[CLOB] Auth preflight failed; continuing with order submissions.');
         }
       }
     } catch (err) {
-      config.detectOnly = true;
-      logger.warn(`[CLOB] Auth preflight failed; switching to detect-only. ${sanitizeErrorMessage(err)}`);
-      if (isAuthError(err)) {
+      const maybeError = err as { code?: string; message?: string };
+      if (maybeError?.code === 'ECONNRESET') {
+        logger.warn(`[CLOB] Auth preflight transient failure; continuing. ${sanitizeErrorMessage(err)}`);
+      } else if (isAuthError(err)) {
+        config.detectOnly = true;
+        logger.warn(`[CLOB] Auth preflight failed; switching to detect-only. ${sanitizeErrorMessage(err)}`);
         logger.warn(formatClobAuthFailureHint(config.clobDeriveEnabled));
+      } else {
+        logger.warn(`[CLOB] Auth preflight failed; continuing. ${sanitizeErrorMessage(err)}`);
       }
     }
   }

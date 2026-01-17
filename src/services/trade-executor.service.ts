@@ -85,19 +85,24 @@ export class TradeExecutorService {
         outcome: signal.outcome,
         side: signal.side,
         sizeUsd: frontrunSize,
+        collateralTokenAddress: env.collateralTokenAddress,
+        collateralTokenDecimals: env.collateralTokenDecimals,
         priority: true, // Flag for priority execution
         targetGasPrice: signal.targetGasPrice,
         logger,
         orderConfig: {
           minOrderUsd: env.minOrderUsd,
-        orderSubmitMinIntervalMs: env.orderSubmitMinIntervalMs,
-        orderSubmitMaxPerHour: env.orderSubmitMaxPerHour,
-        orderSubmitMarketCooldownSeconds: env.orderSubmitMarketCooldownSeconds,
-        cloudflareCooldownSeconds: env.cloudflareCooldownSeconds,
-        authCooldownSeconds: env.authCooldownSeconds,
-      },
-    });
-      
+          orderSubmitMinIntervalMs: env.orderSubmitMinIntervalMs,
+          orderSubmitMaxPerHour: env.orderSubmitMaxPerHour,
+          orderSubmitMarketCooldownSeconds: env.orderSubmitMarketCooldownSeconds,
+          cloudflareCooldownSeconds: env.cloudflareCooldownSeconds,
+          authCooldownSeconds: env.authCooldownSeconds,
+          balanceBufferBps: env.orderBalanceBufferBps,
+          autoApprove: env.autoApprove,
+          autoApproveMaxUsd: env.autoApproveMaxUsd,
+        },
+      });
+
       if (submissionResult.status === 'submitted') {
         logger.info(`[Frontrun] Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`);
       }
