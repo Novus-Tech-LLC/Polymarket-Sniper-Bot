@@ -1,6 +1,6 @@
-import { SignatureType } from '@polymarket/order-utils';
-import type { Logger } from '../utils/logger.util';
-import { deriveSignerAddress, publicKeyMatchesDerived } from './diagnostics';
+import { SignatureType } from "@polymarket/order-utils";
+import type { Logger } from "../utils/logger.util";
+import { deriveSignerAddress, publicKeyMatchesDerived } from "./diagnostics";
 
 const FUNDER_SIGNATURE_TYPES = new Set<number>([
   SignatureType.POLY_PROXY,
@@ -20,15 +20,18 @@ export type PublicKeyMismatchResult = {
   executionDisabled: boolean;
 };
 
-export const parseSignatureType = (value?: string | number): number | undefined => {
+export const parseSignatureType = (
+  value?: string | number,
+): number | undefined => {
   if (value === undefined || value === null) return undefined;
-  const parsed = typeof value === 'number' ? value : Number(value);
+  const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return undefined;
   if (![0, 1, 2].includes(parsed)) return undefined;
   return parsed;
 };
 
-export const resolveDerivedSignerAddress = (privateKey: string): string => deriveSignerAddress(privateKey);
+export const resolveDerivedSignerAddress = (privateKey: string): string =>
+  deriveSignerAddress(privateKey);
 
 export const resolveEffectivePolyAddress = (params: {
   derivedSignerAddress: string;
@@ -38,7 +41,11 @@ export const resolveEffectivePolyAddress = (params: {
   logger?: Logger;
 }): EffectivePolyAddressResult => {
   let effectivePolyAddress = params.derivedSignerAddress;
-  if (params.signatureType !== undefined && FUNDER_SIGNATURE_TYPES.has(params.signatureType) && params.funderAddress) {
+  if (
+    params.signatureType !== undefined &&
+    FUNDER_SIGNATURE_TYPES.has(params.signatureType) &&
+    params.funderAddress
+  ) {
     effectivePolyAddress = params.funderAddress;
   }
 
@@ -67,9 +74,12 @@ export const evaluatePublicKeyMismatch = (params: {
   logger?: Logger;
 }): PublicKeyMismatchResult => {
   const mismatch = Boolean(
-    params.configuredPublicKey
-      && params.derivedSignerAddress
-      && !publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress),
+    params.configuredPublicKey &&
+    params.derivedSignerAddress &&
+    !publicKeyMatchesDerived(
+      params.configuredPublicKey,
+      params.derivedSignerAddress,
+    ),
   );
   if (!mismatch) {
     return { mismatch: false, executionDisabled: false };
@@ -80,10 +90,14 @@ export const evaluatePublicKeyMismatch = (params: {
   );
 
   if (params.forceMismatch) {
-    params.logger?.warn('[CLOB][Diag] FORCE_MISMATCH=true; continuing despite PUBLIC_KEY mismatch.');
+    params.logger?.warn(
+      "[CLOB][Diag] FORCE_MISMATCH=true; continuing despite PUBLIC_KEY mismatch.",
+    );
     return { mismatch: true, executionDisabled: false };
   }
 
-  params.logger?.error('[CLOB][Diag] Execution disabled until PUBLIC_KEY matches derived signer or FORCE_MISMATCH=true.');
+  params.logger?.error(
+    "[CLOB][Diag] Execution disabled until PUBLIC_KEY matches derived signer or FORCE_MISMATCH=true.",
+  );
   return { mismatch: true, executionDisabled: true };
 };

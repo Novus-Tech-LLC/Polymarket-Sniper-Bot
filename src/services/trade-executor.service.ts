@@ -1,12 +1,15 @@
-import type { ClobClient } from '@polymarket/clob-client';
-import type { Wallet } from 'ethers';
-import type { RuntimeEnv } from '../config/env';
-import type { Logger } from '../utils/logger.util';
-import type { TradeSignal } from '../domain/trade.types';
-import { postOrder } from '../utils/post-order.util';
-import { getUsdBalanceApprox, getPolBalance } from '../utils/get-balance.util';
-import { httpGet } from '../utils/fetch-data.util';
-import { POLYMARKET_API, DEFAULT_CONFIG } from '../constants/polymarket.constants';
+import type { ClobClient } from "@polymarket/clob-client";
+import type { Wallet } from "ethers";
+import type { RuntimeEnv } from "../config/env";
+import type { Logger } from "../utils/logger.util";
+import type { TradeSignal } from "../domain/trade.types";
+import { postOrder } from "../utils/post-order.util";
+import { getUsdBalanceApprox, getPolBalance } from "../utils/get-balance.util";
+import { httpGet } from "../utils/fetch-data.util";
+import {
+  POLYMARKET_API,
+  DEFAULT_CONFIG,
+} from "../constants/polymarket.constants";
 
 export type TradeExecutorDeps = {
   client: ClobClient & { wallet: Wallet };
@@ -33,7 +36,9 @@ export class TradeExecutorService {
     const { logger, env, client } = this.deps;
     if (env.detectOnly) {
       if (!this.detectOnlyLogged) {
-        logger.warn('[Frontrun] Detect-only mode enabled; skipping order submissions.');
+        logger.warn(
+          "[Frontrun] Detect-only mode enabled; skipping order submissions.",
+        );
         this.detectOnlyLogged = true;
       }
       return;
@@ -46,7 +51,9 @@ export class TradeExecutorService {
       );
       const polBalance = await getPolBalance(client.wallet);
 
-      logger.info(`[Frontrun] Balance check - POL: ${polBalance.toFixed(4)} POL, USDC: ${yourUsdBalance.toFixed(2)} USDC`);
+      logger.info(
+        `[Frontrun] Balance check - POL: ${polBalance.toFixed(4)} POL, USDC: ${yourUsdBalance.toFixed(2)} USDC`,
+      );
 
       // For frontrunning, we execute the same trade but with higher priority
       // Calculate frontrun size (typically smaller or same as target)
@@ -60,7 +67,7 @@ export class TradeExecutorService {
       const requiredUsdc = frontrunSize;
       const minPolForGas = DEFAULT_CONFIG.MIN_POL_BALANCE;
 
-      if (signal.side === 'BUY') {
+      if (signal.side === "BUY") {
         if (yourUsdBalance < requiredUsdc) {
           logger.error(
             `[Frontrun] Insufficient USDC balance. Required: ${requiredUsdc.toFixed(2)} USDC, Available: ${yourUsdBalance.toFixed(2)} USDC`,
@@ -94,7 +101,8 @@ export class TradeExecutorService {
           minOrderUsd: env.minOrderUsd,
           orderSubmitMinIntervalMs: env.orderSubmitMinIntervalMs,
           orderSubmitMaxPerHour: env.orderSubmitMaxPerHour,
-          orderSubmitMarketCooldownSeconds: env.orderSubmitMarketCooldownSeconds,
+          orderSubmitMarketCooldownSeconds:
+            env.orderSubmitMarketCooldownSeconds,
           cloudflareCooldownSeconds: env.cloudflareCooldownSeconds,
           authCooldownSeconds: env.authCooldownSeconds,
           balanceBufferBps: env.orderBalanceBufferBps,
@@ -103,15 +111,26 @@ export class TradeExecutorService {
         },
       });
 
-      if (submissionResult.status === 'submitted') {
-        logger.info(`[Frontrun] Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`);
+      if (submissionResult.status === "submitted") {
+        logger.info(
+          `[Frontrun] Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`,
+        );
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      if (errorMessage.includes('closed') || errorMessage.includes('resolved') || errorMessage.includes('No orderbook')) {
-        logger.warn(`[Frontrun] Skipping trade - Market ${signal.marketId} is closed or resolved: ${errorMessage}`);
+      if (
+        errorMessage.includes("closed") ||
+        errorMessage.includes("resolved") ||
+        errorMessage.includes("No orderbook")
+      ) {
+        logger.warn(
+          `[Frontrun] Skipping trade - Market ${signal.marketId} is closed or resolved: ${errorMessage}`,
+        );
       } else {
-        logger.error(`[Frontrun] Failed to frontrun trade: ${errorMessage}`, err as Error);
+        logger.error(
+          `[Frontrun] Failed to frontrun trade: ${errorMessage}`,
+          err as Error,
+        );
       }
     }
   }
@@ -119,7 +138,8 @@ export class TradeExecutorService {
   private calculateFrontrunSize(targetSize: number, env: RuntimeEnv): number {
     // Frontrun with a percentage of the target size
     // This can be configured via env variable
-    const frontrunMultiplier = env.frontrunSizeMultiplier || DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER;
+    const frontrunMultiplier =
+      env.frontrunSizeMultiplier || DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER;
     return targetSize * frontrunMultiplier;
   }
 
@@ -133,7 +153,10 @@ export class TradeExecutorService {
       const positions: Position[] = await httpGet<Position[]>(
         POLYMARKET_API.POSITIONS_ENDPOINT(trader),
       );
-      const totalValue = positions.reduce((sum, pos) => sum + (pos.currentValue || pos.initialValue || 0), 0);
+      const totalValue = positions.reduce(
+        (sum, pos) => sum + (pos.currentValue || pos.initialValue || 0),
+        0,
+      );
       return Math.max(100, totalValue);
     } catch {
       return 1000;

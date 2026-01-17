@@ -1,7 +1,7 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import { AssetType } from '@polymarket/clob-client';
-import { checkFundsAndAllowance } from '../../src/utils/funds-allowance.util';
+import assert from "node:assert/strict";
+import test from "node:test";
+import { AssetType } from "@polymarket/clob-client";
+import { checkFundsAndAllowance } from "../../src/utils/funds-allowance.util";
 
 const createLogger = () => ({
   info: () => undefined,
@@ -10,7 +10,7 @@ const createLogger = () => ({
   debug: () => undefined,
 });
 
-test('checkFundsAndAllowance refreshes via second balance-allowance read', async () => {
+test("checkFundsAndAllowance refreshes via second balance-allowance read", async () => {
   let collateralCalls = 0;
 
   const client = {
@@ -18,10 +18,10 @@ test('checkFundsAndAllowance refreshes via second balance-allowance read', async
       if (params.asset_type === AssetType.COLLATERAL) {
         collateralCalls += 1;
         return collateralCalls === 1
-          ? { balance: '0', allowance: '0' }
-          : { balance: '100', allowance: '100' };
+          ? { balance: "0", allowance: "0" }
+          : { balance: "100", allowance: "100" };
       }
-      return { balance: '0', allowance: '0' };
+      return { balance: "0", allowance: "0" };
     },
   };
 

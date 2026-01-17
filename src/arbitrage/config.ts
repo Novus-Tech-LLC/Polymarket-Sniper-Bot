@@ -1,4 +1,4 @@
-export type SizeScalingMode = 'linear' | 'sqrt' | 'log';
+export type SizeScalingMode = "linear" | "sqrt" | "log";
 
 export type ArbConfig = {
   enabled: boolean;

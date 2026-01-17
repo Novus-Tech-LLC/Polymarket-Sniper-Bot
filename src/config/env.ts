@@ -1,4 +1,4 @@
-import { loadMonitorConfig } from './loadConfig';
+import { loadMonitorConfig } from "./loadConfig";
 
 export type RuntimeEnv = ReturnType<typeof loadMonitorConfig>;
 

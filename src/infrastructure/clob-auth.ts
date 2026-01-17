@@ -1,8 +1,11 @@
-import type { ApiKeyCreds, ClobClient } from '@polymarket/clob-client';
+import type { ApiKeyCreds, ClobClient } from "@polymarket/clob-client";
 
 let cachedCreds: ApiKeyCreds | null = null;
 
-export async function initializeApiCreds(client: ClobClient, providedCreds?: ApiKeyCreds): Promise<ApiKeyCreds> {
+export async function initializeApiCreds(
+  client: ClobClient,
+  providedCreds?: ApiKeyCreds,
+): Promise<ApiKeyCreds> {
   if (providedCreds) {
     applyClientCreds(client, providedCreds);
     cachedCreds = providedCreds;
@@ -14,12 +17,18 @@ export async function initializeApiCreds(client: ClobClient, providedCreds?: Api
     return cachedCreds;
   }
 
-  throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.');
+  throw new Error(
+    "[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.",
+  );
 }
 
-export async function refreshApiCreds(client: ClobClient): Promise<ApiKeyCreds> {
+export async function refreshApiCreds(
+  client: ClobClient,
+): Promise<ApiKeyCreds> {
   if (!cachedCreds) {
-    throw new Error('[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.');
+    throw new Error(
+      "[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.",
+    );
   }
   applyClientCreds(client, cachedCreds);
   return cachedCreds;
@@ -37,7 +46,10 @@ export async function verifyApiCreds(client: ClobClient): Promise<boolean> {
   }
 }
 
-export async function withAuthRetry<T>(client: ClobClient, operation: () => Promise<T>): Promise<T> {
+export async function withAuthRetry<T>(
+  client: ClobClient,
+  operation: () => Promise<T>,
+): Promise<T> {
   await initializeApiCreds(client);
   try {
     return await operation();
@@ -55,7 +67,11 @@ export function resetApiCredsCache(): void {
 }
 
 export function isAuthError(error: unknown): boolean {
-  const maybeError = error as { response?: { status?: number }; status?: number; message?: string };
+  const maybeError = error as {
+    response?: { status?: number };
+    status?: number;
+    message?: string;
+  };
   const status = maybeError?.status ?? maybeError?.response?.status;
   if (status === 401) {
     return true;
@@ -64,8 +80,12 @@ export function isAuthError(error: unknown): boolean {
     return false;
   }
 
-  const message = maybeError?.message?.toLowerCase() ?? '';
-  return message.includes('api credentials') || message.includes('unauthorized') || message.includes('forbidden');
+  const message = maybeError?.message?.toLowerCase() ?? "";
+  return (
+    message.includes("api credentials") ||
+    message.includes("unauthorized") ||
+    message.includes("forbidden")
+  );
 }
 
 function applyClientCreds(client: ClobClient, creds: ApiKeyCreds): void {

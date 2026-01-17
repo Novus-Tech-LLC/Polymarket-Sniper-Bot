@@ -31,19 +31,28 @@ export const getAuthHeaderPresence = (
   }
 
   const keys = normalizeHeaderKeys(headers as Record<string, unknown>);
-  const secretFromHeaders = hasHeader(keys, ['POLY_SECRET', 'AUTHORIZATION', 'POLY_SIGNATURE']);
+  const secretFromHeaders = hasHeader(keys, [
+    "POLY_SECRET",
+    "AUTHORIZATION",
+    "POLY_SIGNATURE",
+  ]);
 
   return {
-    apiKeyHeaderPresent: hasHeader(keys, ['POLY_API_KEY', 'X-API-KEY']),
-    passphraseHeaderPresent: hasHeader(keys, ['POLY_PASSPHRASE']),
-    secretHeaderPresent: secretFromHeaders || Boolean(options?.secretConfigured),
-    signatureHeaderPresent: hasHeader(keys, ['POLY_SIGNATURE']),
+    apiKeyHeaderPresent: hasHeader(keys, ["POLY_API_KEY", "X-API-KEY"]),
+    passphraseHeaderPresent: hasHeader(keys, ["POLY_PASSPHRASE"]),
+    secretHeaderPresent:
+      secretFromHeaders || Boolean(options?.secretConfigured),
+    signatureHeaderPresent: hasHeader(keys, ["POLY_SIGNATURE"]),
   };
 };
 
-export const formatAuthHeaderPresence = (presence: AuthHeaderPresence): string => {
-  return `apiKeyHeaderPresent=${presence.apiKeyHeaderPresent} `
-    + `passphraseHeaderPresent=${presence.passphraseHeaderPresent} `
-    + `secretHeaderPresent=${presence.secretHeaderPresent} `
-    + `signatureHeaderPresent=${presence.signatureHeaderPresent}`;
+export const formatAuthHeaderPresence = (
+  presence: AuthHeaderPresence,
+): string => {
+  return (
+    `apiKeyHeaderPresent=${presence.apiKeyHeaderPresent} ` +
+    `passphraseHeaderPresent=${presence.passphraseHeaderPresent} ` +
+    `secretHeaderPresent=${presence.secretHeaderPresent} ` +
+    `signatureHeaderPresent=${presence.signatureHeaderPresent}`
+  );
 };

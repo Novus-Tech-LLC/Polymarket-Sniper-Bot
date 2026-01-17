@@ -2,8 +2,8 @@
  * Polymarket contract addresses on Polygon
  */
 export const POLYMARKET_CONTRACTS = [
-  '0x4bfb41d5b3570dfe5a4bde6f4f13907e456f2b13', // ConditionalTokens
-  '0x89c5cc945dd550bcffb72fe42bff002429f46fec', // Polymarket CLOB
+  "0x4bfb41d5b3570dfe5a4bde6f4f13907e456f2b13", // ConditionalTokens
+  "0x89c5cc945dd550bcffb72fe42bff002429f46fec", // Polymarket CLOB
 ] as const;
 
 /**
@@ -30,24 +30,31 @@ export const DEFAULT_CONFIG = {
 /**
  * USDC contract address on Polygon mainnet
  */
-export const POLYGON_USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+export const POLYGON_USDC_ADDRESS =
+  "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 
 /**
  * Polymarket on-chain addresses (Polygon mainnet)
  */
-export const POLYMARKET_CTF_ADDRESS = '0x4d97dcd97ec945f40cf65f87097ace5ea0476045';
-export const POLYMARKET_CTF_EXCHANGE_ADDRESS = '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E';
-export const POLYMARKET_NEG_RISK_CTF_EXCHANGE_ADDRESS = '0xC5d563A36AE78145C45a50134d48A1215220f80a';
-export const POLYMARKET_NEG_RISK_ADAPTER_ADDRESS = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+export const POLYMARKET_CTF_ADDRESS =
+  "0x4d97dcd97ec945f40cf65f87097ace5ea0476045";
+export const POLYMARKET_CTF_EXCHANGE_ADDRESS =
+  "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E";
+export const POLYMARKET_NEG_RISK_CTF_EXCHANGE_ADDRESS =
+  "0xC5d563A36AE78145C45a50134d48A1215220f80a";
+export const POLYMARKET_NEG_RISK_ADAPTER_ADDRESS =
+  "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296";
 
 /**
  * Polymarket API endpoints
  */
 export const POLYMARKET_API = {
-  BASE_URL: 'https://clob.polymarket.com',
-  DATA_API_BASE_URL: 'https://data-api.polymarket.com',
-  ACTIVITY_ENDPOINT: (user: string) => `${POLYMARKET_API.DATA_API_BASE_URL}/activity?user=${user}`,
-  POSITIONS_ENDPOINT: (user: string) => `${POLYMARKET_API.DATA_API_BASE_URL}/positions?user=${user}`,
+  BASE_URL: "https://clob.polymarket.com",
+  DATA_API_BASE_URL: "https://data-api.polymarket.com",
+  ACTIVITY_ENDPOINT: (user: string) =>
+    `${POLYMARKET_API.DATA_API_BASE_URL}/activity?user=${user}`,
+  POSITIONS_ENDPOINT: (user: string) =>
+    `${POLYMARKET_API.DATA_API_BASE_URL}/positions?user=${user}`,
 } as const;
 
 /**

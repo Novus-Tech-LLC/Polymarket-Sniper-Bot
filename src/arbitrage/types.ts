@@ -44,7 +44,7 @@ export type TradePlan = {
 };
 
 export type TradeExecutionResult = {
-  status: 'dry_run' | 'submitted' | 'failed' | 'skipped';
+  status: "dry_run" | "submitted" | "failed" | "skipped";
   txHashes?: string[];
   reason?: string;
 };
@@ -59,11 +59,24 @@ export interface Strategy {
 }
 
 export interface RiskManager {
-  canExecute: (opportunity: Opportunity, now: number) => { allowed: boolean; reason?: string };
+  canExecute: (
+    opportunity: Opportunity,
+    now: number,
+  ) => { allowed: boolean; reason?: string };
   ensureGasBalance: (now: number) => Promise<{ ok: boolean; balance: number }>;
-  onTradeSubmitted: (opportunity: Opportunity, now: number) => Promise<void> | void;
-  onTradeSuccess: (opportunity: Opportunity, now: number) => Promise<void> | void;
-  onTradeFailure: (opportunity: Opportunity, now: number, reason: string) => Promise<void> | void;
+  onTradeSubmitted: (
+    opportunity: Opportunity,
+    now: number,
+  ) => Promise<void> | void;
+  onTradeSuccess: (
+    opportunity: Opportunity,
+    now: number,
+  ) => Promise<void> | void;
+  onTradeFailure: (
+    opportunity: Opportunity,
+    now: number,
+    reason: string,
+  ) => Promise<void> | void;
 }
 
 export interface TradeExecutor {

@@ -1,11 +1,14 @@
-import { RelayClient, RelayerTxType } from '@polymarket/builder-relayer-client';
-import { deriveProxyWallet, deriveSafe } from '@polymarket/builder-relayer-client/dist/builder/derive';
-import { BuilderConfig } from '@polymarket/builder-signing-sdk';
-import { createWalletClient, http, type Hex } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { polygon } from 'viem/chains';
-import type { Logger } from '../utils/logger.util';
-import { parsePrivateKey } from '../utils/keys';
+import { RelayClient, RelayerTxType } from "@polymarket/builder-relayer-client";
+import {
+  deriveProxyWallet,
+  deriveSafe,
+} from "@polymarket/builder-relayer-client/dist/builder/derive";
+import { BuilderConfig } from "@polymarket/builder-signing-sdk";
+import { createWalletClient, http, type Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { polygon } from "viem/chains";
+import type { Logger } from "../utils/logger.util";
+import { parsePrivateKey } from "../utils/keys";
 
 export type RelayerContext = {
   enabled: boolean;
@@ -23,9 +26,12 @@ export type RelayerTxResult = {
   state?: string;
 };
 
-const readEnv = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
+const readEnv = (key: string): string | undefined =>
+  process.env[key] ?? process.env[key.toLowerCase()];
 
-const parseRelayerTxType = (raw: string | undefined): RelayerTxType | undefined => {
+const parseRelayerTxType = (
+  raw: string | undefined,
+): RelayerTxType | undefined => {
   if (!raw) return undefined;
   const normalized = raw.toUpperCase();
   if (normalized === RelayerTxType.PROXY) return RelayerTxType.PROXY;
@@ -38,10 +44,12 @@ export const createRelayerContext = (params: {
   rpcUrl: string;
   logger?: Logger;
 }): RelayerContext => {
-  const signerUrl = readEnv('SIGNER_URL');
-  const relayerUrl = readEnv('RELAYER_URL') ?? 'https://relayer-v2.polymarket.com/';
-  const txType = parseRelayerTxType(readEnv('RELAYER_TX_TYPE')) ?? RelayerTxType.SAFE;
-  
+  const signerUrl = readEnv("SIGNER_URL");
+  const relayerUrl =
+    readEnv("RELAYER_URL") ?? "https://relayer-v2.polymarket.com/";
+  const txType =
+    parseRelayerTxType(readEnv("RELAYER_TX_TYPE")) ?? RelayerTxType.SAFE;
+
   // Parse and validate private key
   let normalizedKey: string;
   try {
@@ -54,14 +62,17 @@ export const createRelayerContext = (params: {
   const account = privateKeyToAccount(normalizedKey as Hex);
 
   // Check for builder credentials
-  const builderApiKey = readEnv('POLY_BUILDER_API_KEY');
-  const builderSecret = readEnv('POLY_BUILDER_API_SECRET');
-  const builderPassphrase = readEnv('POLY_BUILDER_API_PASSPHRASE');
-  const useRelayerForApprovals = readEnv('USE_RELAYER_FOR_APPROVALS') !== 'false'; // Default true
-  
+  const builderApiKey = readEnv("POLY_BUILDER_API_KEY");
+  const builderSecret = readEnv("POLY_BUILDER_API_SECRET");
+  const builderPassphrase = readEnv("POLY_BUILDER_API_PASSPHRASE");
+  const useRelayerForApprovals =
+    readEnv("USE_RELAYER_FOR_APPROVALS") !== "false"; // Default true
+
   // Need either signer URL or builder credentials for relayer
   if (!signerUrl && !(builderApiKey && builderSecret && builderPassphrase)) {
-    params.logger?.info('[Relayer] Neither SIGNER_URL nor builder credentials provided; relayer disabled.');
+    params.logger?.info(
+      "[Relayer] Neither SIGNER_URL nor builder credentials provided; relayer disabled.",
+    );
     return {
       enabled: false,
       signerAddress: account.address,
@@ -78,17 +89,21 @@ export const createRelayerContext = (params: {
         passphrase: builderPassphrase,
       },
     });
-    params.logger?.info('[Relayer] Using builder credentials for relayer initialization.');
+    params.logger?.info(
+      "[Relayer] Using builder credentials for relayer initialization.",
+    );
   } else if (signerUrl) {
     // Use remote signer
-    const signerToken = readEnv('SIGNER_AUTH_TOKEN');
+    const signerToken = readEnv("SIGNER_AUTH_TOKEN");
     builderConfig = new BuilderConfig({
       remoteBuilderConfig: {
         url: signerUrl,
         ...(signerToken ? { token: signerToken } : {}),
       },
     });
-    params.logger?.info('[Relayer] Using remote signer for relayer initialization.');
+    params.logger?.info(
+      "[Relayer] Using remote signer for relayer initialization.",
+    );
   } else {
     return {
       enabled: false,
@@ -102,7 +117,13 @@ export const createRelayerContext = (params: {
     transport: http(params.rpcUrl),
   });
 
-  const client = new RelayClient(relayerUrl, 137, walletClient, builderConfig, txType);
+  const client = new RelayClient(
+    relayerUrl,
+    137,
+    walletClient,
+    builderConfig,
+    txType,
+  );
   params.logger?.info(
     `[Relayer] enabled=true relayerUrl=${relayerUrl} txType=${txType} signer=${account.address} useForApprovals=${useRelayerForApprovals}`,
   );
@@ -125,23 +146,25 @@ export const executeRelayerTxs = async (params: {
 }): Promise<RelayerTxResult> => {
   const client = params.relayer.client;
   if (!client) {
-    throw new Error('[Relayer] Client unavailable for execute.');
+    throw new Error("[Relayer] Client unavailable for execute.");
   }
 
   const txs = params.txs.map((tx) => ({
     to: tx.to,
     data: tx.data,
-    value: tx.value ?? '0',
+    value: tx.value ?? "0",
   }));
 
-  params.logger.info(`[Relayer] Executing ${txs.length} tx(s) desc=${params.description}`);
+  params.logger.info(
+    `[Relayer] Executing ${txs.length} tx(s) desc=${params.description}`,
+  );
   const response = await client.execute(txs, params.description);
   params.logger.info(
-    `[Relayer] Submitted relayer_tx_id=${response.transactionID} state=${response.state} hash=${response.transactionHash ?? 'n/a'}`,
+    `[Relayer] Submitted relayer_tx_id=${response.transactionID} state=${response.state} hash=${response.transactionHash ?? "n/a"}`,
   );
   const result = await response.wait();
   if (!result) {
-    params.logger.warn('[Relayer] Transaction did not reach a final state.');
+    params.logger.warn("[Relayer] Transaction did not reach a final state.");
     return {
       transactionId: response.transactionID,
       transactionHash: response.transactionHash,
@@ -149,7 +172,7 @@ export const executeRelayerTxs = async (params: {
     };
   }
   params.logger.info(
-    `[Relayer] Finalized relayer_tx_id=${result.transactionID} state=${result.state} txHash=${result.transactionHash ?? 'n/a'} proxy=${result.proxyAddress}`,
+    `[Relayer] Finalized relayer_tx_id=${result.transactionID} state=${result.state} txHash=${result.transactionHash ?? "n/a"} proxy=${result.proxyAddress}`,
   );
   return {
     transactionId: result.transactionID,
@@ -168,10 +191,13 @@ export const deployIfNeeded = async (params: {
   }
 
   if (relayer.txType === RelayerTxType.PROXY) {
-    const proxyFactory = relayer.client.contractConfig.ProxyContracts.ProxyFactory;
+    const proxyFactory =
+      relayer.client.contractConfig.ProxyContracts.ProxyFactory;
     const proxyAddress = deriveProxyWallet(relayer.signerAddress, proxyFactory);
     relayer.tradingAddress = proxyAddress;
-    logger.info(`[Relayer] Proxy address=${proxyAddress} (deployment deferred to first tx).`);
+    logger.info(
+      `[Relayer] Proxy address=${proxyAddress} (deployment deferred to first tx).`,
+    );
     return { tradingAddress: proxyAddress };
   }
 
@@ -187,15 +213,15 @@ export const deployIfNeeded = async (params: {
   logger.info(`[Relayer] Safe not deployed. Deploying address=${safeAddress}.`);
   const response = await relayer.client.deploy();
   logger.info(
-    `[Relayer] Deploy submitted relayer_tx_id=${response.transactionID} state=${response.state} hash=${response.transactionHash ?? 'n/a'}`,
+    `[Relayer] Deploy submitted relayer_tx_id=${response.transactionID} state=${response.state} hash=${response.transactionHash ?? "n/a"}`,
   );
   const result = await response.wait();
   if (!result) {
-    logger.warn('[Relayer] Safe deploy did not reach a final state.');
+    logger.warn("[Relayer] Safe deploy did not reach a final state.");
     return { tradingAddress: safeAddress };
   }
   logger.info(
-    `[Relayer] Safe deploy finalized relayer_tx_id=${result.transactionID} state=${result.state} txHash=${result.transactionHash ?? 'n/a'} proxy=${result.proxyAddress}`,
+    `[Relayer] Safe deploy finalized relayer_tx_id=${result.transactionID} state=${result.state} txHash=${result.transactionHash ?? "n/a"} proxy=${result.proxyAddress}`,
   );
   relayer.tradingAddress = result.proxyAddress || safeAddress;
   return { tradingAddress: relayer.tradingAddress };

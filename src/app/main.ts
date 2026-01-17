@@ -1,16 +1,19 @@
-import 'dotenv/config';
-import { loadMonitorConfig, parseCliOverrides } from '../config/loadConfig';
-import { createPolymarketClient } from '../infrastructure/clob-client.factory';
-import { MempoolMonitorService } from '../services/mempool-monitor.service';
-import { TradeExecutorService } from '../services/trade-executor.service';
-import { ConsoleLogger } from '../utils/logger.util';
-import { getUsdBalanceApprox, getPolBalance } from '../utils/get-balance.util';
-import { startArbitrageEngine } from '../arbitrage/runtime';
-import { suppressClobOrderbookErrors } from '../utils/console-filter.util';
-import { startWireguard } from '../utils/wireguard.util';
-import { startOpenvpn } from '../utils/openvpn.util';
-import { formatClobCredsChecklist, isApiKeyCreds } from '../utils/clob-credentials.util';
-import { ensureTradingReady } from '../polymarket/preflight';
+import "dotenv/config";
+import { loadMonitorConfig, parseCliOverrides } from "../config/loadConfig";
+import { createPolymarketClient } from "../infrastructure/clob-client.factory";
+import { MempoolMonitorService } from "../services/mempool-monitor.service";
+import { TradeExecutorService } from "../services/trade-executor.service";
+import { ConsoleLogger } from "../utils/logger.util";
+import { getUsdBalanceApprox, getPolBalance } from "../utils/get-balance.util";
+import { startArbitrageEngine } from "../arbitrage/runtime";
+import { suppressClobOrderbookErrors } from "../utils/console-filter.util";
+import { startWireguard } from "../utils/wireguard.util";
+import { startOpenvpn } from "../utils/openvpn.util";
+import {
+  formatClobCredsChecklist,
+  isApiKeyCreds,
+} from "../utils/clob-credentials.util";
+import { ensureTradingReady } from "../polymarket/preflight";
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
@@ -20,14 +23,16 @@ async function main(): Promise<void> {
     await startWireguard(logger);
   }
   const cliOverrides = parseCliOverrides(process.argv.slice(2));
-  const mode = String(process.env.MODE ?? process.env.mode ?? 'mempool').toLowerCase();
+  const mode = String(
+    process.env.MODE ?? process.env.mode ?? "mempool",
+  ).toLowerCase();
   logger.info(`Starting Polymarket runtime mode=${mode}`);
 
-  if (mode === 'arb' || mode === 'both') {
+  if (mode === "arb" || mode === "both") {
     await startArbitrageEngine(cliOverrides);
   }
 
-  if (mode !== 'mempool' && mode !== 'both') {
+  if (mode !== "mempool" && mode !== "both") {
     return;
   }
 
@@ -35,12 +40,14 @@ async function main(): Promise<void> {
   logger.info(formatClobCredsChecklist(env.clobCredsChecklist));
 
   if (!env.enabled) {
-    logger.info(`[Monitor] Preset=${env.presetName} disabled; skipping monitor runtime.`);
+    logger.info(
+      `[Monitor] Preset=${env.presetName} disabled; skipping monitor runtime.`,
+    );
     return;
   }
 
   if (!env.clobCredsComplete && !env.clobDeriveEnabled) {
-    logger.warn('CLOB creds incomplete');
+    logger.warn("CLOB creds incomplete");
   }
 
   const client = await createPolymarketClient({
@@ -57,8 +64,12 @@ async function main(): Promise<void> {
     env.detectOnly = true;
   }
 
-  const clientCredsRaw = (client as { creds?: { key?: string; secret?: string; passphrase?: string } }).creds;
-  const clientCreds = isApiKeyCreds(clientCredsRaw) ? clientCredsRaw : undefined;
+  const clientCredsRaw = (
+    client as { creds?: { key?: string; secret?: string; passphrase?: string } }
+  ).creds;
+  const clientCreds = isApiKeyCreds(clientCredsRaw)
+    ? clientCredsRaw
+    : undefined;
   const credsComplete = Boolean(clientCreds);
   env.clobCredsComplete = credsComplete;
   env.detectOnly = !credsComplete || env.detectOnly;
@@ -87,10 +98,15 @@ async function main(): Promise<void> {
     logger.info(`POL Balance: ${polBalance.toFixed(4)} POL`);
     logger.info(`USDC Balance: ${usdcBalance.toFixed(2)} USDC`);
   } catch (err) {
-    logger.error('Failed to fetch balances', err as Error);
+    logger.error("Failed to fetch balances", err as Error);
   }
 
-  const executor = new TradeExecutorService({ client, proxyWallet: env.proxyWallet, logger, env });
+  const executor = new TradeExecutorService({
+    client,
+    proxyWallet: env.proxyWallet,
+    logger,
+    env,
+  });
 
   const monitor = new MempoolMonitorService({
     client,
@@ -105,6 +121,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('Fatal error', err);
+  console.error("Fatal error", err);
   process.exit(1);
 });

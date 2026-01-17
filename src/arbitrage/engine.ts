@@ -1,10 +1,19 @@
-import type { Logger } from '../utils/logger.util';
-import type { ArbConfig } from './config';
-import type { DecisionLogger } from './utils/decision-logger';
-import { OrderbookNotFoundError } from '../errors/app.errors';
-import type { MarketDataProvider, Opportunity, RiskManager, Strategy, TradeExecutor } from './types';
-import { Semaphore } from './utils/limiter';
-import type { ArbDiagnostics, CandidateSnapshot } from './strategy/intra-market.strategy';
+import type { Logger } from "../utils/logger.util";
+import type { ArbConfig } from "./config";
+import type { DecisionLogger } from "./utils/decision-logger";
+import { OrderbookNotFoundError } from "../errors/app.errors";
+import type {
+  MarketDataProvider,
+  Opportunity,
+  RiskManager,
+  Strategy,
+  TradeExecutor,
+} from "./types";
+import { Semaphore } from "./utils/limiter";
+import type {
+  ArbDiagnostics,
+  CandidateSnapshot,
+} from "./strategy/intra-market.strategy";
 
 export class ArbitrageEngine {
   private readonly provider: MarketDataProvider;
@@ -40,7 +49,7 @@ export class ArbitrageEngine {
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    this.logger.info('[ARB] Arbitrage engine started');
+    this.logger.info("[ARB] Arbitrage engine started");
     while (this.running) {
       const startedAt = Date.now();
       await this.scanOnce(startedAt);
@@ -62,13 +71,20 @@ export class ArbitrageEngine {
       const snapshots = await Promise.all(
         markets.map((market) =>
           this.orderbookLimiter.with(async () => {
-            const yesResult = await this.getOrderBookTopSafe(market.yesTokenId, market.marketId);
-            const noResult = await this.getOrderBookTopSafe(market.noTokenId, market.marketId);
+            const yesResult = await this.getOrderBookTopSafe(
+              market.yesTokenId,
+              market.marketId,
+            );
+            const noResult = await this.getOrderBookTopSafe(
+              market.noTokenId,
+              market.marketId,
+            );
             const hasFailure = yesResult.failed || noResult.failed;
             if (hasFailure) {
               marketsWithOrderbookFailures += 1;
             }
-            orderbookFailures += (yesResult.failed ? 1 : 0) + (noResult.failed ? 1 : 0);
+            orderbookFailures +=
+              (yesResult.failed ? 1 : 0) + (noResult.failed ? 1 : 0);
             return { ...market, yesTop: yesResult.top, noTop: noResult.top };
           }),
         ),
@@ -79,7 +95,9 @@ export class ArbitrageEngine {
       const allCandidates = diagnostics?.candidates ?? [];
       const topCandidates = this.selectTopCandidates(allCandidates);
       await this.logCandidates(allCandidates, topCandidates, now);
-      const skipSummary = diagnostics ? this.formatSkipCounts(diagnostics.skipCounts) : 'n/a';
+      const skipSummary = diagnostics
+        ? this.formatSkipCounts(diagnostics.skipCounts)
+        : "n/a";
       opportunities.sort((a, b) => b.estProfitUsd - a.estProfitUsd);
       if (opportunities.length === 0) {
         this.logger.info(
@@ -122,13 +140,21 @@ export class ArbitrageEngine {
     }
   }
 
-  private async handleOpportunity(opportunity: Opportunity, now: number): Promise<void> {
+  private async handleOpportunity(
+    opportunity: Opportunity,
+    now: number,
+  ): Promise<void> {
     const decision = this.riskManager.canExecute(opportunity, now);
     if (!decision.allowed) {
       this.logger.info(
-        `[ARB] Skip market=${opportunity.marketId} reason=${decision.reason || 'filtered'} edge=${opportunity.edgeBps.toFixed(1)}bps est=$${opportunity.estProfitUsd.toFixed(2)} size=$${opportunity.sizeUsd.toFixed(2)}`,
+        `[ARB] Skip market=${opportunity.marketId} reason=${decision.reason || "filtered"} edge=${opportunity.edgeBps.toFixed(1)}bps est=$${opportunity.estProfitUsd.toFixed(2)} size=$${opportunity.sizeUsd.toFixed(2)}`,
       );
-      await this.logDecision(opportunity, 'skip', decision.reason || 'filtered', now);
+      await this.logDecision(
+        opportunity,
+        "skip",
+        decision.reason || "filtered",
+        now,
+      );
       return;
     }
 
@@ -137,7 +163,7 @@ export class ArbitrageEngine {
       this.logger.warn(
         `[ARB] Skip market=${opportunity.marketId} reason=low_gas edge=${opportunity.edgeBps.toFixed(1)}bps est=$${opportunity.estProfitUsd.toFixed(2)} size=$${opportunity.sizeUsd.toFixed(2)}`,
       );
-      await this.logDecision(opportunity, 'skip', 'low_gas', now);
+      await this.logDecision(opportunity, "skip", "low_gas", now);
       return;
     }
 
@@ -158,12 +184,28 @@ export class ArbitrageEngine {
     const result = await this.executor.execute(plan, now);
     this.activeTrades -= 1;
 
-    if (result.status === 'submitted' || result.status === 'dry_run') {
+    if (result.status === "submitted" || result.status === "dry_run") {
       await this.riskManager.onTradeSuccess(opportunity, now);
-      await this.logDecision(opportunity, 'trade', result.status, now, plan.sizeUsd, result.txHashes?.[0]);
+      await this.logDecision(
+        opportunity,
+        "trade",
+        result.status,
+        now,
+        plan.sizeUsd,
+        result.txHashes?.[0],
+      );
     } else {
-      await this.riskManager.onTradeFailure(opportunity, now, result.reason || result.status);
-      await this.logDecision(opportunity, 'skip', result.reason || result.status, now);
+      await this.riskManager.onTradeFailure(
+        opportunity,
+        now,
+        result.reason || result.status,
+      );
+      await this.logDecision(
+        opportunity,
+        "skip",
+        result.reason || result.status,
+        now,
+      );
     }
   }
 
@@ -190,27 +232,36 @@ export class ArbitrageEngine {
       reason,
       planned_size: plannedSize,
       tx_hash: txHash,
-      status: action === 'trade' ? 'submitted' : 'skipped',
+      status: action === "trade" ? "submitted" : "skipped",
     });
   }
 
   private getDiagnostics(): ArbDiagnostics | undefined {
-    const strategyWithDiagnostics = this.strategy as unknown as { getDiagnostics?: () => ArbDiagnostics };
-    if (typeof strategyWithDiagnostics.getDiagnostics === 'function') {
+    const strategyWithDiagnostics = this.strategy as unknown as {
+      getDiagnostics?: () => ArbDiagnostics;
+    };
+    if (typeof strategyWithDiagnostics.getDiagnostics === "function") {
       return strategyWithDiagnostics.getDiagnostics();
     }
     return undefined;
   }
 
-  private selectTopCandidates(candidates: CandidateSnapshot[]): CandidateSnapshot[] {
+  private selectTopCandidates(
+    candidates: CandidateSnapshot[],
+  ): CandidateSnapshot[] {
     if (!this.config.debugTopN || this.config.debugTopN <= 0) return [];
-    return [...candidates].sort((a, b) => b.edgeBps - a.edgeBps).slice(0, this.config.debugTopN);
+    return [...candidates]
+      .sort((a, b) => b.edgeBps - a.edgeBps)
+      .slice(0, this.config.debugTopN);
   }
 
   private logTopCandidates(candidates: CandidateSnapshot[]): void {
     if (!this.config.debugTopN || candidates.length === 0) return;
     const lines = candidates.map((candidate) => {
-      const liquidity = candidate.liquidityUsd !== undefined ? candidate.liquidityUsd.toFixed(2) : 'n/a';
+      const liquidity =
+        candidate.liquidityUsd !== undefined
+          ? candidate.liquidityUsd.toFixed(2)
+          : "n/a";
       return `market_id=${candidate.marketId} yesBid=${candidate.yesBid.toFixed(4)} yesAsk=${candidate.yesAsk.toFixed(
         4,
       )} noBid=${candidate.noBid.toFixed(4)} noAsk=${candidate.noAsk.toFixed(
@@ -219,13 +270,15 @@ export class ArbitrageEngine {
         1,
       )} spread_bps=${candidate.spreadBps.toFixed(1)} liquidity=${liquidity}`;
     });
-    this.logger.info(`[ARB] TopCandidates (pre-filter, top ${this.config.debugTopN}):\n${lines.join('\n')}`);
+    this.logger.info(
+      `[ARB] TopCandidates (pre-filter, top ${this.config.debugTopN}):\n${lines.join("\n")}`,
+    );
   }
 
   private formatSkipCounts(skipCounts: Record<string, number>): string {
     return Object.entries(skipCounts)
       .map(([reason, count]) => `${reason}:${count}`)
-      .join(',');
+      .join(",");
   }
 
   private async logCandidates(
@@ -248,8 +301,8 @@ export class ArbitrageEngine {
         liquidity: candidate.liquidityUsd,
         spread_bps: candidate.spreadBps,
         est_profit_usd: undefined,
-        action: 'candidate',
-        reason: candidate.reason ?? 'pre_filter',
+        action: "candidate",
+        reason: candidate.reason ?? "pre_filter",
       });
     }
   }

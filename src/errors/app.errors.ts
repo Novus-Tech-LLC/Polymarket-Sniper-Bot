@@ -18,7 +18,7 @@ export class AppError extends Error {
  */
 export class ConfigurationError extends AppError {
   constructor(message: string, cause?: Error) {
-    super(message, 'CONFIG_ERROR', cause);
+    super(message, "CONFIG_ERROR", cause);
   }
 }
 
@@ -32,7 +32,7 @@ export class TradeExecutionError extends AppError {
     public readonly tokenId?: string,
     cause?: Error,
   ) {
-    super(message, 'TRADE_EXECUTION_ERROR', cause);
+    super(message, "TRADE_EXECUTION_ERROR", cause);
   }
 }
 
@@ -46,7 +46,7 @@ export class BalanceError extends AppError {
     public readonly available?: number,
     cause?: Error,
   ) {
-    super(message, 'BALANCE_ERROR', cause);
+    super(message, "BALANCE_ERROR", cause);
   }
 }
 
@@ -59,7 +59,7 @@ export class MarketError extends AppError {
     public readonly marketId?: string,
     cause?: Error,
   ) {
-    super(message, 'MARKET_ERROR', cause);
+    super(message, "MARKET_ERROR", cause);
   }
 }
 
@@ -86,6 +86,6 @@ export class NetworkError extends AppError {
     public readonly endpoint?: string,
     cause?: Error,
   ) {
-    super(message, 'NETWORK_ERROR', cause);
+    super(message, "NETWORK_ERROR", cause);
   }
 }

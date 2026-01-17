@@ -1,14 +1,14 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { Wallet } from 'ethers';
-import { ArbRiskManager } from '../../src/arbitrage/risk/risk-manager';
-import { InMemoryStateStore } from '../../src/arbitrage/state/state-store';
-import type { ArbConfig } from '../../src/arbitrage/config';
-import type { Opportunity } from '../../src/arbitrage/types';
-import { ConsoleLogger } from '../../src/utils/logger.util';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Wallet } from "ethers";
+import { ArbRiskManager } from "../../src/arbitrage/risk/risk-manager";
+import { InMemoryStateStore } from "../../src/arbitrage/state/state-store";
+import type { ArbConfig } from "../../src/arbitrage/config";
+import type { Opportunity } from "../../src/arbitrage/types";
+import { ConsoleLogger } from "../../src/utils/logger.util";
 
 function buildConfig(overrides: Partial<ArbConfig> = {}): ArbConfig {
   return {
@@ -22,7 +22,7 @@ function buildConfig(overrides: Partial<ArbConfig> = {}): ArbConfig {
     tradeBaseUsd: 5,
     maxPositionUsd: 25,
     maxWalletExposureUsd: 100,
-    sizeScaling: 'sqrt',
+    sizeScaling: "sqrt",
     slippageBps: 50,
     feeBps: 10,
     startupCooldownSeconds: 0,
@@ -30,24 +30,24 @@ function buildConfig(overrides: Partial<ArbConfig> = {}): ArbConfig {
     maxTradesPerHour: 10,
     maxConsecutiveFailures: 2,
     dryRun: true,
-    liveTrading: '',
+    liveTrading: "",
     minPolGas: 2,
     approveUnlimited: false,
-    stateDir: '/tmp',
-    decisionsLog: '',
-    killSwitchFile: path.join(os.tmpdir(), 'arb-kill'),
+    stateDir: "/tmp",
+    decisionsLog: "",
+    killSwitchFile: path.join(os.tmpdir(), "arb-kill"),
     snapshotState: false,
     maxConcurrentTrades: 1,
     debugTopN: 0,
     unitsAutoFix: true,
     logEveryMarket: false,
-    rpcUrl: 'http://localhost:8545',
-    privateKey: '0x' + '11'.repeat(32),
+    rpcUrl: "http://localhost:8545",
+    privateKey: "0x" + "11".repeat(32),
     proxyWallet: undefined,
     polymarketApiKey: undefined,
     polymarketApiSecret: undefined,
     polymarketApiPassphrase: undefined,
-    collateralTokenAddress: '0x' + '22'.repeat(20),
+    collateralTokenAddress: "0x" + "22".repeat(20),
     collateralTokenDecimals: 6,
     ...overrides,
   };
@@ -55,9 +55,9 @@ function buildConfig(overrides: Partial<ArbConfig> = {}): ArbConfig {
 
 function sampleOpportunity(): Opportunity {
   return {
-    marketId: 'market-1',
-    yesTokenId: 'yes',
-    noTokenId: 'no',
+    marketId: "market-1",
+    yesTokenId: "yes",
+    noTokenId: "no",
     yesAsk: 0.6,
     noAsk: 0.6,
     edgeBps: 2000,
@@ -67,16 +67,16 @@ function sampleOpportunity(): Opportunity {
   };
 }
 
-test('risk manager enforces kill switch and circuit breaker', async () => {
+test("risk manager enforces kill switch and circuit breaker", async () => {
   const logger = new ConsoleLogger();
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arb-state-'));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "arb-state-"));
   const config = buildConfig({ stateDir });
   const state = new InMemoryStateStore(stateDir, false);
   await state.load();
   const wallet = new Wallet(config.privateKey);
   const risk = new ArbRiskManager({ config, state, logger, wallet });
 
-  fs.writeFileSync(config.killSwitchFile, 'STOP');
+  fs.writeFileSync(config.killSwitchFile, "STOP");
   const decision = risk.canExecute(sampleOpportunity(), Date.now());
   assert.equal(decision.allowed, false);
   fs.unlinkSync(config.killSwitchFile);
@@ -87,9 +87,9 @@ test('risk manager enforces kill switch and circuit breaker', async () => {
   assert.equal(breakerDecision.allowed, false);
 });
 
-test('risk manager enforces idempotency after submission', async () => {
+test("risk manager enforces idempotency after submission", async () => {
   const logger = new ConsoleLogger();
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arb-state-'));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "arb-state-"));
   const config = buildConfig({ stateDir, startupCooldownSeconds: 0 });
   const state = new InMemoryStateStore(stateDir, false);
   await state.load();

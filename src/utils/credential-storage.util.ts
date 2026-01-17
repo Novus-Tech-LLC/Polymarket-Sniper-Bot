@@ -1,10 +1,10 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import type { ApiKeyCreds } from '@polymarket/clob-client';
-import type { Logger } from './logger.util';
+import fs from "node:fs";
+import path from "node:path";
+import type { ApiKeyCreds } from "@polymarket/clob-client";
+import type { Logger } from "./logger.util";
 
-const CREDS_FILE_PATH = '/data/clob-creds.json';
-const CREDS_FILE_PATH_FALLBACK = './data/clob-creds.json';
+const CREDS_FILE_PATH = "/data/clob-creds.json";
+const CREDS_FILE_PATH_FALLBACK = "./data/clob-creds.json";
 
 type StoredCredentials = {
   key: string;
@@ -28,7 +28,9 @@ const resolveCredsPath = (): string => {
   } catch (error) {
     // Fallback to local data dir if /data not writable
     // Log the issue but continue with fallback
-    console.warn(`[CredStorage] /data not accessible (${error}), using fallback: ${CREDS_FILE_PATH_FALLBACK}`);
+    console.warn(
+      `[CredStorage] /data not accessible (${error}), using fallback: ${CREDS_FILE_PATH_FALLBACK}`,
+    );
     ensureDataDir(CREDS_FILE_PATH_FALLBACK);
     return CREDS_FILE_PATH_FALLBACK;
   }
@@ -42,18 +44,22 @@ export const loadCachedCreds = (params: {
   logger?: Logger;
 }): ApiKeyCreds | null => {
   const filePath = resolveCredsPath();
-  
+
   try {
     if (!fs.existsSync(filePath)) {
-      params.logger?.info(`[CredStorage] No cached credentials found at ${filePath}`);
+      params.logger?.info(
+        `[CredStorage] No cached credentials found at ${filePath}`,
+      );
       return null;
     }
 
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, "utf-8");
     const stored: StoredCredentials = JSON.parse(content);
 
     // Validate stored credentials match current signer
-    if (stored.signerAddress.toLowerCase() !== params.signerAddress.toLowerCase()) {
+    if (
+      stored.signerAddress.toLowerCase() !== params.signerAddress.toLowerCase()
+    ) {
       params.logger?.warn(
         `[CredStorage] Cached credentials for different signer (cached=${stored.signerAddress} current=${params.signerAddress}); ignoring.`,
       );
@@ -62,11 +68,15 @@ export const loadCachedCreds = (params: {
 
     // Validate credentials are complete
     if (!stored.key || !stored.secret || !stored.passphrase) {
-      params.logger?.warn('[CredStorage] Cached credentials incomplete; ignoring.');
+      params.logger?.warn(
+        "[CredStorage] Cached credentials incomplete; ignoring.",
+      );
       return null;
     }
 
-    const ageHours = Math.floor((Date.now() - stored.createdAt) / (1000 * 60 * 60));
+    const ageHours = Math.floor(
+      (Date.now() - stored.createdAt) / (1000 * 60 * 60),
+    );
     params.logger?.info(
       `[CredStorage] Loaded cached credentials from ${filePath} (age=${ageHours}h signer=${stored.signerAddress})`,
     );
@@ -77,7 +87,9 @@ export const loadCachedCreds = (params: {
       passphrase: stored.passphrase,
     };
   } catch (error) {
-    params.logger?.warn(`[CredStorage] Failed to load cached credentials: ${error}`);
+    params.logger?.warn(
+      `[CredStorage] Failed to load cached credentials: ${error}`,
+    );
     return null;
   }
 };
@@ -102,7 +114,7 @@ export const saveCachedCreds = (params: {
     };
 
     ensureDataDir(filePath);
-    fs.writeFileSync(filePath, JSON.stringify(stored, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(stored, null, 2), "utf-8");
 
     params.logger?.info(
       `[CredStorage] Saved credentials to ${filePath} (signer=${params.signerAddress})`,

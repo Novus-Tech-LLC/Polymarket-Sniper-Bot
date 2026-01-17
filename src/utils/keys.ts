@@ -1,14 +1,18 @@
-import type { Logger } from './logger.util';
+import type { Logger } from "./logger.util";
 
-const readEnv = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
+const readEnv = (key: string): string | undefined =>
+  process.env[key] ?? process.env[key.toLowerCase()];
 
 /**
  * Parse and normalize a private key from environment
  * Accepts either 64 hex chars or 0x + 64 hex chars
  * Returns 0x-prefixed 32-byte hex
  */
-export const parsePrivateKey = (params?: { logger?: Logger; envKey?: string }): string => {
-  const envKey = params?.envKey ?? 'PRIVATE_KEY';
+export const parsePrivateKey = (params?: {
+  logger?: Logger;
+  envKey?: string;
+}): string => {
+  const envKey = params?.envKey ?? "PRIVATE_KEY";
   const raw = readEnv(envKey);
 
   if (!raw) {
@@ -19,9 +23,10 @@ export const parsePrivateKey = (params?: { logger?: Logger; envKey?: string }): 
   const trimmed = raw.trim();
 
   // Remove 0x prefix if present
-  const withoutPrefix = trimmed.startsWith('0x') || trimmed.startsWith('0X')
-    ? trimmed.slice(2)
-    : trimmed;
+  const withoutPrefix =
+    trimmed.startsWith("0x") || trimmed.startsWith("0X")
+      ? trimmed.slice(2)
+      : trimmed;
 
   // Validate hex and length
   if (!/^[0-9a-fA-F]+$/.test(withoutPrefix)) {
@@ -39,7 +44,9 @@ export const parsePrivateKey = (params?: { logger?: Logger; envKey?: string }): 
   }
 
   const normalized = `0x${withoutPrefix}`;
-  params?.logger?.info(`[Keys] Private key format validated successfully (32 bytes, hex)`);
+  params?.logger?.info(
+    `[Keys] Private key format validated successfully (32 bytes, hex)`,
+  );
 
   return normalized;
 };
@@ -50,7 +57,7 @@ export const parsePrivateKey = (params?: { logger?: Logger; envKey?: string }): 
  */
 export const redactPrivateKey = (key: string): string => {
   if (!key || key.length < 10) {
-    return '***';
+    return "***";
   }
   return `${key.slice(0, 6)}...${key.slice(-4)}`;
 };

@@ -3,20 +3,29 @@ export type CanonicalQueryResult = {
   keys: string[];
 };
 
-const normalizeParams = (params?: Record<string, unknown>): Record<string, unknown> => {
+const normalizeParams = (
+  params?: Record<string, unknown>,
+): Record<string, unknown> => {
   if (!params) return {};
-  return Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined));
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined),
+  );
 };
 
-export const canonicalQuery = (params?: Record<string, unknown>): CanonicalQueryResult => {
+export const canonicalQuery = (
+  params?: Record<string, unknown>,
+): CanonicalQueryResult => {
   const normalized = normalizeParams(params);
   const keys = Object.keys(normalized).sort();
   if (keys.length === 0) {
-    return { queryString: '', keys };
+    return { queryString: "", keys };
   }
   const queryString = keys
-    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(String(normalized[key]))}`)
-    .join('&');
+    .map(
+      (key) =>
+        `${encodeURIComponent(key)}=${encodeURIComponent(String(normalized[key]))}`,
+    )
+    .join("&");
   return { queryString, keys };
 };
 

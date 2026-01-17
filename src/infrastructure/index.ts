@@ -1,2 +1,1 @@
-export * from './clob-client.factory';
-
+export * from "./clob-client.factory";

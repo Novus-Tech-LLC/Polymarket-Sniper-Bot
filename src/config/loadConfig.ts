@@ -1,7 +1,15 @@
-import { Wallet } from 'ethers';
-import { DEFAULT_CONFIG, POLYGON_USDC_ADDRESS } from '../constants/polymarket.constants';
-import type { ArbConfig } from '../arbitrage/config';
-import { ARB_PRESETS, DEFAULT_ARB_PRESET, DEFAULT_MONITOR_PRESET, MONITOR_PRESETS } from './presets';
+import { Wallet } from "ethers";
+import {
+  DEFAULT_CONFIG,
+  POLYGON_USDC_ADDRESS,
+} from "../constants/polymarket.constants";
+import type { ArbConfig } from "../arbitrage/config";
+import {
+  ARB_PRESETS,
+  DEFAULT_ARB_PRESET,
+  DEFAULT_MONITOR_PRESET,
+  MONITOR_PRESETS,
+} from "./presets";
 
 export type MonitorRuntimeConfig = {
   presetName: string;
@@ -59,46 +67,50 @@ export type ClobCredsChecklist = {
 };
 
 const ARB_OVERRIDE_ALLOWLIST = new Set([
-  'ARB_DRY_RUN',
-  'ARB_LIVE_TRADING',
-  'ARB_MAX_WALLET_EXPOSURE_USD',
-  'ARB_MAX_POSITION_USD',
-  'ARB_MAX_TRADES_PER_HOUR',
-  'ARB_MAX_SPREAD_BPS',
-  'ARB_KILL_SWITCH_FILE',
-  'ARB_DECISIONS_LOG',
-  'ARB_MIN_POL_GAS',
-  'ARB_SCAN_INTERVAL_MS',
-  'ARB_DEBUG_TOP_N',
-  'MIN_ORDER_USD',
-  'ORDER_BALANCE_BUFFER_BPS',
-  'AUTO_APPROVE',
-  'AUTO_APPROVE_MAX_USD',
-  'ORDER_SUBMIT_MIN_INTERVAL_MS',
-  'ORDER_SUBMIT_MAX_PER_HOUR',
-  'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
-  'CLOUDFLARE_COOLDOWN_SECONDS',
-  'CLOB_AUTH_COOLDOWN_SECONDS',
+  "ARB_DRY_RUN",
+  "ARB_LIVE_TRADING",
+  "ARB_MAX_WALLET_EXPOSURE_USD",
+  "ARB_MAX_POSITION_USD",
+  "ARB_MAX_TRADES_PER_HOUR",
+  "ARB_MAX_SPREAD_BPS",
+  "ARB_KILL_SWITCH_FILE",
+  "ARB_DECISIONS_LOG",
+  "ARB_MIN_POL_GAS",
+  "ARB_SCAN_INTERVAL_MS",
+  "ARB_DEBUG_TOP_N",
+  "MIN_ORDER_USD",
+  "ORDER_BALANCE_BUFFER_BPS",
+  "AUTO_APPROVE",
+  "AUTO_APPROVE_MAX_USD",
+  "ORDER_SUBMIT_MIN_INTERVAL_MS",
+  "ORDER_SUBMIT_MAX_PER_HOUR",
+  "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
+  "CLOUDFLARE_COOLDOWN_SECONDS",
+  "CLOB_AUTH_COOLDOWN_SECONDS",
 ]);
 
 const MONITOR_OVERRIDE_ALLOWLIST = new Set([
-  'MIN_TRADE_SIZE_USD',
-  'TRADE_MULTIPLIER',
-  'FETCH_INTERVAL',
-  'GAS_PRICE_MULTIPLIER',
-  'MONITOR_REQUIRE_CONFIRMED',
-  'MIN_ORDER_USD',
-  'ORDER_BALANCE_BUFFER_BPS',
-  'AUTO_APPROVE',
-  'AUTO_APPROVE_MAX_USD',
-  'ORDER_SUBMIT_MIN_INTERVAL_MS',
-  'ORDER_SUBMIT_MAX_PER_HOUR',
-  'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
-  'CLOUDFLARE_COOLDOWN_SECONDS',
-  'CLOB_AUTH_COOLDOWN_SECONDS',
+  "MIN_TRADE_SIZE_USD",
+  "TRADE_MULTIPLIER",
+  "FETCH_INTERVAL",
+  "GAS_PRICE_MULTIPLIER",
+  "MONITOR_REQUIRE_CONFIRMED",
+  "MIN_ORDER_USD",
+  "ORDER_BALANCE_BUFFER_BPS",
+  "AUTO_APPROVE",
+  "AUTO_APPROVE_MAX_USD",
+  "ORDER_SUBMIT_MIN_INTERVAL_MS",
+  "ORDER_SUBMIT_MAX_PER_HOUR",
+  "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
+  "CLOUDFLARE_COOLDOWN_SECONDS",
+  "CLOB_AUTH_COOLDOWN_SECONDS",
 ]);
 
-const LEGACY_MIN_TRADE_KEYS = ['MIN_TRADE_SIZE', 'MIN_TRADE_USDC', 'MIN_TRADE_SIZE_USDC'] as const;
+const LEGACY_MIN_TRADE_KEYS = [
+  "MIN_TRADE_SIZE",
+  "MIN_TRADE_USDC",
+  "MIN_TRADE_SIZE_USDC",
+] as const;
 
 const ARB_LEGACY_DEFAULTS: ArbConfig = {
   enabled: true,
@@ -111,7 +123,7 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   tradeBaseUsd: 3,
   maxPositionUsd: 15,
   maxWalletExposureUsd: 50,
-  sizeScaling: 'sqrt',
+  sizeScaling: "sqrt",
   slippageBps: 30,
   feeBps: 10,
   startupCooldownSeconds: 120,
@@ -119,26 +131,26 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   maxTradesPerHour: 4,
   maxConsecutiveFailures: 2,
   dryRun: true,
-  liveTrading: '',
+  liveTrading: "",
   minPolGas: 3,
   approveUnlimited: false,
   detectOnly: false,
   clobCredsComplete: false,
   clobDeriveEnabled: false,
-  stateDir: '/data',
-  decisionsLog: '/data/arb_decisions.jsonl',
-  killSwitchFile: '/data/KILL',
+  stateDir: "/data",
+  decisionsLog: "/data/arb_decisions.jsonl",
+  killSwitchFile: "/data/KILL",
   snapshotState: true,
   maxConcurrentTrades: 1,
   debugTopN: 0,
   unitsAutoFix: true,
   logEveryMarket: false,
-  rpcUrl: '',
-  privateKey: '',
+  rpcUrl: "",
+  privateKey: "",
   proxyWallet: undefined,
-  polymarketApiKey: '',
-  polymarketApiSecret: '',
-  polymarketApiPassphrase: '',
+  polymarketApiKey: "",
+  polymarketApiSecret: "",
+  polymarketApiPassphrase: "",
   collateralTokenAddress: POLYGON_USDC_ADDRESS,
   collateralTokenDecimals: 6,
   minOrderUsd: DEFAULT_CONFIG.MIN_ORDER_USD,
@@ -147,7 +159,8 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   autoApproveMaxUsd: undefined,
   orderSubmitMinIntervalMs: DEFAULT_CONFIG.ORDER_SUBMIT_MIN_INTERVAL_MS,
   orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
-  orderSubmitMarketCooldownSeconds: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
+  orderSubmitMarketCooldownSeconds:
+    DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
   authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
 };
@@ -169,7 +182,8 @@ const MONITOR_LEGACY_DEFAULTS = {
   autoApproveMaxUsd: undefined as number | undefined,
   orderSubmitMinIntervalMs: DEFAULT_CONFIG.ORDER_SUBMIT_MIN_INTERVAL_MS,
   orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
-  orderSubmitMarketCooldownSeconds: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
+  orderSubmitMarketCooldownSeconds:
+    DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
   authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
 };
@@ -177,20 +191,22 @@ const MONITOR_LEGACY_DEFAULTS = {
 type EnvParser<T> = (raw: string) => T | undefined;
 
 const parseNumber: EnvParser<number> = (raw) => {
-  if (raw === '') return undefined;
+  if (raw === "") return undefined;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return undefined;
   return parsed;
 };
 
 const parseBool: EnvParser<boolean> = (raw) => {
-  if (raw === '') return undefined;
-  return String(raw).toLowerCase() === 'true';
+  if (raw === "") return undefined;
+  return String(raw).toLowerCase() === "true";
 };
 
 const parseString: EnvParser<string> = (raw) => raw;
 
-const derivePublicKey = (privateKey: string | undefined): string | undefined => {
+const derivePublicKey = (
+  privateKey: string | undefined,
+): string | undefined => {
   if (!privateKey) return undefined;
   try {
     return new Wallet(privateKey).address;
@@ -200,87 +216,147 @@ const derivePublicKey = (privateKey: string | undefined): string | undefined => 
 };
 
 const ARB_ENV_MAP = {
-  ARB_ENABLED: { key: 'enabled', parse: parseBool },
-  ARB_SCAN_INTERVAL_MS: { key: 'scanIntervalMs', parse: parseNumber },
-  ARB_MIN_EDGE_BPS: { key: 'minEdgeBps', parse: parseNumber },
-  ARB_MIN_PROFIT_USD: { key: 'minProfitUsd', parse: parseNumber },
-  ARB_MIN_LIQUIDITY_USD: { key: 'minLiquidityUsd', parse: parseNumber },
-  ARB_MAX_SPREAD_BPS: { key: 'maxSpreadBps', parse: parseNumber },
-  ARB_MAX_HOLD_MINUTES: { key: 'maxHoldMinutes', parse: parseNumber },
-  ARB_TRADE_BASE_USD: { key: 'tradeBaseUsd', parse: parseNumber },
-  ARB_MAX_POSITION_USD: { key: 'maxPositionUsd', parse: parseNumber },
-  ARB_MAX_WALLET_EXPOSURE_USD: { key: 'maxWalletExposureUsd', parse: parseNumber },
-  ARB_SIZE_SCALING: { key: 'sizeScaling', parse: parseString },
-  ARB_SLIPPAGE_BPS: { key: 'slippageBps', parse: parseNumber },
-  ARB_FEE_BPS: { key: 'feeBps', parse: parseNumber },
-  ARB_STARTUP_COOLDOWN_SECONDS: { key: 'startupCooldownSeconds', parse: parseNumber },
-  ARB_MARKET_COOLDOWN_SECONDS: { key: 'marketCooldownSeconds', parse: parseNumber },
-  ARB_MAX_TRADES_PER_HOUR: { key: 'maxTradesPerHour', parse: parseNumber },
-  ARB_MAX_CONSECUTIVE_FAILURES: { key: 'maxConsecutiveFailures', parse: parseNumber },
-  ARB_DRY_RUN: { key: 'dryRun', parse: parseBool },
-  ARB_LIVE_TRADING: { key: 'liveTrading', parse: parseString },
-  ARB_MIN_POL_GAS: { key: 'minPolGas', parse: parseNumber },
-  ARB_APPROVE_UNLIMITED: { key: 'approveUnlimited', parse: parseBool },
-  ARB_STATE_DIR: { key: 'stateDir', parse: parseString },
-  ARB_DECISIONS_LOG: { key: 'decisionsLog', parse: parseString },
-  ARB_KILL_SWITCH_FILE: { key: 'killSwitchFile', parse: parseString },
-  ARB_SNAPSHOT_STATE: { key: 'snapshotState', parse: parseBool },
-  ARB_MAX_CONCURRENT_TRADES: { key: 'maxConcurrentTrades', parse: parseNumber },
-  ARB_DEBUG_TOP_N: { key: 'debugTopN', parse: parseNumber },
-  ARB_UNITS_AUTO_FIX: { key: 'unitsAutoFix', parse: parseBool },
-  ARB_LOG_EVERY_MARKET: { key: 'logEveryMarket', parse: parseBool },
-  MIN_ORDER_USD: { key: 'minOrderUsd', parse: parseNumber },
-  ORDER_BALANCE_BUFFER_BPS: { key: 'orderBalanceBufferBps', parse: parseNumber },
-  AUTO_APPROVE: { key: 'autoApprove', parse: parseBool },
-  AUTO_APPROVE_MAX_USD: { key: 'autoApproveMaxUsd', parse: parseNumber },
-  ORDER_SUBMIT_MIN_INTERVAL_MS: { key: 'orderSubmitMinIntervalMs', parse: parseNumber },
-  ORDER_SUBMIT_MAX_PER_HOUR: { key: 'orderSubmitMaxPerHour', parse: parseNumber },
-  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: { key: 'orderSubmitMarketCooldownSeconds', parse: parseNumber },
-  CLOUDFLARE_COOLDOWN_SECONDS: { key: 'cloudflareCooldownSeconds', parse: parseNumber },
-  CLOB_AUTH_COOLDOWN_SECONDS: { key: 'authCooldownSeconds', parse: parseNumber },
-} as const satisfies Record<string, { key: keyof ArbConfig; parse: EnvParser<unknown> }>;
+  ARB_ENABLED: { key: "enabled", parse: parseBool },
+  ARB_SCAN_INTERVAL_MS: { key: "scanIntervalMs", parse: parseNumber },
+  ARB_MIN_EDGE_BPS: { key: "minEdgeBps", parse: parseNumber },
+  ARB_MIN_PROFIT_USD: { key: "minProfitUsd", parse: parseNumber },
+  ARB_MIN_LIQUIDITY_USD: { key: "minLiquidityUsd", parse: parseNumber },
+  ARB_MAX_SPREAD_BPS: { key: "maxSpreadBps", parse: parseNumber },
+  ARB_MAX_HOLD_MINUTES: { key: "maxHoldMinutes", parse: parseNumber },
+  ARB_TRADE_BASE_USD: { key: "tradeBaseUsd", parse: parseNumber },
+  ARB_MAX_POSITION_USD: { key: "maxPositionUsd", parse: parseNumber },
+  ARB_MAX_WALLET_EXPOSURE_USD: {
+    key: "maxWalletExposureUsd",
+    parse: parseNumber,
+  },
+  ARB_SIZE_SCALING: { key: "sizeScaling", parse: parseString },
+  ARB_SLIPPAGE_BPS: { key: "slippageBps", parse: parseNumber },
+  ARB_FEE_BPS: { key: "feeBps", parse: parseNumber },
+  ARB_STARTUP_COOLDOWN_SECONDS: {
+    key: "startupCooldownSeconds",
+    parse: parseNumber,
+  },
+  ARB_MARKET_COOLDOWN_SECONDS: {
+    key: "marketCooldownSeconds",
+    parse: parseNumber,
+  },
+  ARB_MAX_TRADES_PER_HOUR: { key: "maxTradesPerHour", parse: parseNumber },
+  ARB_MAX_CONSECUTIVE_FAILURES: {
+    key: "maxConsecutiveFailures",
+    parse: parseNumber,
+  },
+  ARB_DRY_RUN: { key: "dryRun", parse: parseBool },
+  ARB_LIVE_TRADING: { key: "liveTrading", parse: parseString },
+  ARB_MIN_POL_GAS: { key: "minPolGas", parse: parseNumber },
+  ARB_APPROVE_UNLIMITED: { key: "approveUnlimited", parse: parseBool },
+  ARB_STATE_DIR: { key: "stateDir", parse: parseString },
+  ARB_DECISIONS_LOG: { key: "decisionsLog", parse: parseString },
+  ARB_KILL_SWITCH_FILE: { key: "killSwitchFile", parse: parseString },
+  ARB_SNAPSHOT_STATE: { key: "snapshotState", parse: parseBool },
+  ARB_MAX_CONCURRENT_TRADES: { key: "maxConcurrentTrades", parse: parseNumber },
+  ARB_DEBUG_TOP_N: { key: "debugTopN", parse: parseNumber },
+  ARB_UNITS_AUTO_FIX: { key: "unitsAutoFix", parse: parseBool },
+  ARB_LOG_EVERY_MARKET: { key: "logEveryMarket", parse: parseBool },
+  MIN_ORDER_USD: { key: "minOrderUsd", parse: parseNumber },
+  ORDER_BALANCE_BUFFER_BPS: {
+    key: "orderBalanceBufferBps",
+    parse: parseNumber,
+  },
+  AUTO_APPROVE: { key: "autoApprove", parse: parseBool },
+  AUTO_APPROVE_MAX_USD: { key: "autoApproveMaxUsd", parse: parseNumber },
+  ORDER_SUBMIT_MIN_INTERVAL_MS: {
+    key: "orderSubmitMinIntervalMs",
+    parse: parseNumber,
+  },
+  ORDER_SUBMIT_MAX_PER_HOUR: {
+    key: "orderSubmitMaxPerHour",
+    parse: parseNumber,
+  },
+  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: {
+    key: "orderSubmitMarketCooldownSeconds",
+    parse: parseNumber,
+  },
+  CLOUDFLARE_COOLDOWN_SECONDS: {
+    key: "cloudflareCooldownSeconds",
+    parse: parseNumber,
+  },
+  CLOB_AUTH_COOLDOWN_SECONDS: {
+    key: "authCooldownSeconds",
+    parse: parseNumber,
+  },
+} as const satisfies Record<
+  string,
+  { key: keyof ArbConfig; parse: EnvParser<unknown> }
+>;
 
 const MONITOR_ENV_MAP = {
-  MONITOR_ENABLED: { key: 'enabled', parse: parseBool },
-  FETCH_INTERVAL: { key: 'fetchIntervalSeconds', parse: parseNumber },
-  MIN_TRADE_SIZE_USD: { key: 'minTradeSizeUsd', parse: parseNumber },
-  TRADE_MULTIPLIER: { key: 'tradeMultiplier', parse: parseNumber },
-  RETRY_LIMIT: { key: 'retryLimit', parse: parseNumber },
-  TRADE_AGGREGATION_ENABLED: { key: 'aggregationEnabled', parse: parseBool },
-  TRADE_AGGREGATION_WINDOW_SECONDS: { key: 'aggregationWindowSeconds', parse: parseNumber },
-  FRONTRUN_SIZE_MULTIPLIER: { key: 'frontrunSizeMultiplier', parse: parseNumber },
-  GAS_PRICE_MULTIPLIER: { key: 'gasPriceMultiplier', parse: parseNumber },
-  MONITOR_REQUIRE_CONFIRMED: { key: 'requireConfirmed', parse: parseBool },
-  MIN_ORDER_USD: { key: 'minOrderUsd', parse: parseNumber },
-  ORDER_BALANCE_BUFFER_BPS: { key: 'orderBalanceBufferBps', parse: parseNumber },
-  AUTO_APPROVE: { key: 'autoApprove', parse: parseBool },
-  AUTO_APPROVE_MAX_USD: { key: 'autoApproveMaxUsd', parse: parseNumber },
-  ORDER_SUBMIT_MIN_INTERVAL_MS: { key: 'orderSubmitMinIntervalMs', parse: parseNumber },
-  ORDER_SUBMIT_MAX_PER_HOUR: { key: 'orderSubmitMaxPerHour', parse: parseNumber },
-  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: { key: 'orderSubmitMarketCooldownSeconds', parse: parseNumber },
-  CLOUDFLARE_COOLDOWN_SECONDS: { key: 'cloudflareCooldownSeconds', parse: parseNumber },
-  CLOB_AUTH_COOLDOWN_SECONDS: { key: 'authCooldownSeconds', parse: parseNumber },
-} as const satisfies Record<string, { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }>;
+  MONITOR_ENABLED: { key: "enabled", parse: parseBool },
+  FETCH_INTERVAL: { key: "fetchIntervalSeconds", parse: parseNumber },
+  MIN_TRADE_SIZE_USD: { key: "minTradeSizeUsd", parse: parseNumber },
+  TRADE_MULTIPLIER: { key: "tradeMultiplier", parse: parseNumber },
+  RETRY_LIMIT: { key: "retryLimit", parse: parseNumber },
+  TRADE_AGGREGATION_ENABLED: { key: "aggregationEnabled", parse: parseBool },
+  TRADE_AGGREGATION_WINDOW_SECONDS: {
+    key: "aggregationWindowSeconds",
+    parse: parseNumber,
+  },
+  FRONTRUN_SIZE_MULTIPLIER: {
+    key: "frontrunSizeMultiplier",
+    parse: parseNumber,
+  },
+  GAS_PRICE_MULTIPLIER: { key: "gasPriceMultiplier", parse: parseNumber },
+  MONITOR_REQUIRE_CONFIRMED: { key: "requireConfirmed", parse: parseBool },
+  MIN_ORDER_USD: { key: "minOrderUsd", parse: parseNumber },
+  ORDER_BALANCE_BUFFER_BPS: {
+    key: "orderBalanceBufferBps",
+    parse: parseNumber,
+  },
+  AUTO_APPROVE: { key: "autoApprove", parse: parseBool },
+  AUTO_APPROVE_MAX_USD: { key: "autoApproveMaxUsd", parse: parseNumber },
+  ORDER_SUBMIT_MIN_INTERVAL_MS: {
+    key: "orderSubmitMinIntervalMs",
+    parse: parseNumber,
+  },
+  ORDER_SUBMIT_MAX_PER_HOUR: {
+    key: "orderSubmitMaxPerHour",
+    parse: parseNumber,
+  },
+  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: {
+    key: "orderSubmitMarketCooldownSeconds",
+    parse: parseNumber,
+  },
+  CLOUDFLARE_COOLDOWN_SECONDS: {
+    key: "cloudflareCooldownSeconds",
+    parse: parseNumber,
+  },
+  CLOB_AUTH_COOLDOWN_SECONDS: {
+    key: "authCooldownSeconds",
+    parse: parseNumber,
+  },
+} as const satisfies Record<
+  string,
+  { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }
+>;
 
 const MONITOR_LEGACY_KEYS = [
-  'FETCH_INTERVAL',
-  'MIN_TRADE_SIZE_USD',
+  "FETCH_INTERVAL",
+  "MIN_TRADE_SIZE_USD",
   ...LEGACY_MIN_TRADE_KEYS,
-  'TRADE_MULTIPLIER',
-  'RETRY_LIMIT',
-  'TRADE_AGGREGATION_ENABLED',
-  'TRADE_AGGREGATION_WINDOW_SECONDS',
-  'FRONTRUN_SIZE_MULTIPLIER',
-  'GAS_PRICE_MULTIPLIER',
-  'MONITOR_REQUIRE_CONFIRMED',
-  'MIN_ORDER_USD',
-  'ORDER_BALANCE_BUFFER_BPS',
-  'AUTO_APPROVE',
-  'AUTO_APPROVE_MAX_USD',
-  'ORDER_SUBMIT_MIN_INTERVAL_MS',
-  'ORDER_SUBMIT_MAX_PER_HOUR',
-  'ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS',
-  'CLOUDFLARE_COOLDOWN_SECONDS',
+  "TRADE_MULTIPLIER",
+  "RETRY_LIMIT",
+  "TRADE_AGGREGATION_ENABLED",
+  "TRADE_AGGREGATION_WINDOW_SECONDS",
+  "FRONTRUN_SIZE_MULTIPLIER",
+  "GAS_PRICE_MULTIPLIER",
+  "MONITOR_REQUIRE_CONFIRMED",
+  "MIN_ORDER_USD",
+  "ORDER_BALANCE_BUFFER_BPS",
+  "AUTO_APPROVE",
+  "AUTO_APPROVE_MAX_USD",
+  "ORDER_SUBMIT_MIN_INTERVAL_MS",
+  "ORDER_SUBMIT_MAX_PER_HOUR",
+  "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
+  "CLOUDFLARE_COOLDOWN_SECONDS",
 ];
 
 const ARB_LEGACY_KEYS = Object.keys(ARB_ENV_MAP);
@@ -288,15 +364,26 @@ const ARB_LEGACY_KEYS = Object.keys(ARB_ENV_MAP);
 type Overrides = Record<string, string | undefined>;
 
 const readEnv = (key: string, overrides?: Overrides): string | undefined =>
-  overrides?.[key] ?? overrides?.[key.toLowerCase()] ?? process.env[key] ?? process.env[key.toLowerCase()];
+  overrides?.[key] ??
+  overrides?.[key.toLowerCase()] ??
+  process.env[key] ??
+  process.env[key.toLowerCase()];
 
-const readBool = (key: string, fallback: boolean, overrides?: Overrides): boolean => {
+const readBool = (
+  key: string,
+  fallback: boolean,
+  overrides?: Overrides,
+): boolean => {
   const raw = readEnv(key, overrides);
   if (raw === undefined) return fallback;
-  return String(raw).toLowerCase() === 'true';
+  return String(raw).toLowerCase() === "true";
 };
 
-const readNumber = (key: string, fallback: number, overrides?: Overrides): number => {
+const readNumber = (
+  key: string,
+  fallback: number,
+  overrides?: Overrides,
+): number => {
   const raw = readEnv(key, overrides);
   const parsed = raw === undefined ? undefined : parseNumber(raw);
   return parsed ?? fallback;
@@ -315,14 +402,16 @@ const readFirstEnvWithSource = (
   return {};
 };
 
-const readFirstEnv = (keys: string[], overrides?: Overrides): string | undefined =>
-  readFirstEnvWithSource(keys, overrides).value;
+const readFirstEnv = (
+  keys: string[],
+  overrides?: Overrides,
+): string | undefined => readFirstEnvWithSource(keys, overrides).value;
 
 const readBoolFromKeys = (keys: string[], overrides?: Overrides): boolean => {
   for (const key of keys) {
     const raw = readEnv(key, overrides);
     if (raw === undefined) continue;
-    if (String(raw).toLowerCase() === 'true') return true;
+    if (String(raw).toLowerCase() === "true") return true;
   }
   return false;
 };
@@ -334,16 +423,20 @@ const required = (key: string, overrides?: Overrides): string => {
 };
 
 const CLOB_CRED_KEYS = {
-  key: ['POLYMARKET_API_KEY', 'POLY_API_KEY', 'CLOB_API_KEY'],
-  secret: ['POLYMARKET_API_SECRET', 'POLY_SECRET', 'CLOB_API_SECRET'],
-  passphrase: ['POLYMARKET_API_PASSPHRASE', 'POLY_PASSPHRASE', 'CLOB_API_PASSPHRASE'],
+  key: ["POLYMARKET_API_KEY", "POLY_API_KEY", "CLOB_API_KEY"],
+  secret: ["POLYMARKET_API_SECRET", "POLY_SECRET", "CLOB_API_SECRET"],
+  passphrase: [
+    "POLYMARKET_API_PASSPHRASE",
+    "POLY_PASSPHRASE",
+    "CLOB_API_PASSPHRASE",
+  ],
 };
 
 const CLOB_DERIVE_KEYS = [
-  'CLOB_DERIVE_CREDS',
-  'CLOB_DERIVE_API_KEY',
-  'POLYMARKET_DERIVE_API_KEY',
-  'POLY_DERIVE_API_KEY',
+  "CLOB_DERIVE_CREDS",
+  "CLOB_DERIVE_API_KEY",
+  "POLYMARKET_DERIVE_API_KEY",
+  "POLY_DERIVE_API_KEY",
 ];
 
 const readClobCreds = (
@@ -355,7 +448,10 @@ const readClobCreds = (
   }
   const keyEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.key, overrides);
   const secretEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.secret, overrides);
-  const passphraseEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.passphrase, overrides);
+  const passphraseEntry = readFirstEnvWithSource(
+    CLOB_CRED_KEYS.passphrase,
+    overrides,
+  );
   return {
     key: keyEntry.value,
     secret: secretEntry.value,
@@ -363,24 +459,47 @@ const readClobCreds = (
   };
 };
 
-const readClobDeriveEnabled = (overrides?: Overrides): boolean => readBoolFromKeys(CLOB_DERIVE_KEYS, overrides);
+const readClobDeriveEnabled = (overrides?: Overrides): boolean =>
+  readBoolFromKeys(CLOB_DERIVE_KEYS, overrides);
 
-const buildClobCredsChecklist = (overrides?: Overrides, deriveEnabled?: boolean): ClobCredsChecklist => {
+const buildClobCredsChecklist = (
+  overrides?: Overrides,
+  deriveEnabled?: boolean,
+): ClobCredsChecklist => {
   const keyEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.key, overrides);
   const secretEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.secret, overrides);
-  const passphraseEntry = readFirstEnvWithSource(CLOB_CRED_KEYS.passphrase, overrides);
+  const passphraseEntry = readFirstEnvWithSource(
+    CLOB_CRED_KEYS.passphrase,
+    overrides,
+  );
   if (deriveEnabled) {
     return {
-      key: { present: false, source: keyEntry.source ? `${keyEntry.source} (ignored)` : undefined },
-      secret: { present: false, source: secretEntry.source ? `${secretEntry.source} (ignored)` : undefined },
-      passphrase: { present: false, source: passphraseEntry.source ? `${passphraseEntry.source} (ignored)` : undefined },
+      key: {
+        present: false,
+        source: keyEntry.source ? `${keyEntry.source} (ignored)` : undefined,
+      },
+      secret: {
+        present: false,
+        source: secretEntry.source
+          ? `${secretEntry.source} (ignored)`
+          : undefined,
+      },
+      passphrase: {
+        present: false,
+        source: passphraseEntry.source
+          ? `${passphraseEntry.source} (ignored)`
+          : undefined,
+      },
       deriveEnabled: true,
     };
   }
   return {
     key: { present: Boolean(keyEntry.value), source: keyEntry.source },
     secret: { present: Boolean(secretEntry.value), source: secretEntry.source },
-    passphrase: { present: Boolean(passphraseEntry.value), source: passphraseEntry.source },
+    passphrase: {
+      present: Boolean(passphraseEntry.value),
+      source: passphraseEntry.source,
+    },
     deriveEnabled: readClobDeriveEnabled(overrides),
   };
 };
@@ -394,7 +513,7 @@ const parseList = (val: string | undefined): string[] => {
     // ignore JSON parse error
   }
   return val
-    .split(',')
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 };
@@ -412,7 +531,7 @@ const getPresetName = (
   const preset = readEnv(envKey, overrides);
   const legacyKeysDetected = detectLegacyKeys(legacyKeys, overrides);
   if (!preset && legacyKeysDetected.length > 0) {
-    return { presetName: 'custom', legacyKeysDetected };
+    return { presetName: "custom", legacyKeysDetected };
   }
   return { presetName: preset || defaultPreset, legacyKeysDetected };
 };
@@ -464,11 +583,14 @@ const applyOverrides = <T extends Record<string, unknown>>(
   return { applied, unsafeApplied, ignored };
 };
 
-const resolveLegacyMinTradeOverride = (overrides?: Overrides): { value?: number; key?: string } => {
-  const canonicalRaw = readEnv('MIN_TRADE_SIZE_USD', overrides);
-  const canonicalValue = canonicalRaw === undefined ? undefined : parseNumber(canonicalRaw);
+const resolveLegacyMinTradeOverride = (
+  overrides?: Overrides,
+): { value?: number; key?: string } => {
+  const canonicalRaw = readEnv("MIN_TRADE_SIZE_USD", overrides);
+  const canonicalValue =
+    canonicalRaw === undefined ? undefined : parseNumber(canonicalRaw);
   if (canonicalRaw !== undefined) {
-    return { value: canonicalValue, key: 'MIN_TRADE_SIZE_USD' };
+    return { value: canonicalValue, key: "MIN_TRADE_SIZE_USD" };
   }
   for (const key of LEGACY_MIN_TRADE_KEYS) {
     const raw = readEnv(key, overrides);
@@ -481,68 +603,101 @@ const resolveLegacyMinTradeOverride = (overrides?: Overrides): { value?: number;
 
 const warnLegacyKeys = (scope: string, keys: string[]): void => {
   if (!keys.length) return;
-  // eslint-disable-next-line no-console
-  console.warn(`[Config] ${scope} legacy vars detected: ${keys.join(', ')}`);
+
+  console.warn(`[Config] ${scope} legacy vars detected: ${keys.join(", ")}`);
 };
 
 const warnIgnoredOverrides = (scope: string, keys: string[]): void => {
   if (!keys.length) return;
-  // eslint-disable-next-line no-console
-  console.warn(`[Config] ${scope} overrides ignored (locked to preset): ${keys.join(', ')}`);
+
+  console.warn(
+    `[Config] ${scope} overrides ignored (locked to preset): ${keys.join(", ")}`,
+  );
 };
 
 const warnUnsafeOverrides = (scope: string, keys: string[]): void => {
   if (!keys.length) return;
-  // eslint-disable-next-line no-console
-  console.warn(`[Config] ${scope} unsafe overrides applied: ${keys.join(', ')}`);
+
+  console.warn(
+    `[Config] ${scope} unsafe overrides applied: ${keys.join(", ")}`,
+  );
 };
 
 const shouldPrintEffectiveConfig = (overrides?: Overrides): boolean =>
-  readBool('PRINT_EFFECTIVE_CONFIG', false, overrides);
+  readBool("PRINT_EFFECTIVE_CONFIG", false, overrides);
 
 const redact = (value: string | undefined): string | undefined => {
   if (!value) return value;
-  if (value.length <= 8) return '***';
+  if (value.length <= 8) return "***";
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 };
 
-const printEffectiveConfig = (label: string, payload: Record<string, unknown>): void => {
-  // eslint-disable-next-line no-console
-  console.info(`[Config] Effective ${label} config: ${JSON.stringify(payload, null, 2)}`);
+const printEffectiveConfig = (
+  label: string,
+  payload: Record<string, unknown>,
+): void => {
+  console.info(
+    `[Config] Effective ${label} config: ${JSON.stringify(payload, null, 2)}`,
+  );
 };
 
 export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
-  const mode = String(readEnv('MODE', overrides) ?? readEnv('mode', overrides) ?? 'arb').toLowerCase();
-  const allowUnsafe = readBool('ARB_ALLOW_UNSAFE_OVERRIDES', false, overrides);
-  const presetLookup = getPresetName('ARB_PRESET', DEFAULT_ARB_PRESET, ARB_LEGACY_KEYS, overrides);
+  const mode = String(
+    readEnv("MODE", overrides) ?? readEnv("mode", overrides) ?? "arb",
+  ).toLowerCase();
+  const allowUnsafe = readBool("ARB_ALLOW_UNSAFE_OVERRIDES", false, overrides);
+  const presetLookup = getPresetName(
+    "ARB_PRESET",
+    DEFAULT_ARB_PRESET,
+    ARB_LEGACY_KEYS,
+    overrides,
+  );
   let presetName = presetLookup.presetName;
   const { legacyKeysDetected } = presetLookup;
   const clobDeriveEnabled = readClobDeriveEnabled(overrides);
-  const clobCreds = readClobCreds(overrides, { deriveEnabled: clobDeriveEnabled });
-  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
-  const clobCredsChecklist = buildClobCredsChecklist(overrides, clobDeriveEnabled);
+  const clobCreds = readClobCreds(overrides, {
+    deriveEnabled: clobDeriveEnabled,
+  });
+  const clobCredsComplete = Boolean(
+    clobCreds.key && clobCreds.secret && clobCreds.passphrase,
+  );
+  const clobCredsChecklist = buildClobCredsChecklist(
+    overrides,
+    clobDeriveEnabled,
+  );
 
-  if (presetName === 'custom') {
-    warnLegacyKeys('ARB', legacyKeysDetected);
+  if (presetName === "custom") {
+    warnLegacyKeys("ARB", legacyKeysDetected);
   }
 
-  let preset = presetName === 'custom' ? undefined : ARB_PRESETS[presetName as keyof typeof ARB_PRESETS];
-  if (!preset && presetName !== 'custom') {
-    // eslint-disable-next-line no-console
-    console.warn(`[Config] Unknown ARB_PRESET="${presetName}", falling back to ${DEFAULT_ARB_PRESET}.`);
+  let preset =
+    presetName === "custom"
+      ? undefined
+      : ARB_PRESETS[presetName as keyof typeof ARB_PRESETS];
+  if (!preset && presetName !== "custom") {
+    console.warn(
+      `[Config] Unknown ARB_PRESET="${presetName}", falling back to ${DEFAULT_ARB_PRESET}.`,
+    );
     presetName = DEFAULT_ARB_PRESET;
     preset = ARB_PRESETS[DEFAULT_ARB_PRESET];
   }
 
   const baseConfig: ArbConfig = { ...ARB_LEGACY_DEFAULTS };
 
-  if (preset && presetName !== 'custom') {
+  if (preset && presetName !== "custom") {
     mapPresetValues(baseConfig, preset as Record<string, unknown>, ARB_ENV_MAP);
   }
 
-  let overrideResult = { applied: [] as string[], unsafeApplied: [] as string[], ignored: [] as string[] };
-  if (presetName === 'custom') {
-    const baseConfigRecord = baseConfig as Record<keyof ArbConfig, ArbConfig[keyof ArbConfig]>;
+  let overrideResult = {
+    applied: [] as string[],
+    unsafeApplied: [] as string[],
+    ignored: [] as string[],
+  };
+  if (presetName === "custom") {
+    const baseConfigRecord = baseConfig as Record<
+      keyof ArbConfig,
+      ArbConfig[keyof ArbConfig]
+    >;
     Object.keys(ARB_ENV_MAP).forEach((envKey) => {
       const raw = readEnv(envKey, overrides);
       if (raw === undefined) return;
@@ -552,49 +707,62 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
       baseConfigRecord[mapping.key] = parsed as ArbConfig[keyof ArbConfig];
     });
   } else {
-    overrideResult = applyOverrides(baseConfig, overrides, ARB_ENV_MAP, ARB_OVERRIDE_ALLOWLIST, allowUnsafe);
-    warnIgnoredOverrides('ARB', overrideResult.ignored);
-    warnUnsafeOverrides('ARB', overrideResult.unsafeApplied);
+    overrideResult = applyOverrides(
+      baseConfig,
+      overrides,
+      ARB_ENV_MAP,
+      ARB_OVERRIDE_ALLOWLIST,
+      allowUnsafe,
+    );
+    warnIgnoredOverrides("ARB", overrideResult.ignored);
+    warnUnsafeOverrides("ARB", overrideResult.unsafeApplied);
     if (overrideResult.applied.length > 0) {
-      // eslint-disable-next-line no-console
-      console.info(`[Config] ARB overrides applied: ${overrideResult.applied.join(', ')}`);
+      console.info(
+        `[Config] ARB overrides applied: ${overrideResult.applied.join(", ")}`,
+      );
     }
   }
 
   const enabledFromPreset = baseConfig.enabled;
-  const enabledFromMode = mode === 'arb' || mode === 'both';
+  const enabledFromMode = mode === "arb" || mode === "both";
 
-  const decisionsLogRaw = readEnv('ARB_DECISIONS_LOG', overrides);
-  const collateralAddressRaw = readEnv('COLLATERAL_TOKEN_ADDRESS', overrides)
-    || readEnv('USDC_CONTRACT_ADDRESS', overrides)
-    || readEnv('POLY_USDCE_ADDRESS', overrides);
+  const decisionsLogRaw = readEnv("ARB_DECISIONS_LOG", overrides);
+  const collateralAddressRaw =
+    readEnv("COLLATERAL_TOKEN_ADDRESS", overrides) ||
+    readEnv("USDC_CONTRACT_ADDRESS", overrides) ||
+    readEnv("POLY_USDCE_ADDRESS", overrides);
 
-  const privateKey = required('PRIVATE_KEY', overrides);
-  const proxyWallet = readEnv('PUBLIC_KEY', overrides) || derivePublicKey(privateKey);
+  const privateKey = required("PRIVATE_KEY", overrides);
+  const proxyWallet =
+    readEnv("PUBLIC_KEY", overrides) || derivePublicKey(privateKey);
 
   const config: ArbRuntimeConfig = {
     ...baseConfig,
     enabled: enabledFromPreset && enabledFromMode,
-    decisionsLog: decisionsLogRaw === '' ? '' : baseConfig.decisionsLog,
-    rpcUrl: required('RPC_URL', overrides),
+    decisionsLog: decisionsLogRaw === "" ? "" : baseConfig.decisionsLog,
+    rpcUrl: required("RPC_URL", overrides),
     privateKey,
     proxyWallet,
     detectOnly: !clobCredsComplete && !clobDeriveEnabled,
     clobCredsComplete,
     clobDeriveEnabled,
     clobCredsChecklist,
-    polymarketApiKey: clobCreds.key ?? '',
-    polymarketApiSecret: clobCreds.secret ?? '',
-    polymarketApiPassphrase: clobCreds.passphrase ?? '',
+    polymarketApiKey: clobCreds.key ?? "",
+    polymarketApiSecret: clobCreds.secret ?? "",
+    polymarketApiPassphrase: clobCreds.passphrase ?? "",
     collateralTokenAddress: collateralAddressRaw || POLYGON_USDC_ADDRESS,
-    collateralTokenDecimals: readNumber('COLLATERAL_TOKEN_DECIMALS', 6, overrides),
+    collateralTokenDecimals: readNumber(
+      "COLLATERAL_TOKEN_DECIMALS",
+      6,
+      overrides,
+    ),
     presetName,
     overridesApplied: [],
     ignoredOverrides: [],
     unsafeOverridesApplied: [],
   };
 
-  if (presetName !== 'custom') {
+  if (presetName !== "custom") {
     config.overridesApplied = overrideResult.applied;
     config.ignoredOverrides = overrideResult.ignored;
     config.unsafeOverridesApplied = overrideResult.unsafeApplied;
@@ -603,7 +771,7 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
   }
 
   if (shouldPrintEffectiveConfig(overrides)) {
-    printEffectiveConfig('arb', {
+    printEffectiveConfig("arb", {
       preset: config.presetName,
       enabled: config.enabled,
       scanIntervalMs: config.scanIntervalMs,
@@ -628,10 +796,12 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
   return config;
 }
 
-export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConfig {
-  const allowUnsafe = readBool('ARB_ALLOW_UNSAFE_OVERRIDES', false, overrides);
+export function loadMonitorConfig(
+  overrides: Overrides = {},
+): MonitorRuntimeConfig {
+  const allowUnsafe = readBool("ARB_ALLOW_UNSAFE_OVERRIDES", false, overrides);
   const monitorPresetLookup = getPresetName(
-    'MONITOR_PRESET',
+    "MONITOR_PRESET",
     DEFAULT_MONITOR_PRESET,
     MONITOR_LEGACY_KEYS,
     overrides,
@@ -639,18 +809,29 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
   let presetName = monitorPresetLookup.presetName;
   const { legacyKeysDetected } = monitorPresetLookup;
   const clobDeriveEnabled = readClobDeriveEnabled(overrides);
-  const clobCreds = readClobCreds(overrides, { deriveEnabled: clobDeriveEnabled });
-  const clobCredsComplete = Boolean(clobCreds.key && clobCreds.secret && clobCreds.passphrase);
-  const clobCredsChecklist = buildClobCredsChecklist(overrides, clobDeriveEnabled);
+  const clobCreds = readClobCreds(overrides, {
+    deriveEnabled: clobDeriveEnabled,
+  });
+  const clobCredsComplete = Boolean(
+    clobCreds.key && clobCreds.secret && clobCreds.passphrase,
+  );
+  const clobCredsChecklist = buildClobCredsChecklist(
+    overrides,
+    clobDeriveEnabled,
+  );
 
-  if (presetName === 'custom') {
-    warnLegacyKeys('MONITOR', legacyKeysDetected);
+  if (presetName === "custom") {
+    warnLegacyKeys("MONITOR", legacyKeysDetected);
   }
 
-  let preset = presetName === 'custom' ? undefined : MONITOR_PRESETS[presetName as keyof typeof MONITOR_PRESETS];
-  if (!preset && presetName !== 'custom') {
-    // eslint-disable-next-line no-console
-    console.warn(`[Config] Unknown MONITOR_PRESET="${presetName}", falling back to ${DEFAULT_MONITOR_PRESET}.`);
+  let preset =
+    presetName === "custom"
+      ? undefined
+      : MONITOR_PRESETS[presetName as keyof typeof MONITOR_PRESETS];
+  if (!preset && presetName !== "custom") {
+    console.warn(
+      `[Config] Unknown MONITOR_PRESET="${presetName}", falling back to ${DEFAULT_MONITOR_PRESET}.`,
+    );
     presetName = DEFAULT_MONITOR_PRESET;
     preset = MONITOR_PRESETS[DEFAULT_MONITOR_PRESET];
   }
@@ -659,10 +840,10 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     presetName,
     enabled: MONITOR_LEGACY_DEFAULTS.enabled,
     targetAddresses: [],
-    proxyWallet: '',
-    privateKey: '',
-    mongoUri: readEnv('MONGO_URI', overrides),
-    rpcUrl: '',
+    proxyWallet: "",
+    privateKey: "",
+    mongoUri: readEnv("MONGO_URI", overrides),
+    rpcUrl: "",
     detectOnly: !clobCredsComplete && !clobDeriveEnabled,
     clobCredsComplete,
     clobDeriveEnabled,
@@ -675,9 +856,9 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     requireConfirmed: MONITOR_LEGACY_DEFAULTS.requireConfirmed,
     collateralTokenAddress: POLYGON_USDC_ADDRESS,
     collateralTokenDecimals: 6,
-    polymarketApiKey: clobCreds.key ?? '',
-    polymarketApiSecret: clobCreds.secret ?? '',
-    polymarketApiPassphrase: clobCreds.passphrase ?? '',
+    polymarketApiKey: clobCreds.key ?? "",
+    polymarketApiSecret: clobCreds.secret ?? "",
+    polymarketApiPassphrase: clobCreds.passphrase ?? "",
     minTradeSizeUsd: MONITOR_LEGACY_DEFAULTS.minTradeSizeUsd,
     frontrunSizeMultiplier: MONITOR_LEGACY_DEFAULTS.frontrunSizeMultiplier,
     gasPriceMultiplier: MONITOR_LEGACY_DEFAULTS.gasPriceMultiplier,
@@ -687,20 +868,30 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
     autoApproveMaxUsd: MONITOR_LEGACY_DEFAULTS.autoApproveMaxUsd,
     orderSubmitMinIntervalMs: MONITOR_LEGACY_DEFAULTS.orderSubmitMinIntervalMs,
     orderSubmitMaxPerHour: MONITOR_LEGACY_DEFAULTS.orderSubmitMaxPerHour,
-    orderSubmitMarketCooldownSeconds: MONITOR_LEGACY_DEFAULTS.orderSubmitMarketCooldownSeconds,
-    cloudflareCooldownSeconds: MONITOR_LEGACY_DEFAULTS.cloudflareCooldownSeconds,
+    orderSubmitMarketCooldownSeconds:
+      MONITOR_LEGACY_DEFAULTS.orderSubmitMarketCooldownSeconds,
+    cloudflareCooldownSeconds:
+      MONITOR_LEGACY_DEFAULTS.cloudflareCooldownSeconds,
     authCooldownSeconds: MONITOR_LEGACY_DEFAULTS.authCooldownSeconds,
     overridesApplied: [],
     ignoredOverrides: [],
     unsafeOverridesApplied: [],
   };
 
-  if (preset && presetName !== 'custom') {
-    mapPresetValues(baseConfig, preset as Record<string, unknown>, MONITOR_ENV_MAP);
+  if (preset && presetName !== "custom") {
+    mapPresetValues(
+      baseConfig,
+      preset as Record<string, unknown>,
+      MONITOR_ENV_MAP,
+    );
   }
 
-  let overrideResult = { applied: [] as string[], unsafeApplied: [] as string[], ignored: [] as string[] };
-  if (presetName === 'custom') {
+  let overrideResult = {
+    applied: [] as string[],
+    unsafeApplied: [] as string[],
+    ignored: [] as string[],
+  };
+  if (presetName === "custom") {
     const baseConfigRecord = baseConfig as Record<
       keyof MonitorRuntimeConfig,
       MonitorRuntimeConfig[keyof MonitorRuntimeConfig]
@@ -711,47 +902,69 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
       const mapping = MONITOR_ENV_MAP[envKey as keyof typeof MONITOR_ENV_MAP];
       const parsed = mapping.parse(raw);
       if (parsed === undefined) return;
-      baseConfigRecord[mapping.key] = parsed as MonitorRuntimeConfig[keyof MonitorRuntimeConfig];
+      baseConfigRecord[mapping.key] =
+        parsed as MonitorRuntimeConfig[keyof MonitorRuntimeConfig];
     });
   } else {
-    overrideResult = applyOverrides(baseConfig, overrides, MONITOR_ENV_MAP, MONITOR_OVERRIDE_ALLOWLIST, allowUnsafe);
-    warnIgnoredOverrides('MONITOR', overrideResult.ignored);
-    warnUnsafeOverrides('MONITOR', overrideResult.unsafeApplied);
+    overrideResult = applyOverrides(
+      baseConfig,
+      overrides,
+      MONITOR_ENV_MAP,
+      MONITOR_OVERRIDE_ALLOWLIST,
+      allowUnsafe,
+    );
+    warnIgnoredOverrides("MONITOR", overrideResult.ignored);
+    warnUnsafeOverrides("MONITOR", overrideResult.unsafeApplied);
     if (overrideResult.applied.length > 0) {
-      // eslint-disable-next-line no-console
-      console.info(`[Config] MONITOR overrides applied: ${overrideResult.applied.join(', ')}`);
+      console.info(
+        `[Config] MONITOR overrides applied: ${overrideResult.applied.join(", ")}`,
+      );
     }
   }
 
   const minTradeOverride = resolveLegacyMinTradeOverride(overrides);
-  if (minTradeOverride.value !== undefined && (presetName === 'custom' || MONITOR_OVERRIDE_ALLOWLIST.has('MIN_TRADE_SIZE_USD'))) {
+  if (
+    minTradeOverride.value !== undefined &&
+    (presetName === "custom" ||
+      MONITOR_OVERRIDE_ALLOWLIST.has("MIN_TRADE_SIZE_USD"))
+  ) {
     baseConfig.minTradeSizeUsd = minTradeOverride.value;
-    if (minTradeOverride.key && minTradeOverride.key !== 'MIN_TRADE_SIZE_USD') {
-      warnLegacyKeys('MONITOR', [minTradeOverride.key]);
+    if (minTradeOverride.key && minTradeOverride.key !== "MIN_TRADE_SIZE_USD") {
+      warnLegacyKeys("MONITOR", [minTradeOverride.key]);
     }
   } else if (minTradeOverride.key && minTradeOverride.value === undefined) {
-    // eslint-disable-next-line no-console
-    console.warn(`[Config] MONITOR override ${minTradeOverride.key} ignored (invalid value).`);
+    console.warn(
+      `[Config] MONITOR override ${minTradeOverride.key} ignored (invalid value).`,
+    );
   }
 
-  const targetAddresses = parseList(readEnv('TARGET_ADDRESSES', overrides));
+  const targetAddresses = parseList(readEnv("TARGET_ADDRESSES", overrides));
   if (targetAddresses.length === 0) {
-    throw new Error('TARGET_ADDRESSES must contain at least one trader address');
+    throw new Error(
+      "TARGET_ADDRESSES must contain at least one trader address",
+    );
   }
 
   baseConfig.targetAddresses = targetAddresses;
-  const monitorPrivateKey = required('PRIVATE_KEY', overrides);
-  baseConfig.proxyWallet = readEnv('PUBLIC_KEY', overrides) || derivePublicKey(monitorPrivateKey) || '';
+  const monitorPrivateKey = required("PRIVATE_KEY", overrides);
+  baseConfig.proxyWallet =
+    readEnv("PUBLIC_KEY", overrides) ||
+    derivePublicKey(monitorPrivateKey) ||
+    "";
   baseConfig.privateKey = monitorPrivateKey;
-  baseConfig.rpcUrl = required('RPC_URL', overrides);
+  baseConfig.rpcUrl = required("RPC_URL", overrides);
   baseConfig.collateralTokenAddress =
-    readEnv('COLLATERAL_TOKEN_ADDRESS', overrides)
-    || readEnv('USDC_CONTRACT_ADDRESS', overrides)
-    || readEnv('POLY_USDCE_ADDRESS', overrides)
-    || POLYGON_USDC_ADDRESS;
-  baseConfig.collateralTokenDecimals = readNumber('COLLATERAL_TOKEN_DECIMALS', 6, overrides);
+    readEnv("COLLATERAL_TOKEN_ADDRESS", overrides) ||
+    readEnv("USDC_CONTRACT_ADDRESS", overrides) ||
+    readEnv("POLY_USDCE_ADDRESS", overrides) ||
+    POLYGON_USDC_ADDRESS;
+  baseConfig.collateralTokenDecimals = readNumber(
+    "COLLATERAL_TOKEN_DECIMALS",
+    6,
+    overrides,
+  );
 
-  if (presetName !== 'custom') {
+  if (presetName !== "custom") {
     baseConfig.overridesApplied = overrideResult.applied;
     baseConfig.ignoredOverrides = overrideResult.ignored;
     baseConfig.unsafeOverridesApplied = overrideResult.unsafeApplied;
@@ -760,7 +973,7 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
   }
 
   if (shouldPrintEffectiveConfig(overrides)) {
-    printEffectiveConfig('monitor', {
+    printEffectiveConfig("monitor", {
       preset: baseConfig.presetName,
       enabled: baseConfig.enabled,
       fetchIntervalSeconds: baseConfig.fetchIntervalSeconds,
@@ -771,7 +984,8 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
       autoApproveMaxUsd: baseConfig.autoApproveMaxUsd,
       orderSubmitMinIntervalMs: baseConfig.orderSubmitMinIntervalMs,
       orderSubmitMaxPerHour: baseConfig.orderSubmitMaxPerHour,
-      orderSubmitMarketCooldownSeconds: baseConfig.orderSubmitMarketCooldownSeconds,
+      orderSubmitMarketCooldownSeconds:
+        baseConfig.orderSubmitMarketCooldownSeconds,
       cloudflareCooldownSeconds: baseConfig.cloudflareCooldownSeconds,
       tradeMultiplier: baseConfig.tradeMultiplier,
       requireConfirmed: baseConfig.requireConfirmed,
@@ -791,18 +1005,18 @@ export function parseCliOverrides(argv: string[]): Record<string, string> {
   const overrides: Record<string, string> = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (!arg.startsWith('--')) continue;
-    const [rawKey, rawValue] = arg.slice(2).split('=');
+    if (!arg.startsWith("--")) continue;
+    const [rawKey, rawValue] = arg.slice(2).split("=");
     if (rawValue !== undefined) {
       overrides[rawKey.toUpperCase()] = rawValue;
       continue;
     }
     const next = argv[i + 1];
-    if (next && !next.startsWith('--')) {
+    if (next && !next.startsWith("--")) {
       overrides[rawKey.toUpperCase()] = next;
       i += 1;
     } else {
-      overrides[rawKey.toUpperCase()] = 'true';
+      overrides[rawKey.toUpperCase()] = "true";
     }
   }
   return overrides;

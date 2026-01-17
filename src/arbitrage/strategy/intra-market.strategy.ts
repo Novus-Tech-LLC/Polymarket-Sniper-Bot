@@ -1,16 +1,20 @@
-import type { ArbConfig } from '../config';
-import type { MarketSnapshot, Opportunity, Strategy } from '../types';
-import { calculateEdgeBps, calculateSpreadBps, estimateProfitUsd } from '../utils/bps';
-import { computeSizeUsd } from '../utils/sizing';
+import type { ArbConfig } from "../config";
+import type { MarketSnapshot, Opportunity, Strategy } from "../types";
+import {
+  calculateEdgeBps,
+  calculateSpreadBps,
+  estimateProfitUsd,
+} from "../utils/bps";
+import { computeSizeUsd } from "../utils/sizing";
 
 export type ArbSkipReason =
-  | 'SKIP_LOW_EDGE'
-  | 'SKIP_LOW_PROFIT'
-  | 'SKIP_LOW_LIQ'
-  | 'SKIP_WIDE_SPREAD'
-  | 'SKIP_BAD_BOOK'
-  | 'SKIP_UNITS'
-  | 'SKIP_OTHER';
+  | "SKIP_LOW_EDGE"
+  | "SKIP_LOW_PROFIT"
+  | "SKIP_LOW_LIQ"
+  | "SKIP_WIDE_SPREAD"
+  | "SKIP_BAD_BOOK"
+  | "SKIP_UNITS"
+  | "SKIP_OTHER";
 
 export type CandidateSnapshot = {
   marketId: string;
@@ -22,7 +26,7 @@ export type CandidateSnapshot = {
   edgeBps: number;
   liquidityUsd?: number;
   spreadBps: number;
-  reason?: ArbSkipReason | 'ELIGIBLE';
+  reason?: ArbSkipReason | "ELIGIBLE";
 };
 
 export type ArbDiagnostics = {
@@ -31,38 +35,50 @@ export type ArbDiagnostics = {
 };
 
 const SKIP_REASONS: ArbSkipReason[] = [
-  'SKIP_LOW_EDGE',
-  'SKIP_LOW_PROFIT',
-  'SKIP_LOW_LIQ',
-  'SKIP_WIDE_SPREAD',
-  'SKIP_BAD_BOOK',
-  'SKIP_UNITS',
-  'SKIP_OTHER',
+  "SKIP_LOW_EDGE",
+  "SKIP_LOW_PROFIT",
+  "SKIP_LOW_LIQ",
+  "SKIP_WIDE_SPREAD",
+  "SKIP_BAD_BOOK",
+  "SKIP_UNITS",
+  "SKIP_OTHER",
 ];
 
 const initSkipCounts = (): Record<ArbSkipReason, number> =>
-  SKIP_REASONS.reduce((acc, reason) => {
-    acc[reason] = 0;
-    return acc;
-  }, {} as Record<ArbSkipReason, number>);
+  SKIP_REASONS.reduce(
+    (acc, reason) => {
+      acc[reason] = 0;
+      return acc;
+    },
+    {} as Record<ArbSkipReason, number>,
+  );
 
-type NormalizedTop = { bestAsk: number; bestBid: number; skipReason?: ArbSkipReason };
+type NormalizedTop = {
+  bestAsk: number;
+  bestBid: number;
+  skipReason?: ArbSkipReason;
+};
 
-const normalizeOrderbookTop = (top: { bestAsk: number; bestBid: number }, autoFix: boolean): NormalizedTop => {
+const normalizeOrderbookTop = (
+  top: { bestAsk: number; bestBid: number },
+  autoFix: boolean,
+): NormalizedTop => {
   const ask = Number(top.bestAsk);
   const bid = Number(top.bestBid);
   if (!Number.isFinite(ask) || !Number.isFinite(bid)) {
-    return { bestAsk: 0, bestBid: 0, skipReason: 'SKIP_BAD_BOOK' };
+    return { bestAsk: 0, bestBid: 0, skipReason: "SKIP_BAD_BOOK" };
   }
 
-  const normalize = (value: number): { value: number; skipReason?: ArbSkipReason } => {
+  const normalize = (
+    value: number,
+  ): { value: number; skipReason?: ArbSkipReason } => {
     if (value > 1.5) {
       if (!autoFix) {
-        return { value: 0, skipReason: 'SKIP_UNITS' };
+        return { value: 0, skipReason: "SKIP_UNITS" };
       }
       const fixed = value / 100;
       if (fixed > 1.5) {
-        return { value: 0, skipReason: 'SKIP_UNITS' };
+        return { value: 0, skipReason: "SKIP_UNITS" };
       }
       return { value: fixed };
     }
@@ -83,8 +99,14 @@ const normalizeOrderbookTop = (top: { bestAsk: number; bestBid: number }, autoFi
 
 export class IntraMarketArbStrategy implements Strategy {
   private readonly config: ArbConfig;
-  private readonly getExposure: (marketId: string) => { market: number; wallet: number };
-  private lastDiagnostics: ArbDiagnostics = { candidates: [], skipCounts: initSkipCounts() };
+  private readonly getExposure: (marketId: string) => {
+    market: number;
+    wallet: number;
+  };
+  private lastDiagnostics: ArbDiagnostics = {
+    candidates: [],
+    skipCounts: initSkipCounts(),
+  };
 
   constructor(params: {
     config: ArbConfig;
@@ -99,12 +121,18 @@ export class IntraMarketArbStrategy implements Strategy {
     const candidates: CandidateSnapshot[] = [];
     const skipCounts = initSkipCounts();
     for (const market of markets) {
-      const yesTop = normalizeOrderbookTop(market.yesTop, this.config.unitsAutoFix);
+      const yesTop = normalizeOrderbookTop(
+        market.yesTop,
+        this.config.unitsAutoFix,
+      );
       if (yesTop.skipReason) {
         skipCounts[yesTop.skipReason] += 1;
         continue;
       }
-      const noTop = normalizeOrderbookTop(market.noTop, this.config.unitsAutoFix);
+      const noTop = normalizeOrderbookTop(
+        market.noTop,
+        this.config.unitsAutoFix,
+      );
       if (noTop.skipReason) {
         skipCounts[noTop.skipReason] += 1;
         continue;
@@ -142,23 +170,29 @@ export class IntraMarketArbStrategy implements Strategy {
       };
       candidates.push(candidate);
 
-      if (market.liquidityUsd !== undefined && market.liquidityUsd < this.config.minLiquidityUsd) {
-        candidate.reason = 'SKIP_LOW_LIQ';
+      if (
+        market.liquidityUsd !== undefined &&
+        market.liquidityUsd < this.config.minLiquidityUsd
+      ) {
+        candidate.reason = "SKIP_LOW_LIQ";
         skipCounts.SKIP_LOW_LIQ += 1;
         continue;
       }
-      if (market.endTime && market.endTime - now > this.config.maxHoldMinutes * 60 * 1000) {
-        candidate.reason = 'SKIP_OTHER';
+      if (
+        market.endTime &&
+        market.endTime - now > this.config.maxHoldMinutes * 60 * 1000
+      ) {
+        candidate.reason = "SKIP_OTHER";
         skipCounts.SKIP_OTHER += 1;
         continue;
       }
       if (edgeBps < this.config.minEdgeBps) {
-        candidate.reason = 'SKIP_LOW_EDGE';
+        candidate.reason = "SKIP_LOW_EDGE";
         skipCounts.SKIP_LOW_EDGE += 1;
         continue;
       }
       if (spreadBps > this.config.maxSpreadBps) {
-        candidate.reason = 'SKIP_WIDE_SPREAD';
+        candidate.reason = "SKIP_WIDE_SPREAD";
         skipCounts.SKIP_WIDE_SPREAD += 1;
         continue;
       }
@@ -175,7 +209,7 @@ export class IntraMarketArbStrategy implements Strategy {
       });
 
       if (sizing.sizeUsd <= 0) {
-        candidate.reason = 'SKIP_OTHER';
+        candidate.reason = "SKIP_OTHER";
         skipCounts.SKIP_OTHER += 1;
         continue;
       }
@@ -187,7 +221,7 @@ export class IntraMarketArbStrategy implements Strategy {
         slippageBps: this.config.slippageBps,
       });
       if (estProfitUsd < this.config.minProfitUsd) {
-        candidate.reason = 'SKIP_LOW_PROFIT';
+        candidate.reason = "SKIP_LOW_PROFIT";
         skipCounts.SKIP_LOW_PROFIT += 1;
         continue;
       }
@@ -206,7 +240,7 @@ export class IntraMarketArbStrategy implements Strategy {
         endTime: market.endTime,
         sizeTier: sizing.sizeTier,
       });
-      candidate.reason = 'ELIGIBLE';
+      candidate.reason = "ELIGIBLE";
     }
 
     this.lastDiagnostics = { candidates, skipCounts };

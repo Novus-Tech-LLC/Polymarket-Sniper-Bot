@@ -1,28 +1,33 @@
-import { Contract, constants, utils } from 'ethers';
-import type { BigNumber, Wallet } from 'ethers';
-import type { ClobClient } from '@polymarket/clob-client';
-import { OrderType, Side } from '@polymarket/clob-client';
-import type { Logger } from '../../utils/logger.util';
-import type { ArbConfig } from '../config';
-import type { MarketDataProvider, TradeExecutionResult, TradeExecutor, TradePlan } from '../types';
-import { calculateEdgeBps, estimateProfitUsd } from '../utils/bps';
-import { resolvePolymarketContracts } from '../../polymarket/contracts';
-import { withAuthRetry } from '../../infrastructure/clob-auth';
+import { Contract, constants, utils } from "ethers";
+import type { BigNumber, Wallet } from "ethers";
+import type { ClobClient } from "@polymarket/clob-client";
+import { OrderType, Side } from "@polymarket/clob-client";
+import type { Logger } from "../../utils/logger.util";
+import type { ArbConfig } from "../config";
+import type {
+  MarketDataProvider,
+  TradeExecutionResult,
+  TradeExecutor,
+  TradePlan,
+} from "../types";
+import { calculateEdgeBps, estimateProfitUsd } from "../utils/bps";
+import { resolvePolymarketContracts } from "../../polymarket/contracts";
+import { withAuthRetry } from "../../infrastructure/clob-auth";
 import {
   getOrderSubmissionController,
   toOrderSubmissionSettings,
   type OrderSubmissionSettings,
-} from '../../utils/order-submission.util';
+} from "../../utils/order-submission.util";
 import {
   checkFundsAndAllowance,
   formatCollateralLabel,
   resolveSignerAddress,
-} from '../../utils/funds-allowance.util';
-import { readApprovalsConfig } from '../../polymarket/preflight';
+} from "../../utils/funds-allowance.util";
+import { readApprovalsConfig } from "../../polymarket/preflight";
 
 const ERC20_ABI = [
-  'function allowance(address owner, address spender) view returns (uint256)',
-  'function approve(address spender, uint256 amount) returns (bool)',
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
 ];
 
 const APPROVAL_COOLDOWN_MS = 60_000;
@@ -59,7 +64,10 @@ class AllowanceManager {
     if (now - this.lastChecked < 30_000) {
       return this.cachedAllowance;
     }
-    const allowance = await this.contract.allowance(this.wallet.address, this.spender);
+    const allowance = await this.contract.allowance(
+      this.wallet.address,
+      this.spender,
+    );
     this.cachedAllowance = allowance;
     this.lastChecked = now;
     return allowance;
@@ -70,18 +78,25 @@ class AllowanceManager {
     if (allowance.gte(requiredAmount)) return;
 
     if (now - this.lastApprovalAt < APPROVAL_COOLDOWN_MS) {
-      throw new Error('approval_cooldown');
+      throw new Error("approval_cooldown");
     }
 
     const approvalsConfig = readApprovalsConfig();
-    const liveTradingEnabled = process.env.ARB_LIVE_TRADING === 'I_UNDERSTAND_THE_RISKS';
-    if (!liveTradingEnabled || approvalsConfig.mode !== 'true') {
-      this.logger.warn('[ARB] Approval blocked (live trading disabled or APPROVALS_AUTO!=true).');
-      throw new Error('approval_blocked');
+    const liveTradingEnabled =
+      process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+    if (!liveTradingEnabled || approvalsConfig.mode !== "true") {
+      this.logger.warn(
+        "[ARB] Approval blocked (live trading disabled or APPROVALS_AUTO!=true).",
+      );
+      throw new Error("approval_blocked");
     }
 
-    const approveAmount = this.approveUnlimited ? constants.MaxUint256 : requiredAmount;
-    this.logger.info(`[ARB] Approving collateral allowance ${approveAmount.toString()}`);
+    const approveAmount = this.approveUnlimited
+      ? constants.MaxUint256
+      : requiredAmount;
+    this.logger.info(
+      `[ARB] Approving collateral allowance ${approveAmount.toString()}`,
+    );
     const tx = await this.contract.approve(this.spender, approveAmount);
     await tx.wait(1);
     this.lastApprovalAt = now;
@@ -110,7 +125,9 @@ export class ArbTradeExecutor implements TradeExecutor {
     const contracts = resolvePolymarketContracts();
     const spender = contracts.ctfExchangeAddress ?? constants.AddressZero;
     if (!contracts.ctfExchangeAddress) {
-      this.logger.warn('[ARB] Missing POLY_CTF_EXCHANGE_ADDRESS; forcing detect-only.');
+      this.logger.warn(
+        "[ARB] Missing POLY_CTF_EXCHANGE_ADDRESS; forcing detect-only.",
+      );
       this.config.detectOnly = true;
     }
     this.allowanceManager = new AllowanceManager({
@@ -124,7 +141,8 @@ export class ArbTradeExecutor implements TradeExecutor {
       minOrderUsd: this.config.minOrderUsd,
       orderSubmitMinIntervalMs: this.config.orderSubmitMinIntervalMs,
       orderSubmitMaxPerHour: this.config.orderSubmitMaxPerHour,
-      orderSubmitMarketCooldownSeconds: this.config.orderSubmitMarketCooldownSeconds,
+      orderSubmitMarketCooldownSeconds:
+        this.config.orderSubmitMarketCooldownSeconds,
       cloudflareCooldownSeconds: this.config.cloudflareCooldownSeconds,
       authCooldownSeconds: this.config.authCooldownSeconds,
     });
@@ -132,36 +150,66 @@ export class ArbTradeExecutor implements TradeExecutor {
 
   async execute(plan: TradePlan, now: number): Promise<TradeExecutionResult> {
     if (this.config.detectOnly) {
-      this.logger.info(`[ARB] Detect-only: ${plan.marketId} size=${plan.sizeUsd.toFixed(2)} USD`);
-      return { status: 'dry_run' };
+      this.logger.info(
+        `[ARB] Detect-only: ${plan.marketId} size=${plan.sizeUsd.toFixed(2)} USD`,
+      );
+      return { status: "dry_run" };
     }
-    if (this.config.dryRun || this.config.liveTrading !== 'I_UNDERSTAND_THE_RISKS') {
-      this.logger.info(`[ARB] Dry run: ${plan.marketId} size=${plan.sizeUsd.toFixed(2)} USD`);
-      return { status: 'dry_run' };
+    if (
+      this.config.dryRun ||
+      this.config.liveTrading !== "I_UNDERSTAND_THE_RISKS"
+    ) {
+      this.logger.info(
+        `[ARB] Dry run: ${plan.marketId} size=${plan.sizeUsd.toFixed(2)} USD`,
+      );
+      return { status: "dry_run" };
     }
 
     if (!this.config.collateralTokenAddress) {
-      return { status: 'failed', reason: 'missing_collateral_token' };
+      return { status: "failed", reason: "missing_collateral_token" };
     }
 
     try {
       const totalUsd = plan.sizeUsd * 2;
-      const requiredAmount = utils.parseUnits(totalUsd.toFixed(this.config.collateralTokenDecimals), this.config.collateralTokenDecimals);
+      const requiredAmount = utils.parseUnits(
+        totalUsd.toFixed(this.config.collateralTokenDecimals),
+        this.config.collateralTokenDecimals,
+      );
       await this.allowanceManager.ensureAllowance(requiredAmount, now);
 
-      const legOrder = plan.yesAsk <= plan.noAsk
-        ? ([{ outcome: 'YES', tokenId: plan.yesTokenId, ask: plan.yesAsk }, { outcome: 'NO', tokenId: plan.noTokenId, ask: plan.noAsk }] as const)
-        : ([{ outcome: 'NO', tokenId: plan.noTokenId, ask: plan.noAsk }, { outcome: 'YES', tokenId: plan.yesTokenId, ask: plan.yesAsk }] as const);
+      const legOrder =
+        plan.yesAsk <= plan.noAsk
+          ? ([
+              { outcome: "YES", tokenId: plan.yesTokenId, ask: plan.yesAsk },
+              { outcome: "NO", tokenId: plan.noTokenId, ask: plan.noAsk },
+            ] as const)
+          : ([
+              { outcome: "NO", tokenId: plan.noTokenId, ask: plan.noAsk },
+              { outcome: "YES", tokenId: plan.yesTokenId, ask: plan.yesAsk },
+            ] as const);
 
       const first = legOrder[0];
       const second = legOrder[1];
 
-      const firstTx = await this.submitMarketOrder(plan.marketId, first.tokenId, plan.sizeUsd, first.ask);
+      const firstTx = await this.submitMarketOrder(
+        plan.marketId,
+        first.tokenId,
+        plan.sizeUsd,
+        first.ask,
+      );
 
       const refreshedFirst = await this.provider.getOrderBookTop(first.tokenId);
-      const refreshedSecond = await this.provider.getOrderBookTop(second.tokenId);
-      const yesAsk = first.outcome === 'YES' ? refreshedFirst.bestAsk : refreshedSecond.bestAsk;
-      const noAsk = first.outcome === 'NO' ? refreshedFirst.bestAsk : refreshedSecond.bestAsk;
+      const refreshedSecond = await this.provider.getOrderBookTop(
+        second.tokenId,
+      );
+      const yesAsk =
+        first.outcome === "YES"
+          ? refreshedFirst.bestAsk
+          : refreshedSecond.bestAsk;
+      const noAsk =
+        first.outcome === "NO"
+          ? refreshedFirst.bestAsk
+          : refreshedSecond.bestAsk;
       const edgeBps = calculateEdgeBps(yesAsk, noAsk);
       const estProfit = estimateProfitUsd({
         sizeUsd: plan.sizeUsd,
@@ -170,36 +218,53 @@ export class ArbTradeExecutor implements TradeExecutor {
         slippageBps: this.config.slippageBps,
       });
 
-      const maxAcceptableSecond = second.ask * (1 + this.config.slippageBps / 10000);
-      if (refreshedSecond.bestAsk > maxAcceptableSecond || estProfit < this.config.minProfitUsd) {
-        return { status: 'failed', reason: 'second_leg_guard' };
+      const maxAcceptableSecond =
+        second.ask * (1 + this.config.slippageBps / 10000);
+      if (
+        refreshedSecond.bestAsk > maxAcceptableSecond ||
+        estProfit < this.config.minProfitUsd
+      ) {
+        return { status: "failed", reason: "second_leg_guard" };
       }
 
-      const secondTx = await this.submitMarketOrder(plan.marketId, second.tokenId, plan.sizeUsd, refreshedSecond.bestAsk);
+      const secondTx = await this.submitMarketOrder(
+        plan.marketId,
+        second.tokenId,
+        plan.sizeUsd,
+        refreshedSecond.bestAsk,
+      );
 
       return {
-        status: 'submitted',
+        status: "submitted",
         txHashes: [firstTx, secondTx].filter(Boolean),
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`[ARB] Trade execution failed: ${message}`);
-      return { status: 'failed', reason: message };
+      return { status: "failed", reason: message };
     }
   }
 
-  private async submitMarketOrder(marketId: string, tokenId: string, sizeUsd: number, askPrice: number): Promise<string> {
+  private async submitMarketOrder(
+    marketId: string,
+    tokenId: string,
+    sizeUsd: number,
+    askPrice: number,
+  ): Promise<string> {
     const maxAcceptablePrice = askPrice * (1 + this.config.slippageBps / 10000);
     const top = await this.provider.getOrderBookTop(tokenId);
     if (!top.bestAsk || top.bestAsk > maxAcceptablePrice) {
-      throw new Error('slippage_guard');
+      throw new Error("slippage_guard");
     }
 
-    const balanceBufferBps = this.config.orderBalanceBufferBps > 0
-      ? this.config.orderBalanceBufferBps
-      : this.config.slippageBps + this.config.feeBps;
+    const balanceBufferBps =
+      this.config.orderBalanceBufferBps > 0
+        ? this.config.orderBalanceBufferBps
+        : this.config.slippageBps + this.config.feeBps;
     const signerAddress = resolveSignerAddress(this.client);
-    const collateralLabel = formatCollateralLabel(this.config.collateralTokenAddress);
+    const collateralLabel = formatCollateralLabel(
+      this.config.collateralTokenAddress,
+    );
     const readiness = await checkFundsAndAllowance({
       client: this.client,
       sizeUsd,
@@ -212,7 +277,7 @@ export class ArbTradeExecutor implements TradeExecutor {
       logger: this.logger,
     });
     if (!readiness.ok) {
-      throw new Error(readiness.reason ?? 'INSUFFICIENT_BALANCE_OR_ALLOWANCE');
+      throw new Error(readiness.reason ?? "INSUFFICIENT_BALANCE_OR_ALLOWANCE");
     }
 
     const amount = sizeUsd / top.bestAsk;
@@ -223,7 +288,9 @@ export class ArbTradeExecutor implements TradeExecutor {
       price: top.bestAsk,
     };
 
-    const submissionController = getOrderSubmissionController(this.submissionSettings);
+    const submissionController = getOrderSubmissionController(
+      this.submissionSettings,
+    );
     const result = await submissionController.submit({
       sizeUsd,
       marketId,
@@ -233,16 +300,18 @@ export class ArbTradeExecutor implements TradeExecutor {
       collateralLabel,
       submit: async () => {
         const signedOrder = await this.client.createMarketOrder(orderArgs);
-        return withAuthRetry(this.client, () => this.client.postOrder(signedOrder, OrderType.FOK));
+        return withAuthRetry(this.client, () =>
+          this.client.postOrder(signedOrder, OrderType.FOK),
+        );
       },
     });
 
-    if (result.status !== 'submitted') {
+    if (result.status !== "submitted") {
       this.logger.warn(
-        `[CLOB] Order ${result.status} (${result.reason ?? 'unknown'}): required=${sizeUsd.toFixed(2)} signer=${signerAddress} collateral=${collateralLabel}`,
+        `[CLOB] Order ${result.status} (${result.reason ?? "unknown"}): required=${sizeUsd.toFixed(2)} signer=${signerAddress} collateral=${collateralLabel}`,
       );
-      throw new Error(result.reason ?? 'order_rejected');
+      throw new Error(result.reason ?? "order_rejected");
     }
-    return result.orderId || '';
+    return result.orderId || "";
   }
 }

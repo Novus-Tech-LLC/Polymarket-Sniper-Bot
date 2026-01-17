@@ -1,8 +1,8 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { IntraMarketArbStrategy } from '../../src/arbitrage/strategy/intra-market.strategy';
-import type { ArbConfig } from '../../src/arbitrage/config';
-import type { MarketSnapshot } from '../../src/arbitrage/types';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { IntraMarketArbStrategy } from "../../src/arbitrage/strategy/intra-market.strategy";
+import type { ArbConfig } from "../../src/arbitrage/config";
+import type { MarketSnapshot } from "../../src/arbitrage/types";
 
 const baseConfig: ArbConfig = {
   enabled: true,
@@ -15,7 +15,7 @@ const baseConfig: ArbConfig = {
   tradeBaseUsd: 5,
   maxPositionUsd: 25,
   maxWalletExposureUsd: 100,
-  sizeScaling: 'sqrt',
+  sizeScaling: "sqrt",
   slippageBps: 0,
   feeBps: 0,
   startupCooldownSeconds: 0,
@@ -23,28 +23,28 @@ const baseConfig: ArbConfig = {
   maxTradesPerHour: 10,
   maxConsecutiveFailures: 2,
   dryRun: true,
-  liveTrading: '',
+  liveTrading: "",
   minPolGas: 2,
   approveUnlimited: false,
-  stateDir: '/tmp',
-  decisionsLog: '',
-  killSwitchFile: '/tmp/arb-kill',
+  stateDir: "/tmp",
+  decisionsLog: "",
+  killSwitchFile: "/tmp/arb-kill",
   snapshotState: false,
   maxConcurrentTrades: 1,
   debugTopN: 0,
   unitsAutoFix: true,
   logEveryMarket: false,
-  rpcUrl: 'http://localhost:8545',
-  privateKey: '0x' + '11'.repeat(32),
+  rpcUrl: "http://localhost:8545",
+  privateKey: "0x" + "11".repeat(32),
   proxyWallet: undefined,
   polymarketApiKey: undefined,
   polymarketApiSecret: undefined,
   polymarketApiPassphrase: undefined,
-  collateralTokenAddress: '0x' + '22'.repeat(20),
+  collateralTokenAddress: "0x" + "22".repeat(20),
   collateralTokenDecimals: 6,
 };
 
-test('strategy uses asks for edge calculations', () => {
+test("strategy uses asks for edge calculations", () => {
   const strategy = new IntraMarketArbStrategy({
     config: baseConfig,
     getExposure: () => ({ market: 0, wallet: 0 }),
@@ -52,9 +52,9 @@ test('strategy uses asks for edge calculations', () => {
 
   const markets: MarketSnapshot[] = [
     {
-      marketId: 'market-1',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "market-1",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 10000,
       yesTop: { bestAsk: 0.52, bestBid: 0.519 },
       noTop: { bestAsk: 0.52, bestBid: 0.519 },
@@ -66,7 +66,7 @@ test('strategy uses asks for edge calculations', () => {
   assert.equal(opportunities[0].yesAsk, 0.52);
 });
 
-test('strategy auto-fixes cents to probability units when enabled', () => {
+test("strategy auto-fixes cents to probability units when enabled", () => {
   const strategy = new IntraMarketArbStrategy({
     config: { ...baseConfig, minEdgeBps: 0 },
     getExposure: () => ({ market: 0, wallet: 0 }),
@@ -74,9 +74,9 @@ test('strategy auto-fixes cents to probability units when enabled', () => {
 
   const markets: MarketSnapshot[] = [
     {
-      marketId: 'market-1',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "market-1",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 10000,
       yesTop: { bestAsk: 53, bestBid: 52 },
       noTop: { bestAsk: 53, bestBid: 52 },
@@ -88,7 +88,7 @@ test('strategy auto-fixes cents to probability units when enabled', () => {
   assert.equal(opportunities[0].yesAsk, 0.53);
 });
 
-test('strategy treats missing bids as bad books', () => {
+test("strategy treats missing bids as bad books", () => {
   const strategy = new IntraMarketArbStrategy({
     config: { ...baseConfig, minEdgeBps: 0, maxSpreadBps: 5 },
     getExposure: () => ({ market: 0, wallet: 0 }),
@@ -96,9 +96,9 @@ test('strategy treats missing bids as bad books', () => {
 
   const markets: MarketSnapshot[] = [
     {
-      marketId: 'missing-bid',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "missing-bid",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 10000,
       yesTop: { bestAsk: 0.6, bestBid: 0 },
       noTop: { bestAsk: 0.4, bestBid: 0.39 },
@@ -111,7 +111,7 @@ test('strategy treats missing bids as bad books', () => {
   assert.equal(diagnostics.skipCounts.SKIP_WIDE_SPREAD, 0);
 });
 
-test('strategy increments skip reason histogram correctly', () => {
+test("strategy increments skip reason histogram correctly", () => {
   const now = Date.now();
   const config: ArbConfig = {
     ...baseConfig,
@@ -132,57 +132,57 @@ test('strategy increments skip reason histogram correctly', () => {
 
   const markets: MarketSnapshot[] = [
     {
-      marketId: 'low-liq',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "low-liq",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 500,
       yesTop: { bestAsk: 0.6, bestBid: 0.59 },
       noTop: { bestAsk: 0.6, bestBid: 0.59 },
     },
     {
-      marketId: 'bad-book',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "bad-book",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 2000,
       yesTop: { bestAsk: 0, bestBid: 0.8 },
       noTop: { bestAsk: 0.6, bestBid: 0.59 },
     },
     {
-      marketId: 'units',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "units",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 2000,
       yesTop: { bestAsk: 250, bestBid: 240 },
       noTop: { bestAsk: 250, bestBid: 240 },
     },
     {
-      marketId: 'wide-spread',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "wide-spread",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 2000,
       yesTop: { bestAsk: 0.6, bestBid: 0.1 },
       noTop: { bestAsk: 0.6, bestBid: 0.1 },
     },
     {
-      marketId: 'low-edge',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "low-edge",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 2000,
       yesTop: { bestAsk: 0.4, bestBid: 0.39 },
       noTop: { bestAsk: 0.4, bestBid: 0.39 },
     },
     {
-      marketId: 'low-profit',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "low-profit",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 2000,
       yesTop: { bestAsk: 0.6, bestBid: 0.599 },
       noTop: { bestAsk: 0.6, bestBid: 0.599 },
     },
     {
-      marketId: 'too-far',
-      yesTokenId: 'yes',
-      noTokenId: 'no',
+      marketId: "too-far",
+      yesTokenId: "yes",
+      noTokenId: "no",
       liquidityUsd: 2000,
       endTime: now + 2 * 60 * 60 * 1000,
       yesTop: { bestAsk: 0.6, bestBid: 0.59 },

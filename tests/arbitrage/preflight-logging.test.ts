@@ -1,7 +1,7 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import axios from 'axios';
-import { runClobAuthPreflight } from '../../src/clob/diagnostics';
+import assert from "node:assert/strict";
+import test from "node:test";
+import axios from "axios";
+import { runClobAuthPreflight } from "../../src/clob/diagnostics";
 
 const createLogger = () => {
   const warnings: string[] = [];
@@ -16,13 +16,13 @@ const createLogger = () => {
   };
 };
 
-test('preflight logging includes error code and message when axios has no response', async () => {
+test("preflight logging includes error code and message when axios has no response", async () => {
   const { warnings, logger } = createLogger();
   const originalGet = axios.get;
 
   axios.get = async () => {
-    const error = new Error('no route to host');
-    (error as { code?: string }).code = 'EHOSTUNREACH';
+    const error = new Error("no route to host");
+    (error as { code?: string }).code = "EHOSTUNREACH";
     throw error;
   };
 
@@ -30,7 +30,7 @@ test('preflight logging includes error code and message when axios has no respon
     await runClobAuthPreflight({
       client: {} as never,
       logger,
-      creds: { key: 'key', secret: 'secret', passphrase: 'pass' },
+      creds: { key: "key", secret: "secret", passphrase: "pass" },
       privateKeyPresent: true,
     });
   } finally {
@@ -38,6 +38,10 @@ test('preflight logging includes error code and message when axios has no respon
   }
 
   assert.ok(
-    warnings.some((entry) => entry.includes('code=EHOSTUNREACH') && entry.includes('message=no route to host')),
+    warnings.some(
+      (entry) =>
+        entry.includes("code=EHOSTUNREACH") &&
+        entry.includes("message=no route to host"),
+    ),
   );
 });

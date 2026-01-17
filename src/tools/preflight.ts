@@ -1,10 +1,11 @@
-import 'dotenv/config';
-import { ConsoleLogger } from '../utils/logger.util';
-import { createPolymarketClient } from '../infrastructure/clob-client.factory';
-import { ensureTradingReady } from '../polymarket/preflight';
-import { isApiKeyCreds } from '../utils/clob-credentials.util';
+import "dotenv/config";
+import { ConsoleLogger } from "../utils/logger.util";
+import { createPolymarketClient } from "../infrastructure/clob-client.factory";
+import { ensureTradingReady } from "../polymarket/preflight";
+import { isApiKeyCreds } from "../utils/clob-credentials.util";
 
-const readEnv = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
+const readEnv = (key: string): string | undefined =>
+  process.env[key] ?? process.env[key.toLowerCase()];
 
 const required = (key: string): string => {
   const value = readEnv(key);
@@ -23,19 +24,31 @@ const readFirstEnv = (keys: string[]): string | undefined => {
 };
 
 const getClobCreds = () => ({
-  key: readFirstEnv(['POLYMARKET_API_KEY', 'POLY_API_KEY', 'CLOB_API_KEY']),
-  secret: readFirstEnv(['POLYMARKET_API_SECRET', 'POLY_SECRET', 'CLOB_API_SECRET']),
-  passphrase: readFirstEnv(['POLYMARKET_API_PASSPHRASE', 'POLY_PASSPHRASE', 'CLOB_API_PASSPHRASE']),
+  key: readFirstEnv(["POLYMARKET_API_KEY", "POLY_API_KEY", "CLOB_API_KEY"]),
+  secret: readFirstEnv([
+    "POLYMARKET_API_SECRET",
+    "POLY_SECRET",
+    "CLOB_API_SECRET",
+  ]),
+  passphrase: readFirstEnv([
+    "POLYMARKET_API_PASSPHRASE",
+    "POLY_PASSPHRASE",
+    "CLOB_API_PASSPHRASE",
+  ]),
 });
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
-  const rpcUrl = required('RPC_URL');
-  const privateKey = required('PRIVATE_KEY');
-  const publicKey = readEnv('PUBLIC_KEY');
-  const clobDeriveEnabled = readEnv('CLOB_DERIVE_CREDS') === 'true' || readEnv('CLOB_DERIVE_API_KEY') === 'true';
+  const rpcUrl = required("RPC_URL");
+  const privateKey = required("PRIVATE_KEY");
+  const publicKey = readEnv("PUBLIC_KEY");
+  const clobDeriveEnabled =
+    readEnv("CLOB_DERIVE_CREDS") === "true" ||
+    readEnv("CLOB_DERIVE_API_KEY") === "true";
   const clobCreds = getClobCreds();
-  const collateralTokenDecimals = Number(readEnv('COLLATERAL_TOKEN_DECIMALS') ?? 6);
+  const collateralTokenDecimals = Number(
+    readEnv("COLLATERAL_TOKEN_DECIMALS") ?? 6,
+  );
 
   const client = await createPolymarketClient({
     rpcUrl,
@@ -48,8 +61,12 @@ async function main(): Promise<void> {
     logger,
   });
 
-  const clientCredsRaw = (client as { creds?: { key?: string; secret?: string; passphrase?: string } }).creds;
-  const clientCreds = isApiKeyCreds(clientCredsRaw) ? clientCredsRaw : undefined;
+  const clientCredsRaw = (
+    client as { creds?: { key?: string; secret?: string; passphrase?: string } }
+  ).creds;
+  const clientCreds = isApiKeyCreds(clientCredsRaw)
+    ? clientCredsRaw
+    : undefined;
   const credsComplete = Boolean(clientCreds);
 
   const result = await ensureTradingReady({
@@ -72,7 +89,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error('Preflight failed', err);
+  console.error("Preflight failed", err);
   process.exit(1);
 });

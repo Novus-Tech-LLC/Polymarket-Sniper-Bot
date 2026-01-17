@@ -1,6 +1,6 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import type { StateStore } from '../types';
+import { promises as fs } from "fs";
+import path from "path";
+import type { StateStore } from "../types";
 
 export type PersistedState = {
   marketExposureUsd: Record<string, number>;
@@ -20,17 +20,21 @@ export class InMemoryStateStore implements StateStore {
   private tradeTimestamps: number[] = [];
 
   constructor(stateDir: string, snapshotEnabled: boolean) {
-    this.snapshotPath = path.join(stateDir, 'arb_state.json');
+    this.snapshotPath = path.join(stateDir, "arb_state.json");
     this.snapshotEnabled = snapshotEnabled;
   }
 
   async load(): Promise<void> {
     try {
-      const raw = await fs.readFile(this.snapshotPath, 'utf8');
+      const raw = await fs.readFile(this.snapshotPath, "utf8");
       const parsed = JSON.parse(raw) as PersistedState;
-      this.marketExposureUsd = new Map(Object.entries(parsed.marketExposureUsd || {}));
+      this.marketExposureUsd = new Map(
+        Object.entries(parsed.marketExposureUsd || {}),
+      );
       this.walletExposureUsd = parsed.walletExposureUsd || 0;
-      this.marketCooldowns = new Map(Object.entries(parsed.marketCooldowns || {}));
+      this.marketCooldowns = new Map(
+        Object.entries(parsed.marketCooldowns || {}),
+      );
       this.consecutiveFailures = parsed.consecutiveFailures || 0;
       this.tradeTimestamps = parsed.tradeTimestamps || [];
     } catch {
@@ -48,7 +52,11 @@ export class InMemoryStateStore implements StateStore {
       tradeTimestamps: this.tradeTimestamps,
     };
     await fs.mkdir(path.dirname(this.snapshotPath), { recursive: true });
-    await fs.writeFile(this.snapshotPath, JSON.stringify(state, null, 2), 'utf8');
+    await fs.writeFile(
+      this.snapshotPath,
+      JSON.stringify(state, null, 2),
+      "utf8",
+    );
   }
 
   getMarketExposure(marketId: string): number {

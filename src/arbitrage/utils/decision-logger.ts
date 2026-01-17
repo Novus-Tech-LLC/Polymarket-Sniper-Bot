@@ -1,5 +1,5 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { promises as fs } from "fs";
+import path from "path";
 
 export type DecisionLogEntry = {
   ts: string;
@@ -29,6 +29,6 @@ export class DecisionLogger {
     if (!this.path) return;
     const line = `${JSON.stringify(entry)}\n`;
     await fs.mkdir(path.dirname(this.path), { recursive: true });
-    await fs.appendFile(this.path, line, { encoding: 'utf8' });
+    await fs.appendFile(this.path, line, { encoding: "utf8" });
   }
 }

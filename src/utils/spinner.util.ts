@@ -1,4 +1,4 @@
-import ora from 'ora';
+import ora from "ora";
 
 export function withSpinner<T>(text: string, fn: () => Promise<T>): Promise<T> {
   const s = ora(text).start();
@@ -12,4 +12,3 @@ export function withSpinner<T>(text: string, fn: () => Promise<T>): Promise<T> {
       throw err;
     });
 }
-

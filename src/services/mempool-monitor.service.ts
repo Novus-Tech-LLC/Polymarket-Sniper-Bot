@@ -1,12 +1,19 @@
-import type { ClobClient } from '@polymarket/clob-client';
-import type { RuntimeEnv } from '../config/env';
-import type { Logger } from '../utils/logger.util';
-import type { TradeSignal } from '../domain/trade.types';
-import { ethers } from 'ethers';
-import { httpGet } from '../utils/fetch-data.util';
-import axios from 'axios';
-import { POLYMARKET_CONTRACTS, POLYMARKET_API, DEFAULT_CONFIG } from '../constants/polymarket.constants';
-import { sanitizeAxiosError, sanitizeErrorMessage } from '../utils/sanitize-axios-error.util';
+import type { ClobClient } from "@polymarket/clob-client";
+import type { RuntimeEnv } from "../config/env";
+import type { Logger } from "../utils/logger.util";
+import type { TradeSignal } from "../domain/trade.types";
+import { ethers } from "ethers";
+import { httpGet } from "../utils/fetch-data.util";
+import axios from "axios";
+import {
+  POLYMARKET_CONTRACTS,
+  POLYMARKET_API,
+  DEFAULT_CONFIG,
+} from "../constants/polymarket.constants";
+import {
+  sanitizeAxiosError,
+  sanitizeErrorMessage,
+} from "../utils/sanitize-axios-error.util";
 
 export type MempoolMonitorDeps = {
   client: ClobClient;
@@ -40,23 +47,29 @@ export class MempoolMonitorService {
 
   constructor(deps: MempoolMonitorDeps) {
     this.deps = deps;
-    POLYMARKET_CONTRACTS.forEach((addr) => this.targetAddresses.add(addr.toLowerCase()));
+    POLYMARKET_CONTRACTS.forEach((addr) =>
+      this.targetAddresses.add(addr.toLowerCase()),
+    );
   }
 
   async start(): Promise<void> {
     const { logger, env } = this.deps;
-    logger.info('Starting Polymarket Frontrun Bot - Mempool Monitor');
-    const overridesInfo = env.overridesApplied.length ? ` overrides=${env.overridesApplied.join(',')}` : '';
+    logger.info("Starting Polymarket Frontrun Bot - Mempool Monitor");
+    const overridesInfo = env.overridesApplied.length
+      ? ` overrides=${env.overridesApplied.join(",")}`
+      : "";
     logger.info(
       `[Monitor] Preset=${env.presetName} min_trade_usd=${env.minTradeSizeUsd.toFixed(2)} recent_window=${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s fetch_interval=${env.fetchIntervalSeconds}s trade_multiplier=${env.tradeMultiplier} gas_multiplier=${env.gasPriceMultiplier} require_confirmed=${env.requireConfirmed} targets=${env.targetAddresses.length}${overridesInfo}`,
     );
-    logger.debug(`Target addresses: ${env.targetAddresses.map((addr) => addr.toLowerCase()).join(', ') || 'none'}`);
-    
+    logger.debug(
+      `Target addresses: ${env.targetAddresses.map((addr) => addr.toLowerCase()).join(", ") || "none"}`,
+    );
+
     this.provider = new ethers.providers.JsonRpcProvider(env.rpcUrl);
     this.isRunning = true;
 
     // Subscribe to pending transactions
-    this.provider.on('pending', (txHash: string) => {
+    this.provider.on("pending", (txHash: string) => {
       if (this.isRunning) {
         void this.handlePendingTransaction(txHash).catch(() => {
           // Silently handle errors for mempool monitoring
@@ -66,21 +79,26 @@ export class MempoolMonitorService {
 
     // Also monitor Polymarket API for recent orders (hybrid approach)
     // This helps catch orders that might not be in mempool yet
-    this.timer = setInterval(() => void this.monitorRecentOrders().catch(() => undefined), env.fetchIntervalSeconds * 1000);
+    this.timer = setInterval(
+      () => void this.monitorRecentOrders().catch(() => undefined),
+      env.fetchIntervalSeconds * 1000,
+    );
     await this.monitorRecentOrders();
 
-    logger.info('Mempool monitoring active. Waiting for pending transactions...');
+    logger.info(
+      "Mempool monitoring active. Waiting for pending transactions...",
+    );
   }
 
   stop(): void {
     this.isRunning = false;
     if (this.provider) {
-      this.provider.removeAllListeners('pending');
+      this.provider.removeAllListeners("pending");
     }
     if (this.timer) {
       clearInterval(this.timer);
     }
-    this.deps.logger.info('Mempool monitoring stopped');
+    this.deps.logger.info("Mempool monitoring stopped");
   }
 
   private async handlePendingTransaction(txHash: string): Promise<void> {
@@ -126,7 +144,7 @@ export class MempoolMonitorService {
       skippedApiErrorTrades: 0,
       skippedOtherTrades: 0,
     };
-    
+
     // Monitor all addresses from env (these are the addresses we want to frontrun)
     for (const targetAddress of env.targetAddresses) {
       try {
@@ -138,7 +156,9 @@ export class MempoolMonitorService {
           continue;
         }
         stats.skippedApiErrorTrades += 1;
-        logger.debug(`Error checking activity for ${targetAddress}: ${sanitizeErrorMessage(err)}`);
+        logger.debug(
+          `Error checking activity for ${targetAddress}: ${sanitizeErrorMessage(err)}`,
+        );
       }
     }
 
@@ -148,39 +168,48 @@ export class MempoolMonitorService {
     );
   }
 
-  private async checkRecentActivity(targetAddress: string, stats: MonitorStats): Promise<void> {
+  private async checkRecentActivity(
+    targetAddress: string,
+    stats: MonitorStats,
+  ): Promise<void> {
     const { logger, env } = this.deps;
-    
+
     try {
       const url = POLYMARKET_API.ACTIVITY_ENDPOINT(targetAddress);
-      const activities: ActivityResponse[] = await httpGet<ActivityResponse[]>(url);
+      const activities: ActivityResponse[] =
+        await httpGet<ActivityResponse[]>(url);
 
       const now = Math.floor(Date.now() / 1000);
       const cutoffTime = now - DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS;
 
       for (const activity of activities) {
-        if (activity.type !== 'TRADE') {
+        if (activity.type !== "TRADE") {
           stats.skippedUnsupportedActionTrades += 1;
           continue;
         }
         stats.tradesSeen += 1;
 
-        const activityTime = typeof activity.timestamp === 'number' 
-          ? activity.timestamp 
-          : Math.floor(new Date(activity.timestamp).getTime() / 1000);
+        const activityTime =
+          typeof activity.timestamp === "number"
+            ? activity.timestamp
+            : Math.floor(new Date(activity.timestamp).getTime() / 1000);
 
-        if (!activity.transactionHash || !activity.conditionId || activity.outcomeIndex === undefined) {
+        if (
+          !activity.transactionHash ||
+          !activity.conditionId ||
+          activity.outcomeIndex === undefined
+        ) {
           stats.skippedMissingFieldsTrades += 1;
           continue;
         }
-        
+
         // Only process very recent trades (potential frontrun targets)
         if (activityTime < cutoffTime) {
           stats.skippedOutsideRecentWindowTrades += 1;
           continue;
         }
         stats.recentTrades += 1;
-        
+
         // Skip if already processed
         if (this.processedHashes.has(activity.transactionHash)) {
           stats.skippedOtherTrades += 1;
@@ -206,8 +235,10 @@ export class MempoolMonitorService {
 
         // Check if transaction is still pending (frontrun opportunity)
         if (env.requireConfirmed) {
-          const txStatus = await this.checkTransactionStatus(activity.transactionHash);
-          if (txStatus !== 'confirmed') {
+          const txStatus = await this.checkTransactionStatus(
+            activity.transactionHash,
+          );
+          if (txStatus !== "confirmed") {
             stats.skippedUnconfirmedTrades += 1;
             continue;
           }
@@ -222,8 +253,8 @@ export class MempoolMonitorService {
           trader: targetAddress,
           marketId: activity.conditionId,
           tokenId: activity.asset,
-          outcome: activity.outcomeIndex === 0 ? 'YES' : 'NO',
-          side: activity.side.toUpperCase() as 'BUY' | 'SELL',
+          outcome: activity.outcomeIndex === 0 ? "YES" : "NO",
+          side: activity.side.toUpperCase() as "BUY" | "SELL",
           sizeUsd,
           price: activity.price,
           timestamp: activityTime * 1000,
@@ -231,7 +262,10 @@ export class MempoolMonitorService {
         };
 
         this.processedHashes.add(activity.transactionHash);
-        this.lastFetchTime.set(targetAddress, Math.max(this.lastFetchTime.get(targetAddress) || 0, activityTime));
+        this.lastFetchTime.set(
+          targetAddress,
+          Math.max(this.lastFetchTime.get(targetAddress) || 0, activityTime),
+        );
 
         // Execute frontrun
         await this.deps.onDetectedTrade(signal);
@@ -244,12 +278,14 @@ export class MempoolMonitorService {
     }
   }
 
-  private async checkTransactionStatus(txHash: string): Promise<'pending' | 'confirmed'> {
+  private async checkTransactionStatus(
+    txHash: string,
+  ): Promise<"pending" | "confirmed"> {
     try {
       const receipt = await this.provider!.getTransactionReceipt(txHash);
-      return receipt ? 'confirmed' : 'pending';
+      return receipt ? "confirmed" : "pending";
     } catch {
-      return 'pending';
+      return "pending";
     }
   }
 }

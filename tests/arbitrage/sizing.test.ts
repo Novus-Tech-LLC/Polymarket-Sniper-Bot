@@ -1,12 +1,12 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { computeSizeUsd } from '../../src/arbitrage/utils/sizing';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { computeSizeUsd } from "../../src/arbitrage/utils/sizing";
 
-test('computeSizeUsd respects caps and scaling', () => {
+test("computeSizeUsd respects caps and scaling", () => {
   const result = computeSizeUsd({
     baseUsd: 5,
     edgeBps: 500,
-    mode: 'linear',
+    mode: "linear",
     maxPositionUsd: 10,
     maxWalletExposureUsd: 12,
     currentMarketExposureUsd: 6,

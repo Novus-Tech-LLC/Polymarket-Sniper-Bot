@@ -1,2 +1,1 @@
-export * from './polymarket.constants';
-
+export * from "./polymarket.constants";

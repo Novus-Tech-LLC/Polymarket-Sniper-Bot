@@ -1,24 +1,24 @@
-import { afterEach, test } from 'node:test';
-import assert from 'node:assert/strict';
-import { MempoolMonitorService } from '../../src/services/mempool-monitor.service';
-import type { RuntimeEnv } from '../../src/config/env';
-import * as fetchData from '../../src/utils/fetch-data.util';
+import { afterEach, test } from "node:test";
+import assert from "node:assert/strict";
+import { MempoolMonitorService } from "../../src/services/mempool-monitor.service";
+import type { RuntimeEnv } from "../../src/config/env";
+import * as fetchData from "../../src/utils/fetch-data.util";
 
 const baseEnv: RuntimeEnv = {
-  presetName: 'active',
+  presetName: "active",
   enabled: true,
-  targetAddresses: ['0xabc'],
-  proxyWallet: '0x' + '11'.repeat(20),
-  privateKey: '0x' + '22'.repeat(32),
+  targetAddresses: ["0xabc"],
+  proxyWallet: "0x" + "11".repeat(20),
+  privateKey: "0x" + "22".repeat(32),
   mongoUri: undefined,
-  rpcUrl: 'http://localhost:8545',
+  rpcUrl: "http://localhost:8545",
   fetchIntervalSeconds: 1,
   tradeMultiplier: 1,
   retryLimit: 0,
   aggregationEnabled: false,
   aggregationWindowSeconds: 10,
   requireConfirmed: false,
-  collateralTokenAddress: '0x' + '33'.repeat(20),
+  collateralTokenAddress: "0x" + "33".repeat(20),
   collateralTokenDecimals: 6,
   polymarketApiKey: undefined,
   polymarketApiSecret: undefined,
@@ -46,27 +46,29 @@ const logger = {
 const originalHttpGet = fetchData.httpGet;
 
 afterEach(() => {
-  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet = originalHttpGet;
+  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet =
+    originalHttpGet;
 });
 
-test('monitor treats pending trades as eligible when confirmation is not required', async () => {
+test("monitor treats pending trades as eligible when confirmation is not required", async () => {
   const now = Math.floor(Date.now() / 1000);
   const activities = [
     {
-      type: 'TRADE',
+      type: "TRADE",
       timestamp: now,
-      conditionId: 'market-1',
-      asset: 'token-1',
+      conditionId: "market-1",
+      asset: "token-1",
       size: 10,
       usdcSize: 120,
       price: 0.5,
-      side: 'buy',
+      side: "buy",
       outcomeIndex: 0,
-      transactionHash: '0xhash',
+      transactionHash: "0xhash",
     },
   ];
 
-  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet = async () => activities;
+  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet = async () =>
+    activities;
 
   const detected: string[] = [];
   const service = new MempoolMonitorService({
@@ -78,7 +80,11 @@ test('monitor treats pending trades as eligible when confirmation is not require
     },
   });
 
-  (service as { provider?: { getTransactionReceipt: (hash: string) => Promise<null> } }).provider = {
+  (
+    service as {
+      provider?: { getTransactionReceipt: (hash: string) => Promise<null> };
+    }
+  ).provider = {
     getTransactionReceipt: async () => null,
   };
 
@@ -97,58 +103,63 @@ test('monitor treats pending trades as eligible when confirmation is not require
     skippedOtherTrades: 0,
   };
 
-  await (service as { checkRecentActivity: (target: string, stats: typeof stats) => Promise<void> }).checkRecentActivity(
-    baseEnv.targetAddresses[0],
-    stats,
-  );
+  await (
+    service as {
+      checkRecentActivity: (
+        target: string,
+        stats: typeof stats,
+      ) => Promise<void>;
+    }
+  ).checkRecentActivity(baseEnv.targetAddresses[0], stats);
 
   assert.equal(stats.eligibleTrades, 1);
   assert.equal(stats.skippedUnconfirmedTrades, 0);
   assert.equal(detected.length, 1);
 });
 
-test('monitor tracks skip counters for unsupported actions, missing fields, and stale trades', async () => {
+test("monitor tracks skip counters for unsupported actions, missing fields, and stale trades", async () => {
   const now = Math.floor(Date.now() / 1000);
   const activities = [
     {
-      type: 'CANCEL',
+      type: "CANCEL",
       timestamp: now,
-      conditionId: 'market-1',
-      asset: 'token-1',
+      conditionId: "market-1",
+      asset: "token-1",
       size: 10,
       usdcSize: 120,
       price: 0.5,
-      side: 'buy',
+      side: "buy",
       outcomeIndex: 0,
-      transactionHash: '0xhash1',
+      transactionHash: "0xhash1",
     },
     {
-      type: 'TRADE',
+      type: "TRADE",
       timestamp: now - 500,
-      conditionId: 'market-2',
-      asset: 'token-2',
+      conditionId: "market-2",
+      asset: "token-2",
       size: 10,
       usdcSize: 120,
       price: 0.5,
-      side: 'sell',
+      side: "sell",
       outcomeIndex: 1,
-      transactionHash: '0xhash2',
+      transactionHash: "0xhash2",
     },
     {
-      type: 'TRADE',
+      type: "TRADE",
       timestamp: now,
-      conditionId: 'market-3',
-      asset: 'token-3',
+      conditionId: "market-3",
+      asset: "token-3",
       size: 10,
       usdcSize: 120,
       price: 0.5,
-      side: 'buy',
+      side: "buy",
       outcomeIndex: undefined,
-      transactionHash: '',
+      transactionHash: "",
     },
   ];
 
-  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet = async () => activities;
+  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet = async () =>
+    activities;
 
   const service = new MempoolMonitorService({
     client: {} as never,
@@ -172,10 +183,14 @@ test('monitor tracks skip counters for unsupported actions, missing fields, and 
     skippedOtherTrades: 0,
   };
 
-  await (service as { checkRecentActivity: (target: string, stats: typeof stats) => Promise<void> }).checkRecentActivity(
-    baseEnv.targetAddresses[0],
-    stats,
-  );
+  await (
+    service as {
+      checkRecentActivity: (
+        target: string,
+        stats: typeof stats,
+      ) => Promise<void>;
+    }
+  ).checkRecentActivity(baseEnv.targetAddresses[0], stats);
 
   assert.equal(stats.skippedUnsupportedActionTrades, 1);
   assert.equal(stats.skippedOutsideRecentWindowTrades, 1);

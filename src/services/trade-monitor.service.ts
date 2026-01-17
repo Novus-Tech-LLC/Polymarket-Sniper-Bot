@@ -1,10 +1,10 @@
-import type { ClobClient } from '@polymarket/clob-client';
-import type { RuntimeEnv } from '../config/env';
-import type { Logger } from '../utils/logger.util';
-import type { TradeSignal } from '../domain/trade.types';
-import { httpGet } from '../utils/fetch-data.util';
-import { sanitizeAxiosError } from '../utils/sanitize-axios-error.util';
-import axios from 'axios';
+import type { ClobClient } from "@polymarket/clob-client";
+import type { RuntimeEnv } from "../config/env";
+import type { Logger } from "../utils/logger.util";
+import type { TradeSignal } from "../domain/trade.types";
+import { httpGet } from "../utils/fetch-data.util";
+import { sanitizeAxiosError } from "../utils/sanitize-axios-error.util";
+import axios from "axios";
 
 export type TradeMonitorDeps = {
   client: ClobClient;
@@ -40,9 +40,12 @@ export class TradeMonitorService {
   async start(): Promise<void> {
     const { logger, env } = this.deps;
     logger.info(
-      `Monitoring trader(${this.deps.targetAddresses.join(', ')})...`,
+      `Monitoring trader(${this.deps.targetAddresses.join(", ")})...`,
     );
-    this.timer = setInterval(() => void this.tick().catch(() => undefined), env.fetchIntervalSeconds * 1000);
+    this.timer = setInterval(
+      () => void this.tick().catch(() => undefined),
+      env.fetchIntervalSeconds * 1000,
+    );
     await this.tick();
   }
 
@@ -57,19 +60,25 @@ export class TradeMonitorService {
         await this.fetchTraderActivities(trader, env);
       }
     } catch (err) {
-      logger.error('Monitor tick failed', sanitizeAxiosError(err));
+      logger.error("Monitor tick failed", sanitizeAxiosError(err));
     }
   }
 
-  private async fetchTraderActivities(trader: string, env: RuntimeEnv): Promise<void> {
+  private async fetchTraderActivities(
+    trader: string,
+    env: RuntimeEnv,
+  ): Promise<void> {
     try {
       const url = `https://data-api.polymarket.com/activity?user=${trader}`;
-      const activities: ActivityResponse[] = await httpGet<ActivityResponse[]>(url);
+      const activities: ActivityResponse[] =
+        await httpGet<ActivityResponse[]>(url);
 
       const now = Math.floor(Date.now() / 1000);
       const cutoffTime = now - env.aggregationWindowSeconds;
 
-      this.deps.logger.info(`[Monitor] Fetched ${activities.length} activities for ${trader}`);
+      this.deps.logger.info(
+        `[Monitor] Fetched ${activities.length} activities for ${trader}`,
+      );
 
       let tradeCount = 0;
       let skippedOld = 0;
@@ -77,16 +86,19 @@ export class TradeMonitorService {
       let skippedBeforeLastTime = 0;
 
       for (const activity of activities) {
-        if (activity.type !== 'TRADE') continue;
+        if (activity.type !== "TRADE") continue;
         tradeCount++;
 
-        const activityTime = typeof activity.timestamp === 'number' ? activity.timestamp : Math.floor(new Date(activity.timestamp).getTime() / 1000);
-        
+        const activityTime =
+          typeof activity.timestamp === "number"
+            ? activity.timestamp
+            : Math.floor(new Date(activity.timestamp).getTime() / 1000);
+
         if (activityTime < cutoffTime) {
           skippedOld++;
           continue;
         }
-        
+
         if (this.processedHashes.has(activity.transactionHash)) {
           skippedProcessed++;
           continue;
@@ -102,17 +114,22 @@ export class TradeMonitorService {
           trader,
           marketId: activity.conditionId,
           tokenId: activity.asset,
-          outcome: activity.outcomeIndex === 0 ? 'YES' : 'NO',
-          side: activity.side.toUpperCase() as 'BUY' | 'SELL',
+          outcome: activity.outcomeIndex === 0 ? "YES" : "NO",
+          side: activity.side.toUpperCase() as "BUY" | "SELL",
           sizeUsd: activity.usdcSize || activity.size * activity.price,
           price: activity.price,
           timestamp: activityTime * 1000,
         };
 
-        this.deps.logger.info(`[Monitor] New trade detected: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD on market ${signal.marketId}`);
+        this.deps.logger.info(
+          `[Monitor] New trade detected: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD on market ${signal.marketId}`,
+        );
 
         this.processedHashes.add(activity.transactionHash);
-        this.lastFetchTime.set(trader, Math.max(this.lastFetchTime.get(trader) || 0, activityTime));
+        this.lastFetchTime.set(
+          trader,
+          Math.max(this.lastFetchTime.get(trader) || 0, activityTime),
+        );
 
         await this.deps.onDetectedTrade(signal);
       }
@@ -125,11 +142,16 @@ export class TradeMonitorService {
     } catch (err) {
       // Handle 404 gracefully - user might have no activities yet or endpoint doesn't exist
       if (axios.isAxiosError(err) && err.response?.status === 404) {
-        this.deps.logger.warn(`[Monitor] No activities found for ${trader} (404)`);
+        this.deps.logger.warn(
+          `[Monitor] No activities found for ${trader} (404)`,
+        );
         return;
       }
       // Log other errors
-      this.deps.logger.error(`Failed to fetch activities for ${trader}`, sanitizeAxiosError(err));
+      this.deps.logger.error(
+        `Failed to fetch activities for ${trader}`,
+        sanitizeAxiosError(err),
+      );
     }
   }
 }

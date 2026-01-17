@@ -1,12 +1,12 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { BigNumber } from 'ethers';
-import { getApprovalDecision } from '../../src/polymarket/approvals';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { BigNumber } from "ethers";
+import { getApprovalDecision } from "../../src/polymarket/approvals";
 
-test('getApprovalDecision flags missing ERC20 allowance', () => {
+test("getApprovalDecision flags missing ERC20 allowance", () => {
   const result = getApprovalDecision({
-    allowance: BigNumber.from('0'),
-    minAllowance: BigNumber.from('100'),
+    allowance: BigNumber.from("0"),
+    minAllowance: BigNumber.from("100"),
     approvedForAll: true,
     force: false,
   });
@@ -15,10 +15,10 @@ test('getApprovalDecision flags missing ERC20 allowance', () => {
   assert.equal(result.needsErc1155, false);
 });
 
-test('getApprovalDecision respects force flag', () => {
+test("getApprovalDecision respects force flag", () => {
   const result = getApprovalDecision({
-    allowance: BigNumber.from('1000'),
-    minAllowance: BigNumber.from('100'),
+    allowance: BigNumber.from("1000"),
+    minAllowance: BigNumber.from("100"),
     approvedForAll: true,
     force: true,
   });
@@ -27,10 +27,10 @@ test('getApprovalDecision respects force flag', () => {
   assert.equal(result.needsErc1155, true);
 });
 
-test('getApprovalDecision flags missing ERC1155 approval', () => {
+test("getApprovalDecision flags missing ERC1155 approval", () => {
   const result = getApprovalDecision({
-    allowance: BigNumber.from('1000'),
-    minAllowance: BigNumber.from('100'),
+    allowance: BigNumber.from("1000"),
+    minAllowance: BigNumber.from("100"),
     approvedForAll: false,
     force: false,
   });

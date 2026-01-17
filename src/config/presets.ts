@@ -10,7 +10,7 @@ export const ARB_PRESETS = {
     ARB_MIN_LIQUIDITY_USD: 2000,
     ARB_MAX_SPREAD_BPS: 200,
     ARB_TRADE_BASE_USD: 2,
-    ARB_SIZE_SCALING: 'sqrt',
+    ARB_SIZE_SCALING: "sqrt",
     ARB_SLIPPAGE_BPS: 60,
     ARB_FEE_BPS: 10,
     ARB_MAX_POSITION_USD: 10,
@@ -29,7 +29,7 @@ export const ARB_PRESETS = {
     ARB_MIN_LIQUIDITY_USD: 2000,
     ARB_MAX_SPREAD_BPS: 200,
     ARB_TRADE_BASE_USD: 5,
-    ARB_SIZE_SCALING: 'sqrt',
+    ARB_SIZE_SCALING: "sqrt",
     ARB_SLIPPAGE_BPS: 60,
     ARB_FEE_BPS: 10,
     ARB_MAX_POSITION_USD: 25,
@@ -48,7 +48,7 @@ export const ARB_PRESETS = {
     ARB_MIN_LIQUIDITY_USD: 5000,
     ARB_MAX_SPREAD_BPS: 120,
     ARB_TRADE_BASE_USD: 3,
-    ARB_SIZE_SCALING: 'sqrt',
+    ARB_SIZE_SCALING: "sqrt",
     ARB_SLIPPAGE_BPS: 40,
     ARB_FEE_BPS: 10,
     ARB_MAX_POSITION_USD: 25,
@@ -67,7 +67,7 @@ export const ARB_PRESETS = {
     ARB_MIN_LIQUIDITY_USD: 15000,
     ARB_MAX_SPREAD_BPS: 100,
     ARB_TRADE_BASE_USD: 8,
-    ARB_SIZE_SCALING: 'sqrt',
+    ARB_SIZE_SCALING: "sqrt",
     ARB_SLIPPAGE_BPS: 30,
     ARB_FEE_BPS: 10,
     ARB_MAX_POSITION_USD: 40,
@@ -86,7 +86,7 @@ export const ARB_PRESETS = {
     ARB_MIN_LIQUIDITY_USD: 3000,
     ARB_MAX_SPREAD_BPS: 250,
     ARB_TRADE_BASE_USD: 5,
-    ARB_SIZE_SCALING: 'sqrt',
+    ARB_SIZE_SCALING: "sqrt",
     ARB_SLIPPAGE_BPS: 80,
     ARB_FEE_BPS: 10,
     ARB_MAX_HOLD_MINUTES: 30,
@@ -157,5 +157,5 @@ export const MONITOR_PRESETS = {
 export type ArbPresetName = keyof typeof ARB_PRESETS;
 export type MonitorPresetName = keyof typeof MONITOR_PRESETS;
 
-export const DEFAULT_ARB_PRESET: ArbPresetName = 'safe_small';
-export const DEFAULT_MONITOR_PRESET: MonitorPresetName = 'balanced';
+export const DEFAULT_ARB_PRESET: ArbPresetName = "safe_small";
+export const DEFAULT_MONITOR_PRESET: MonitorPresetName = "balanced";

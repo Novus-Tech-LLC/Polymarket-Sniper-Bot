@@ -1,17 +1,17 @@
-import crypto from 'node:crypto';
-import axios from 'axios';
-import type { ApiKeyCreds, ClobClient } from '@polymarket/clob-client';
-import { AssetType } from '@polymarket/clob-client';
-import * as clobSigning from '@polymarket/clob-client/dist/signing';
-import { SignatureType } from '@polymarket/order-utils';
-import { Wallet } from 'ethers';
-import { POLYMARKET_API } from '../constants/polymarket.constants';
-import { initializeApiCreds } from '../infrastructure/clob-auth';
-import type { Logger } from '../utils/logger.util';
-import { buildSignedPath } from '../utils/query-string.util';
+import crypto from "node:crypto";
+import axios from "axios";
+import type { ApiKeyCreds, ClobClient } from "@polymarket/clob-client";
+import { AssetType } from "@polymarket/clob-client";
+import * as clobSigning from "@polymarket/clob-client/dist/signing";
+import { SignatureType } from "@polymarket/order-utils";
+import { Wallet } from "ethers";
+import { POLYMARKET_API } from "../constants/polymarket.constants";
+import { initializeApiCreds } from "../infrastructure/clob-auth";
+import type { Logger } from "../utils/logger.util";
+import { buildSignedPath } from "../utils/query-string.util";
 
-export type SecretDecodingMode = 'raw' | 'base64' | 'base64url';
-export type SignatureEncodingMode = 'base64' | 'base64url';
+export type SecretDecodingMode = "raw" | "base64" | "base64url";
+export type SignatureEncodingMode = "base64" | "base64url";
 
 export type AuthMessageComponents = {
   timestamp: number;
@@ -22,29 +22,30 @@ export type AuthMessageComponents = {
 };
 
 export type AuthFailureReason =
-  | 'MISMATCHED_ADDRESS'
-  | 'WRONG_SIGNATURE_TYPE'
-  | 'SECRET_ENCODING'
-  | 'MESSAGE_CANONICALIZATION'
-  | 'SERVER_REJECTED_CREDS';
+  | "MISMATCHED_ADDRESS"
+  | "WRONG_SIGNATURE_TYPE"
+  | "SECRET_ENCODING"
+  | "MESSAGE_CANONICALIZATION"
+  | "SERVER_REJECTED_CREDS";
 
-export type PreflightIssue = 'AUTH' | 'PARAM' | 'FUNDS' | 'NETWORK' | 'UNKNOWN';
+export type PreflightIssue = "AUTH" | "PARAM" | "FUNDS" | "NETWORK" | "UNKNOWN";
 
-const SIGNATURE_ENCODING_USED: SignatureEncodingMode = 'base64url';
-const SECRET_DECODING_USED: SecretDecodingMode = 'base64';
+const SIGNATURE_ENCODING_USED: SignatureEncodingMode = "base64url";
+const SECRET_DECODING_USED: SecretDecodingMode = "base64";
 const PREFLIGHT_BACKOFF_BASE_MS = 1000;
 const PREFLIGHT_BACKOFF_MAX_MS = 5 * 60 * 1000;
-const PREFLIGHT_MATRIX_DEFAULT_SIGNATURE_TYPES = '0,2';
-const PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE = 'base64,base64url,raw';
-const PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING = 'base64url,base64';
-const PREFLIGHT_MATRIX_DEFAULT_ENDPOINT = '/balance-allowance';
+const PREFLIGHT_MATRIX_DEFAULT_SIGNATURE_TYPES = "0,2";
+const PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE = "base64,base64url,raw";
+const PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING = "base64url,base64";
+const PREFLIGHT_MATRIX_DEFAULT_ENDPOINT = "/balance-allowance";
 const PREFLIGHT_MATRIX_ERROR_TRUNCATE = 160;
 const PREFLIGHT_DATA_TRUNCATE = 300;
 const PREFLIGHT_CONNECTIVITY_MAX_TRIES = 5;
 const PREFLIGHT_CONNECTIVITY_BACKOFF_BASE_MS = 500;
-const PREFLIGHT_TRANSIENT_CODES = new Set(['ECONNRESET', 'ETIMEDOUT']);
+const PREFLIGHT_TRANSIENT_CODES = new Set(["ECONNRESET", "ETIMEDOUT"]);
 const PREFLIGHT_INVALID_ASSET_TYPE = /invalid asset type/i;
-const PREFLIGHT_INSUFFICIENT_FUNDS = /not enough balance|insufficient balance|allowance/i;
+const PREFLIGHT_INSUFFICIENT_FUNDS =
+  /not enough balance|insufficient balance|allowance/i;
 const PREFLIGHT_NETWORK_HINT = /timeout|timed out|econnreset|network/i;
 
 let headerKeysLogged = false;
@@ -63,94 +64,138 @@ type AuthModeConfig = {
 
 let activeAuthMode: AuthModeConfig | null = null;
 let hmacOverrideInstalled = false;
-let originalHmacSignature: ((secret: string, timestamp: number, method: string, path: string, body?: string) => string)
+let originalHmacSignature:
+  | ((
+      secret: string,
+      timestamp: number,
+      method: string,
+      path: string,
+      body?: string,
+    ) => string)
   | null = null;
 
-const normalizeAddress = (value?: string): string | undefined => value?.toLowerCase();
+const normalizeAddress = (value?: string): string | undefined =>
+  value?.toLowerCase();
 
-export const deriveSignerAddress = (privateKey: string): string => new Wallet(privateKey).address;
+export const deriveSignerAddress = (privateKey: string): string =>
+  new Wallet(privateKey).address;
 
-export const publicKeyMatchesDerived = (configuredPublicKey?: string, derivedSignerAddress?: string): boolean => {
+export const publicKeyMatchesDerived = (
+  configuredPublicKey?: string,
+  derivedSignerAddress?: string,
+): boolean => {
   if (!configuredPublicKey || !derivedSignerAddress) return false;
-  return normalizeAddress(configuredPublicKey) === normalizeAddress(derivedSignerAddress);
+  return (
+    normalizeAddress(configuredPublicKey) ===
+    normalizeAddress(derivedSignerAddress)
+  );
 };
 
 const secretLooksBase64Url = (secret: string): boolean => {
   const base64UrlAlphabet = /^[A-Za-z0-9_-]+$/;
-  const withoutPadding = secret.replace(/=/g, '');
+  const withoutPadding = secret.replace(/=/g, "");
   if (!base64UrlAlphabet.test(withoutPadding)) {
     return false;
   }
-  if (secret.includes('-') || secret.includes('_')) {
+  if (secret.includes("-") || secret.includes("_")) {
     return true;
   }
   return withoutPadding.length % 4 !== 0;
 };
 
-export const detectSecretDecodingMode = (secret?: string): SecretDecodingMode => {
-  if (!secret) return 'raw';
+export const detectSecretDecodingMode = (
+  secret?: string,
+): SecretDecodingMode => {
+  if (!secret) return "raw";
   if (secretLooksBase64Url(secret)) {
-    return 'base64url';
+    return "base64url";
   }
-  if (secret.includes('+') || secret.includes('/') || secret.endsWith('=')) {
-    return 'base64';
+  if (secret.includes("+") || secret.includes("/") || secret.endsWith("=")) {
+    return "base64";
   }
   const base64Alphabet = /^[A-Za-z0-9]+$/;
   if (base64Alphabet.test(secret) && secret.length % 4 === 0) {
-    return 'base64';
+    return "base64";
   }
-  return 'raw';
+  return "raw";
 };
 
-export const decodeSecretBytes = (secret: string, mode: SecretDecodingMode): Buffer => {
-  if (mode === 'base64url') {
-    let normalized = secret.replace(/-/g, '+').replace(/_/g, '/');
+export const decodeSecretBytes = (
+  secret: string,
+  mode: SecretDecodingMode,
+): Buffer => {
+  if (mode === "base64url") {
+    let normalized = secret.replace(/-/g, "+").replace(/_/g, "/");
     const paddingNeeded = normalized.length % 4;
     if (paddingNeeded) {
-      normalized = normalized.padEnd(normalized.length + (4 - paddingNeeded), '=');
+      normalized = normalized.padEnd(
+        normalized.length + (4 - paddingNeeded),
+        "=",
+      );
     }
-    return Buffer.from(normalized, 'base64');
+    return Buffer.from(normalized, "base64");
   }
-  if (mode === 'base64') {
-    return Buffer.from(secret, 'base64');
+  if (mode === "base64") {
+    return Buffer.from(secret, "base64");
   }
-  return Buffer.from(secret, 'utf8');
+  return Buffer.from(secret, "utf8");
 };
 
-const encodeSignature = (digest: Buffer, mode: SignatureEncodingMode): string => {
-  const base64 = digest.toString('base64');
-  if (mode === 'base64') {
+const encodeSignature = (
+  digest: Buffer,
+  mode: SignatureEncodingMode,
+): string => {
+  const base64 = digest.toString("base64");
+  if (mode === "base64") {
     return base64;
   }
-  return base64.replace(/\+/g, '-').replace(/\//g, '_');
+  return base64.replace(/\+/g, "-").replace(/\//g, "_");
 };
 
-const readEnvValue = (key: string): string | undefined => process.env[key] ?? process.env[key.toLowerCase()];
+const readEnvValue = (key: string): string | undefined =>
+  process.env[key] ?? process.env[key.toLowerCase()];
 
 const parseCsv = (value: string | undefined): string[] => {
   if (!value) return [];
   return value
-    .split(',')
+    .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
 };
 
-const parseBooleanList = (value: string | undefined, fallback: boolean[]): boolean[] => {
+const parseBooleanList = (
+  value: string | undefined,
+  fallback: boolean[],
+): boolean[] => {
   const entries = parseCsv(value);
   if (!entries.length) return fallback;
-  return entries.map((entry) => entry.toLowerCase() === 'true');
+  return entries.map((entry) => entry.toLowerCase() === "true");
 };
 
 const installHmacOverride = (): void => {
   if (hmacOverrideInstalled) return;
   const signingModule = clobSigning as unknown as {
-    buildPolyHmacSignature?: (secret: string, timestamp: number, method: string, path: string, body?: string) => string;
+    buildPolyHmacSignature?: (
+      secret: string,
+      timestamp: number,
+      method: string,
+      path: string,
+      body?: string,
+    ) => string;
   };
-  if (typeof signingModule.buildPolyHmacSignature !== 'function') return;
+  if (typeof signingModule.buildPolyHmacSignature !== "function") return;
   originalHmacSignature = signingModule.buildPolyHmacSignature;
-  signingModule.buildPolyHmacSignature = (secret, timestamp, method, path, body) => {
+  signingModule.buildPolyHmacSignature = (
+    secret,
+    timestamp,
+    method,
+    path,
+    body,
+  ) => {
     if (!activeAuthMode) {
-      return originalHmacSignature ? originalHmacSignature(secret, timestamp, method, path, body) : '';
+      return originalHmacSignature
+        ? originalHmacSignature(secret, timestamp, method, path, body)
+        : "";
     }
     return buildHmacSignature({
       secret,
@@ -194,17 +239,17 @@ const buildHmacSignature = (params: {
     body: params.body,
   });
   const secretBytes = decodeSecretBytes(params.secret, params.secretDecoding);
-  const hmac = crypto.createHmac('sha256', secretBytes);
+  const hmac = crypto.createHmac("sha256", secretBytes);
   const digest = hmac.update(message).digest();
   return encodeSignature(digest, params.signatureEncoding);
 };
 
 export const computeSha256Hex = (value: string | Buffer): string => {
-  return crypto.createHash('sha256').update(value).digest('hex');
+  return crypto.createHash("sha256").update(value).digest("hex");
 };
 
 export const formatApiKeyId = (apiKey?: string): string => {
-  if (!apiKey) return 'n/a';
+  if (!apiKey) return "n/a";
   if (apiKey.length >= 6) {
     return `...${apiKey.slice(-6)}`;
   }
@@ -212,9 +257,11 @@ export const formatApiKeyId = (apiKey?: string): string => {
   return `sha256:${digest}`;
 };
 
-export const getApiKeyDiagnostics = (apiKey?: string): { apiKeyDigest: string; keyIdSuffix: string } => {
+export const getApiKeyDiagnostics = (
+  apiKey?: string,
+): { apiKeyDigest: string; keyIdSuffix: string } => {
   if (!apiKey) {
-    return { apiKeyDigest: 'n/a', keyIdSuffix: 'n/a' };
+    return { apiKeyDigest: "n/a", keyIdSuffix: "n/a" };
   }
   const apiKeyDigest = computeSha256Hex(apiKey).slice(0, 8);
   const keyIdSuffix = apiKey.slice(-6);
@@ -224,13 +271,13 @@ export const getApiKeyDiagnostics = (apiKey?: string): { apiKeyDigest: string; k
 const signatureTypeLabel = (signatureType?: number): string => {
   switch (signatureType) {
     case SignatureType.EOA:
-      return 'EOA';
+      return "EOA";
     case SignatureType.POLY_PROXY:
-      return 'Magic';
+      return "Magic";
     case SignatureType.POLY_GNOSIS_SAFE:
-      return 'GnosisSafe';
+      return "GnosisSafe";
     default:
-      return 'Unknown';
+      return "Unknown";
   }
 };
 
@@ -261,9 +308,12 @@ export const logAuthSigningDiagnostics = (params: {
   signatureEncoding: SignatureEncodingMode;
 } => {
   const signatureEncoding = params.signatureEncoding ?? SIGNATURE_ENCODING_USED;
-  const secretLooksBase64UrlFlag = params.secret ? secretLooksBase64Url(params.secret) : false;
-  const secretDecodingUsed = params.secretDecodingUsed
-    ?? (secretLooksBase64UrlFlag ? 'base64url' : SECRET_DECODING_USED);
+  const secretLooksBase64UrlFlag = params.secret
+    ? secretLooksBase64Url(params.secret)
+    : false;
+  const secretDecodingUsed =
+    params.secretDecodingUsed ??
+    (secretLooksBase64UrlFlag ? "base64url" : SECRET_DECODING_USED);
   const messageString = buildAuthMessageString({
     timestamp: params.messageComponents.timestamp,
     method: params.messageComponents.method,
@@ -271,11 +321,15 @@ export const logAuthSigningDiagnostics = (params: {
     body: params.body,
   });
   const messageStringLength = messageString.length;
-  const methodUppercase = params.messageComponents.method === params.messageComponents.method.toUpperCase();
+  const methodUppercase =
+    params.messageComponents.method ===
+    params.messageComponents.method.toUpperCase();
   const messageDigest = computeSha256Hex(messageString).slice(0, 12);
   const secretDigest = params.secret
-    ? computeSha256Hex(decodeSecretBytes(params.secret, secretDecodingUsed)).slice(0, 12)
-    : 'n/a';
+    ? computeSha256Hex(
+        decodeSecretBytes(params.secret, secretDecodingUsed),
+      ).slice(0, 12)
+    : "n/a";
 
   if (params.logger) {
     params.logger.info(
@@ -305,7 +359,7 @@ export const logClobDiagnostics = (params: {
 }): void => {
   if (!params.logger) return;
   params.logger.info(
-    `[CLOB][Diag] derivedSignerAddress=${params.derivedSignerAddress ?? 'n/a'} configuredPublicKey=${params.configuredPublicKey ?? 'none'} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} chainId=${params.chainId ?? 'n/a'} clobHost=${params.clobHost ?? POLYMARKET_API.BASE_URL} signatureType=${params.signatureType ?? 'n/a'} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? 'none'} makerAddress=${params.makerAddress ?? 'n/a'} ownerId=${params.ownerId ?? 'n/a'} keyPresent=${params.apiKeyPresent} secretPresent=${params.secretPresent} passphrasePresent=${params.passphrasePresent}`,
+    `[CLOB][Diag] derivedSignerAddress=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} chainId=${params.chainId ?? "n/a"} clobHost=${params.clobHost ?? POLYMARKET_API.BASE_URL} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} makerAddress=${params.makerAddress ?? "n/a"} ownerId=${params.ownerId ?? "n/a"} keyPresent=${params.apiKeyPresent} secretPresent=${params.secretPresent} passphrasePresent=${params.passphrasePresent}`,
   );
 };
 
@@ -316,11 +370,11 @@ export const logAuthFundsDiagnostics = (params: {
   effectivePolyAddress?: string;
   signatureType?: number;
   funderAddress?: string;
-  credentialMode: 'explicit' | 'derived' | 'none';
+  credentialMode: "explicit" | "derived" | "none";
 }): void => {
   if (!params.logger) return;
   params.logger.info(
-    `[CLOB][Diag][AuthFunds] signer=${params.derivedSignerAddress ?? 'n/a'} configuredPublicKey=${params.configuredPublicKey ?? 'none'} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} effectivePolyAddress=${params.effectivePolyAddress ?? 'n/a'} signatureType=${params.signatureType ?? 'n/a'} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? 'none'} credentialMode=${params.credentialMode}`,
+    `[CLOB][Diag][AuthFunds] signer=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} effectivePolyAddress=${params.effectivePolyAddress ?? "n/a"} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} credentialMode=${params.credentialMode}`,
   );
 };
 
@@ -337,25 +391,34 @@ export const classifyAuthFailure = (params: {
   pathIncludesQuery: boolean;
 }): AuthFailureReason => {
   if (
-    params.configuredPublicKey
-    && params.derivedSignerAddress
-    && !publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)
+    params.configuredPublicKey &&
+    params.derivedSignerAddress &&
+    !publicKeyMatchesDerived(
+      params.configuredPublicKey,
+      params.derivedSignerAddress,
+    )
   ) {
-    return 'MISMATCHED_ADDRESS';
-  }
-  if (params.signatureType === SignatureType.POLY_PROXY && params.privateKeyPresent) {
-    return 'WRONG_SIGNATURE_TYPE';
-  }
-  if (params.secretFormat === 'base64url' && params.secretDecodingUsed !== 'base64url') {
-    return 'SECRET_ENCODING';
+    return "MISMATCHED_ADDRESS";
   }
   if (
-    (params.expectedBodyIncluded && !params.bodyIncluded)
-    || (params.expectedQueryPresent && !params.pathIncludesQuery)
+    params.signatureType === SignatureType.POLY_PROXY &&
+    params.privateKeyPresent
   ) {
-    return 'MESSAGE_CANONICALIZATION';
+    return "WRONG_SIGNATURE_TYPE";
   }
-  return 'SERVER_REJECTED_CREDS';
+  if (
+    params.secretFormat === "base64url" &&
+    params.secretDecodingUsed !== "base64url"
+  ) {
+    return "SECRET_ENCODING";
+  }
+  if (
+    (params.expectedBodyIncluded && !params.bodyIncluded) ||
+    (params.expectedQueryPresent && !params.pathIncludesQuery)
+  ) {
+    return "MESSAGE_CANONICALIZATION";
+  }
+  return "SERVER_REJECTED_CREDS";
 };
 
 export const classifyPreflightIssue = (params: {
@@ -365,35 +428,51 @@ export const classifyPreflightIssue = (params: {
   data?: unknown;
 }): PreflightIssue => {
   if (params.status === 401 || params.status === 403) {
-    return 'AUTH';
+    return "AUTH";
   }
-  const dataText = typeof params.data === 'string' ? params.data : params.data ? JSON.stringify(params.data) : '';
-  const combined = `${params.message ?? ''} ${dataText}`.trim();
+  const dataText =
+    typeof params.data === "string"
+      ? params.data
+      : params.data
+        ? JSON.stringify(params.data)
+        : "";
+  const combined = `${params.message ?? ""} ${dataText}`.trim();
   if (params.status === 400 && PREFLIGHT_INVALID_ASSET_TYPE.test(combined)) {
-    return 'PARAM';
+    return "PARAM";
   }
   if (params.status === 400 && PREFLIGHT_INSUFFICIENT_FUNDS.test(combined)) {
-    return 'FUNDS';
+    return "FUNDS";
   }
-  if ((params.code && PREFLIGHT_TRANSIENT_CODES.has(params.code)) || PREFLIGHT_NETWORK_HINT.test(combined)) {
-    return 'NETWORK';
+  if (
+    (params.code && PREFLIGHT_TRANSIENT_CODES.has(params.code)) ||
+    PREFLIGHT_NETWORK_HINT.test(combined)
+  ) {
+    return "NETWORK";
   }
-  return 'UNKNOWN';
+  return "UNKNOWN";
 };
 
 const logPreflightHint = (logger: Logger, issue: PreflightIssue): void => {
   switch (issue) {
-    case 'AUTH':
-      logger.warn('[CLOB][Preflight][Hint] Auth failed: verify API key/secret/passphrase, signature_type, and POLY_ADDRESS.');
+    case "AUTH":
+      logger.warn(
+        "[CLOB][Preflight][Hint] Auth failed: verify API key/secret/passphrase, signature_type, and POLY_ADDRESS.",
+      );
       break;
-    case 'PARAM':
-      logger.warn('[CLOB][Preflight][Hint] Invalid params: use asset_type=COLLATERAL or asset_type=CONDITIONAL&token_id=...');
+    case "PARAM":
+      logger.warn(
+        "[CLOB][Preflight][Hint] Invalid params: use asset_type=COLLATERAL or asset_type=CONDITIONAL&token_id=...",
+      );
       break;
-    case 'FUNDS':
-      logger.warn('[CLOB][Preflight][Hint] Insufficient balance/allowance: top up collateral or approve spending.');
+    case "FUNDS":
+      logger.warn(
+        "[CLOB][Preflight][Hint] Insufficient balance/allowance: top up collateral or approve spending.",
+      );
       break;
-    case 'NETWORK':
-      logger.warn('[CLOB][Preflight][Hint] Network issue: retry or check connectivity/Cloudflare.');
+    case "NETWORK":
+      logger.warn(
+        "[CLOB][Preflight][Hint] Network issue: retry or check connectivity/Cloudflare.",
+      );
       break;
     default:
       break;
@@ -401,24 +480,29 @@ const logPreflightHint = (logger: Logger, issue: PreflightIssue): void => {
 };
 
 const extractStatus = (error: unknown): number | undefined => {
-  const maybeError = error as { response?: { status?: number }; status?: number };
+  const maybeError = error as {
+    response?: { status?: number };
+    status?: number;
+  };
   return maybeError?.status ?? maybeError?.response?.status;
 };
 
 const truncatePreflightData = (data: unknown): string | null => {
   if (data === null || data === undefined) return null;
-  let dataText = typeof data === 'string' ? data : JSON.stringify(data);
+  let dataText = typeof data === "string" ? data : JSON.stringify(data);
   if (dataText === undefined) {
     dataText = String(data);
   }
-  dataText = dataText.replace(/\s+/g, ' ');
+  dataText = dataText.replace(/\s+/g, " ");
   if (dataText.length > PREFLIGHT_DATA_TRUNCATE) {
     dataText = dataText.slice(0, PREFLIGHT_DATA_TRUNCATE);
   }
   return dataText;
 };
 
-const extractPreflightErrorDetails = (error: unknown): {
+const extractPreflightErrorDetails = (
+  error: unknown,
+): {
   status?: number;
   code?: string | null;
   message: string;
@@ -433,10 +517,13 @@ const extractPreflightErrorDetails = (error: unknown): {
   };
   let url: string | undefined;
   if (axios.isAxiosError(error)) {
-    const baseUrl = error.config?.baseURL ?? '';
-    const configUrl = error.config?.url ?? '';
+    const baseUrl = error.config?.baseURL ?? "";
+    const configUrl = error.config?.url ?? "";
     if (configUrl) {
-      url = configUrl.startsWith('http') || !baseUrl ? configUrl : `${baseUrl}${configUrl}`;
+      url =
+        configUrl.startsWith("http") || !baseUrl
+          ? configUrl
+          : `${baseUrl}${configUrl}`;
     } else if (baseUrl) {
       url = baseUrl;
     }
@@ -459,10 +546,10 @@ const logPreflightFailure = (params: {
   data?: unknown;
   url?: string;
 }): void => {
-  const message = params.message?.trim() ? params.message : 'unknown_error';
-  const urlPart = params.url ? ` url=${params.url}` : '';
+  const message = params.message?.trim() ? params.message : "unknown_error";
+  const urlPart = params.url ? ` url=${params.url}` : "";
   params.logger.warn(
-    `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? 'none'} code=${params.code ?? 'none'} message=${message}${urlPart}`,
+    `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? "none"} code=${params.code ?? "none"} message=${message}${urlPart}`,
   );
   const dataText = truncatePreflightData(params.data);
   if (dataText) {
@@ -470,30 +557,39 @@ const logPreflightFailure = (params: {
   }
 };
 
-const delay = async (ms: number): Promise<void> => new Promise((resolve) => {
-  setTimeout(resolve, ms);
-});
+const delay = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
-const runConnectivityCheck = async (logger: Logger): Promise<'ok' | 'transient' | 'fail'> => {
-  for (let attempt = 1; attempt <= PREFLIGHT_CONNECTIVITY_MAX_TRIES; attempt += 1) {
+const runConnectivityCheck = async (
+  logger: Logger,
+): Promise<"ok" | "transient" | "fail"> => {
+  for (
+    let attempt = 1;
+    attempt <= PREFLIGHT_CONNECTIVITY_MAX_TRIES;
+    attempt += 1
+  ) {
     try {
-      const response = await axios.get(`${POLYMARKET_API.BASE_URL}/markets`, { timeout: 10000 });
+      const response = await axios.get(`${POLYMARKET_API.BASE_URL}/markets`, {
+        timeout: 10000,
+      });
       if (response?.status === 200) {
-        return 'ok';
+        return "ok";
       }
       logPreflightFailure({
         logger,
-        stage: 'connectivity',
+        stage: "connectivity",
         status: response?.status,
-        message: response?.statusText ?? 'non_200',
+        message: response?.statusText ?? "non_200",
         data: (response as { data?: unknown })?.data,
       });
-      return 'fail';
+      return "fail";
     } catch (error) {
       const details = extractPreflightErrorDetails(error);
       logPreflightFailure({
         logger,
-        stage: 'connectivity',
+        stage: "connectivity",
         status: details.status,
         code: details.code,
         message: details.message,
@@ -502,24 +598,25 @@ const runConnectivityCheck = async (logger: Logger): Promise<'ok' | 'transient' 
       });
       if (details.code && PREFLIGHT_TRANSIENT_CODES.has(details.code)) {
         if (attempt === PREFLIGHT_CONNECTIVITY_MAX_TRIES) {
-          return 'transient';
+          return "transient";
         }
-        const backoffMs = PREFLIGHT_CONNECTIVITY_BACKOFF_BASE_MS * (2 ** (attempt - 1));
+        const backoffMs =
+          PREFLIGHT_CONNECTIVITY_BACKOFF_BASE_MS * 2 ** (attempt - 1);
         const jitterMs = Math.floor(Math.random() * backoffMs * 0.2);
         await delay(backoffMs + jitterMs);
         continue;
       }
-      return 'fail';
+      return "fail";
     }
   }
-  return 'transient';
+  return "transient";
 };
 
 export const setupClobHeaderKeyLogging = (logger?: Logger): void => {
   if (!logger || headerKeysLogged) return;
   axios.interceptors.request.use((config) => {
     if (headerKeysLogged) return config;
-    const url = config.url ?? '';
+    const url = config.url ?? "";
     if (!url.includes(POLYMARKET_API.BASE_URL)) {
       return config;
     }
@@ -528,7 +625,7 @@ export const setupClobHeaderKeyLogging = (logger?: Logger): void => {
       .map((key) => key.toUpperCase())
       .sort();
     if (headerKeys.length > 0) {
-      logger.info(`[CLOB][Diag] headerKeysSorted=${headerKeys.join(',')}`);
+      logger.info(`[CLOB][Diag] headerKeysSorted=${headerKeys.join(",")}`);
       headerKeysLogged = true;
     }
     return config;
@@ -544,7 +641,12 @@ export const runClobAuthPreflight = async (params: {
   privateKeyPresent: boolean;
   derivedCredsEnabled?: boolean;
   force?: boolean;
-}): Promise<{ ok: boolean; status?: number; reason?: AuthFailureReason; forced: boolean } | null> => {
+}): Promise<{
+  ok: boolean;
+  status?: number;
+  reason?: AuthFailureReason;
+  forced: boolean;
+} | null> => {
   if (!params.logger || !params.creds) return null;
   const nowMs = Date.now();
   if (nowMs - lastPreflightAttemptMs < preflightBackoffMs) {
@@ -552,55 +654,70 @@ export const runClobAuthPreflight = async (params: {
   }
   lastPreflightAttemptMs = nowMs;
 
-  const orderBuilder = (params.client as { orderBuilder?: { signatureType?: number; funderAddress?: string } })
-    .orderBuilder;
+  const orderBuilder = (
+    params.client as {
+      orderBuilder?: { signatureType?: number; funderAddress?: string };
+    }
+  ).orderBuilder;
   const signatureType = orderBuilder?.signatureType ?? SignatureType.EOA;
   const funderAddress = orderBuilder?.funderAddress;
 
   const connectivity = await runConnectivityCheck(params.logger);
-  if (connectivity === 'transient') {
-    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+  if (connectivity === "transient") {
+    preflightBackoffMs = Math.min(
+      preflightBackoffMs * 2,
+      PREFLIGHT_BACKOFF_MAX_MS,
+    );
     return null;
   }
-  if (connectivity === 'fail') {
-    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+  if (connectivity === "fail") {
+    preflightBackoffMs = Math.min(
+      preflightBackoffMs * 2,
+      PREFLIGHT_BACKOFF_MAX_MS,
+    );
     return { ok: false, forced: Boolean(params.force) };
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const endpoint = '/balance-allowance';
+  const endpoint = "/balance-allowance";
   params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
   const requestParams = { asset_type: AssetType.COLLATERAL };
-  const signedParams = signatureType !== undefined
-    ? { ...requestParams, signature_type: signatureType }
-    : requestParams;
+  const signedParams =
+    signatureType !== undefined
+      ? { ...requestParams, signature_type: signatureType }
+      : requestParams;
   const { signedPath, paramsKeys } = buildSignedPath(endpoint, signedParams);
   params.logger.info(
-    `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(',') : 'none'} signatureIncludesQuery=${signedPath.includes('?')}`,
+    `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(",") : "none"} signatureIncludesQuery=${signedPath.includes("?")}`,
   );
-  const messageComponents = buildAuthMessageComponents(timestamp, 'GET', signedPath);
-  const { messageDigest, secretDecodingUsed, signatureEncoding } = logAuthSigningDiagnostics({
-    logger: params.logger,
-    secret: params.creds.secret,
-    messageComponents,
-    signatureEncoding: SIGNATURE_ENCODING_USED,
-  });
+  const messageComponents = buildAuthMessageComponents(
+    timestamp,
+    "GET",
+    signedPath,
+  );
+  const { messageDigest, secretDecodingUsed, signatureEncoding } =
+    logAuthSigningDiagnostics({
+      logger: params.logger,
+      secret: params.creds.secret,
+      messageComponents,
+      signatureEncoding: SIGNATURE_ENCODING_USED,
+    });
 
   try {
     const response = await params.client.getBalanceAllowance(requestParams);
     const status = (response as { status?: number })?.status;
     const responseErrorMessage = extractPreflightResponseErrorMessage(response);
     if (status === 200) {
-      params.logger.info('[CLOB][Preflight] OK');
+      params.logger.info("[CLOB][Preflight] OK");
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return { ok: true, status, forced: Boolean(params.force) };
     }
     if (status === 401 || status === 403) {
       logPreflightFailure({
         logger: params.logger,
-        stage: 'auth',
+        stage: "auth",
         status,
-        message: responseErrorMessage || 'unauthorized',
+        message: responseErrorMessage || "unauthorized",
         data: (response as { data?: unknown })?.data,
       });
       logPreflightHint(
@@ -622,72 +739,83 @@ export const runClobAuthPreflight = async (params: {
         expectedBodyIncluded: false,
         bodyIncluded: messageComponents.bodyIncluded,
         expectedQueryPresent: paramsKeys.length > 0,
-        pathIncludesQuery: messageComponents.path.includes('?'),
+        pathIncludesQuery: messageComponents.path.includes("?"),
       });
 
       params.logger.warn(`[CLOB][Preflight] FAIL ${status}`);
       params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
       params.logger.warn(
-        `[CLOB][401] address=${params.derivedSignerAddress ?? 'n/a'} sigType=${signatureType} funder=${funderAddress ?? 'none'} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
+        `[CLOB][401] address=${params.derivedSignerAddress ?? "n/a"} sigType=${signatureType} funder=${funderAddress ?? "none"} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
       );
 
-      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      preflightBackoffMs = Math.min(
+        preflightBackoffMs * 2,
+        PREFLIGHT_BACKOFF_MAX_MS,
+      );
       return { ok: false, status, reason, forced: Boolean(params.force) };
     }
     if (status && status >= 500) {
       logPreflightFailure({
         logger: params.logger,
-        stage: 'auth',
+        stage: "auth",
         status,
-        message: responseErrorMessage || 'server_error',
+        message: responseErrorMessage || "server_error",
         data: (response as { data?: unknown })?.data,
       });
-      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      preflightBackoffMs = Math.min(
+        preflightBackoffMs * 2,
+        PREFLIGHT_BACKOFF_MAX_MS,
+      );
       return null;
     }
     if (status && status >= 400 && status < 500) {
       logPreflightFailure({
         logger: params.logger,
-        stage: 'auth',
+        stage: "auth",
         status,
-        message: responseErrorMessage || 'bad_request',
+        message: responseErrorMessage || "bad_request",
         data: (response as { data?: unknown })?.data,
       });
       logPreflightHint(
         params.logger,
         classifyPreflightIssue({
           status,
-          message: responseErrorMessage || 'bad_request',
+          message: responseErrorMessage || "bad_request",
           data: (response as { data?: unknown })?.data,
         }),
       );
-      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
+      params.logger.warn(
+        `[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`,
+      );
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return { ok: true, status, forced: Boolean(params.force) };
     }
     logPreflightFailure({
       logger: params.logger,
-      stage: 'auth',
+      stage: "auth",
       status,
-      message: responseErrorMessage || 'unknown_error',
+      message: responseErrorMessage || "unknown_error",
       data: (response as { data?: unknown })?.data,
     });
     logPreflightHint(
       params.logger,
       classifyPreflightIssue({
         status,
-        message: responseErrorMessage || 'unknown_error',
+        message: responseErrorMessage || "unknown_error",
         data: (response as { data?: unknown })?.data,
       }),
     );
-    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+    preflightBackoffMs = Math.min(
+      preflightBackoffMs * 2,
+      PREFLIGHT_BACKOFF_MAX_MS,
+    );
     return { ok: false, status, forced: Boolean(params.force) };
   } catch (error) {
     const details = extractPreflightErrorDetails(error);
     params.logger.warn(`[CLOB][Preflight] request GET ${endpoint}`);
     logPreflightFailure({
       logger: params.logger,
-      stage: 'auth',
+      stage: "auth",
       status: details.status,
       code: details.code,
       message: details.message,
@@ -704,7 +832,10 @@ export const runClobAuthPreflight = async (params: {
       }),
     );
     if (details.code && PREFLIGHT_TRANSIENT_CODES.has(details.code)) {
-      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      preflightBackoffMs = Math.min(
+        preflightBackoffMs * 2,
+        PREFLIGHT_BACKOFF_MAX_MS,
+      );
       return null;
     }
     if (details.status === 401 || details.status === 403) {
@@ -719,28 +850,48 @@ export const runClobAuthPreflight = async (params: {
         expectedBodyIncluded: false,
         bodyIncluded: messageComponents.bodyIncluded,
         expectedQueryPresent: paramsKeys.length > 0,
-        pathIncludesQuery: messageComponents.path.includes('?'),
+        pathIncludesQuery: messageComponents.path.includes("?"),
       });
 
       params.logger.warn(`[CLOB][Preflight] FAIL ${details.status}`);
       params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
       params.logger.warn(
-        `[CLOB][401] address=${params.derivedSignerAddress ?? 'n/a'} sigType=${signatureType} funder=${funderAddress ?? 'none'} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
+        `[CLOB][401] address=${params.derivedSignerAddress ?? "n/a"} sigType=${signatureType} funder=${funderAddress ?? "none"} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
       );
 
-      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
-      return { ok: false, status: details.status, reason, forced: Boolean(params.force) };
+      preflightBackoffMs = Math.min(
+        preflightBackoffMs * 2,
+        PREFLIGHT_BACKOFF_MAX_MS,
+      );
+      return {
+        ok: false,
+        status: details.status,
+        reason,
+        forced: Boolean(params.force),
+      };
     }
     if (details.status && details.status >= 500) {
-      preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+      preflightBackoffMs = Math.min(
+        preflightBackoffMs * 2,
+        PREFLIGHT_BACKOFF_MAX_MS,
+      );
       return null;
     }
     if (details.status && details.status >= 400 && details.status < 500) {
-      params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
+      params.logger.warn(
+        `[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`,
+      );
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
-      return { ok: true, status: details.status, forced: Boolean(params.force) };
+      return {
+        ok: true,
+        status: details.status,
+        forced: Boolean(params.force),
+      };
     }
-    preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
+    preflightBackoffMs = Math.min(
+      preflightBackoffMs * 2,
+      PREFLIGHT_BACKOFF_MAX_MS,
+    );
     return { ok: false, status: details.status, forced: Boolean(params.force) };
   }
 };
@@ -749,7 +900,7 @@ const formatPreflightError = (error: unknown): string => {
   const status = extractStatus(error);
   let message = extractPreflightErrorMessage(error);
   if (!message) {
-    message = status ? `status_${status}` : 'unknown_error';
+    message = status ? `status_${status}` : "unknown_error";
   }
   if (message.length > PREFLIGHT_MATRIX_ERROR_TRUNCATE) {
     return `${message.slice(0, PREFLIGHT_MATRIX_ERROR_TRUNCATE)}…`;
@@ -758,37 +909,57 @@ const formatPreflightError = (error: unknown): string => {
 };
 
 const extractPreflightErrorMessage = (error: unknown): string => {
-  const maybeError = error as { response?: { data?: unknown }; message?: string };
-  if (typeof maybeError?.response?.data === 'string') {
+  const maybeError = error as {
+    response?: { data?: unknown };
+    message?: string;
+  };
+  if (typeof maybeError?.response?.data === "string") {
     return maybeError.response.data;
   }
-  if (maybeError?.response?.data && typeof maybeError.response.data === 'object') {
+  if (
+    maybeError?.response?.data &&
+    typeof maybeError.response.data === "object"
+  ) {
     return JSON.stringify(maybeError.response.data);
   }
-  if (typeof maybeError?.message === 'string') {
+  if (typeof maybeError?.message === "string") {
     return maybeError.message;
   }
-  return '';
+  return "";
 };
 
 const extractPreflightResponseErrorMessage = (response: unknown): string => {
   const responseError = (response as { error?: unknown })?.error;
-  if (typeof responseError === 'string') {
+  if (typeof responseError === "string") {
     return responseError;
   }
-  if (responseError && typeof responseError === 'object') {
+  if (responseError && typeof responseError === "object") {
     return JSON.stringify(responseError);
   }
-  return '';
+  return "";
 };
 
 const formatMatrixTable = (rows: string[][]): string => {
-  const header = ['id', 'signature_type', 'secretDecode', 'sigEncoding', 'derivedCreds', 'status', 'error'];
+  const header = [
+    "id",
+    "signature_type",
+    "secretDecode",
+    "sigEncoding",
+    "derivedCreds",
+    "status",
+    "error",
+  ];
   const table = [header, ...rows];
-  const widths = header.map((_, idx) => Math.max(...table.map((row) => row[idx].length)));
+  const widths = header.map((_, idx) =>
+    Math.max(...table.map((row) => row[idx].length)),
+  );
   const formatRow = (row: string[]): string =>
-    row.map((value, idx) => value.padEnd(widths[idx])).join(' | ');
-  return ['[CLOB][Preflight][Matrix]', formatRow(header), ...rows.map(formatRow)].join('\n');
+    row.map((value, idx) => value.padEnd(widths[idx])).join(" | ");
+  return [
+    "[CLOB][Preflight][Matrix]",
+    formatRow(header),
+    ...rows.map(formatRow),
+  ].join("\n");
 };
 
 const applyAuthMode = async (
@@ -798,7 +969,8 @@ const applyAuthMode = async (
 ): Promise<void> => {
   activeAuthMode = mode;
   installHmacOverride();
-  const orderBuilder = (client as { orderBuilder?: { signatureType?: number } }).orderBuilder;
+  const orderBuilder = (client as { orderBuilder?: { signatureType?: number } })
+    .orderBuilder;
   if (orderBuilder) {
     orderBuilder.signatureType = mode.signatureType;
   }
@@ -812,7 +984,7 @@ export const runClobAuthMatrixPreflight = async (params: {
   derivedCreds?: ApiKeyCreds;
 }): Promise<{ ok: boolean } | null> => {
   if (!params.logger || !params.creds) return null;
-  const matrixEnabled = readEnvValue('CLOB_PREFLIGHT_MATRIX') === 'true';
+  const matrixEnabled = readEnvValue("CLOB_PREFLIGHT_MATRIX") === "true";
   if (!matrixEnabled) return null;
   if (matrixCompleted) return null;
   const nowMs = Date.now();
@@ -821,23 +993,30 @@ export const runClobAuthMatrixPreflight = async (params: {
   }
   lastMatrixAttemptMs = nowMs;
 
-  const endpoint = readEnvValue('CLOB_PREFLIGHT_ENDPOINT') ?? PREFLIGHT_MATRIX_DEFAULT_ENDPOINT;
+  const endpoint =
+    readEnvValue("CLOB_PREFLIGHT_ENDPOINT") ??
+    PREFLIGHT_MATRIX_DEFAULT_ENDPOINT;
   const signatureTypeValues = parseCsv(
-    readEnvValue('CLOB_PREFLIGHT_TRY_SIGNATURE_TYPES') ?? PREFLIGHT_MATRIX_DEFAULT_SIGNATURE_TYPES,
+    readEnvValue("CLOB_PREFLIGHT_TRY_SIGNATURE_TYPES") ??
+      PREFLIGHT_MATRIX_DEFAULT_SIGNATURE_TYPES,
   );
   const secretDecodingValues = parseCsv(
-    readEnvValue('CLOB_PREFLIGHT_TRY_SECRET_DECODE') ?? PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE,
+    readEnvValue("CLOB_PREFLIGHT_TRY_SECRET_DECODE") ??
+      PREFLIGHT_MATRIX_DEFAULT_SECRET_DECODE,
   ) as SecretDecodingMode[];
   const signatureEncodingValues = parseCsv(
-    readEnvValue('CLOB_PREFLIGHT_TRY_SIG_ENCODING') ?? PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING,
+    readEnvValue("CLOB_PREFLIGHT_TRY_SIG_ENCODING") ??
+      PREFLIGHT_MATRIX_DEFAULT_SIG_ENCODING,
   ) as SignatureEncodingMode[];
   const derivedCredsChoices = parseBooleanList(
-    readEnvValue('CLOB_PREFLIGHT_USE_DERIVED_CREDS'),
+    readEnvValue("CLOB_PREFLIGHT_USE_DERIVED_CREDS"),
     [false, true],
   );
 
-  const signer = (params.client as { signer?: { getAddress: () => Promise<string> } }).signer;
-  const address = signer ? await signer.getAddress() : '';
+  const signer = (
+    params.client as { signer?: { getAddress: () => Promise<string> } }
+  ).signer;
+  const address = signer ? await signer.getAddress() : "";
   const rows: string[][] = [];
   let successMode: { mode: AuthModeConfig; creds: ApiKeyCreds } | null = null;
   let attemptId = 0;
@@ -851,7 +1030,9 @@ export const runClobAuthMatrixPreflight = async (params: {
       for (const signatureEncoding of signatureEncodingValues) {
         for (const useDerivedCreds of derivedCredsChoices) {
           attemptId += 1;
-          const credsToUse = useDerivedCreds ? params.derivedCreds : params.creds;
+          const credsToUse = useDerivedCreds
+            ? params.derivedCreds
+            : params.creds;
           if (!credsToUse) {
             rows.push([
               `${attemptId}`,
@@ -859,8 +1040,8 @@ export const runClobAuthMatrixPreflight = async (params: {
               secretDecoding,
               signatureEncoding,
               `${useDerivedCreds}`,
-              'other',
-              'missing_creds',
+              "other",
+              "missing_creds",
             ]);
             continue;
           }
@@ -871,7 +1052,7 @@ export const runClobAuthMatrixPreflight = async (params: {
           const signature = buildHmacSignature({
             secret: credsToUse.secret,
             timestamp,
-            method: 'GET',
+            method: "GET",
             path: signedPath,
             secretDecoding,
             signatureEncoding,
@@ -884,16 +1065,19 @@ export const runClobAuthMatrixPreflight = async (params: {
             POLY_PASSPHRASE: credsToUse.passphrase,
           };
 
-          let statusLabel = 'other';
-          let errorLabel = '';
+          let statusLabel = "other";
+          let errorLabel = "";
           try {
-            const response = await axios.get(`${POLYMARKET_API.BASE_URL}${endpoint}`, {
-              headers,
-              params: requestParams,
-              timeout: 10000,
-            });
+            const response = await axios.get(
+              `${POLYMARKET_API.BASE_URL}${endpoint}`,
+              {
+                headers,
+                params: requestParams,
+                timeout: 10000,
+              },
+            );
             if (response?.status === 200) {
-              statusLabel = '200';
+              statusLabel = "200";
               rows.push([
                 `${attemptId}`,
                 `${signatureType}`,
@@ -901,19 +1085,25 @@ export const runClobAuthMatrixPreflight = async (params: {
                 signatureEncoding,
                 `${useDerivedCreds}`,
                 statusLabel,
-                '',
+                "",
               ]);
               successMode = {
-                mode: { signatureType, secretDecoding, signatureEncoding, useDerivedCreds },
+                mode: {
+                  signatureType,
+                  secretDecoding,
+                  signatureEncoding,
+                  useDerivedCreds,
+                },
                 creds: credsToUse,
               };
               break;
             }
-            statusLabel = response?.status === 401 ? '401' : 'other';
-            errorLabel = response?.statusText ?? '';
+            statusLabel = response?.status === 401 ? "401" : "other";
+            errorLabel = response?.statusText ?? "";
           } catch (error) {
             const status = extractStatus(error);
-            statusLabel = status === 200 ? '200' : status === 401 ? '401' : 'other';
+            statusLabel =
+              status === 200 ? "200" : status === 401 ? "401" : "other";
             errorLabel = formatPreflightError(error);
           }
 
@@ -927,7 +1117,7 @@ export const runClobAuthMatrixPreflight = async (params: {
             errorLabel,
           ]);
 
-          if (statusLabel === '200') {
+          if (statusLabel === "200") {
             break;
           }
         }
@@ -947,7 +1137,7 @@ export const runClobAuthMatrixPreflight = async (params: {
     return { ok: true };
   }
 
-  params.logger.warn('NO_VALID_AUTH_MODE');
+  params.logger.warn("NO_VALID_AUTH_MODE");
   matrixBackoffMs = Math.min(matrixBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
   return { ok: false };
 };

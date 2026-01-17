@@ -55,6 +55,6 @@ app.post('/sign', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
+   
   console.log(`[Signer] listening on :${PORT}`);
 });
