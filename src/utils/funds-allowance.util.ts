@@ -114,7 +114,7 @@ const isSnapshotSufficient = (snapshot: BalanceAllowanceSnapshot, requiredUsd: n
 const getBalanceUpdater = (client?: ClobClient): (() => Promise<void>) | null => {
   if (!client) return null;
   const updater = (client as { updateBalanceAllowance?: () => Promise<void> }).updateBalanceAllowance;
-  const canL2Auth = (client as { canL2Auth?: () => void }).canL2Auth;
+  const canL2Auth = (client as unknown as { canL2Auth?: () => void }).canL2Auth;
   if (typeof updater !== 'function' || typeof canL2Auth !== 'function') {
     return null;
   }
