@@ -437,7 +437,10 @@ export const runClobAuthPreflight = async (params: {
     preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
     return { ok: false, status, forced: Boolean(params.force) };
   } catch (error) {
-    const status = extractStatus(error);
+    const status = (error as { response?: { status?: number } })?.response?.status ?? null;
+    const code = (error as { code?: string })?.code ?? null;
+    const message = (error as { message?: string })?.message ?? String(error);
+    const data = (error as { response?: { data?: unknown } })?.response?.data ?? null;
     const errorMessage = extractPreflightErrorMessage(error);
     if (status === 400 && errorMessage.includes('Invalid asset type')) {
       params.logger.warn(`[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`);
@@ -469,7 +472,20 @@ export const runClobAuthPreflight = async (params: {
       return { ok: false, status, reason, forced: Boolean(params.force) };
     }
 
-    params.logger.warn(`[CLOB][Preflight] FAIL status=${status ?? 'unknown'}`);
+    params.logger.warn(
+      `[CLOB][Preflight] FAIL status=${status ?? 'none'} code=${code ?? 'none'} message=${message}`,
+    );
+    if (data !== null && data !== undefined) {
+      let dataText = typeof data === 'string' ? data : JSON.stringify(data);
+      if (dataText === undefined) {
+        dataText = String(data);
+      }
+      dataText = dataText.replace(/\s+/g, ' ');
+      if (dataText.length > 200) {
+        dataText = dataText.slice(0, 200);
+      }
+      params.logger.warn(`[CLOB][Preflight] data=${dataText}`);
+    }
     preflightBackoffMs = Math.min(preflightBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
     return { ok: false, status, forced: Boolean(params.force) };
   }
