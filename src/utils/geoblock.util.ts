@@ -28,10 +28,18 @@ export async function checkGeoblock(): Promise<GeoblockResponse> {
  * Check if the current IP is geographically blocked and log the result.
  * Returns true if blocked (trading not allowed), false if allowed.
  *
+ * SECURITY NOTE: By default, this function fails CLOSED - if the geoblock API
+ * is unreachable, it returns true (blocked) to prevent potential compliance violations.
+ * Set failOpen=true to allow trading when the API is unavailable (not recommended).
+ *
  * @param logger - Logger instance for output
+ * @param failOpen - If true, allow trading when API is unreachable (default: false)
  * @returns true if blocked, false if allowed
  */
-export async function isGeoblocked(logger?: Logger): Promise<boolean> {
+export async function isGeoblocked(
+  logger?: Logger,
+  failOpen = false,
+): Promise<boolean> {
   try {
     const response = await checkGeoblock();
 
@@ -47,13 +55,18 @@ export async function isGeoblocked(logger?: Logger): Promise<boolean> {
     );
     return false;
   } catch (error) {
-    // If we can't reach the geoblock API, log warning but don't block
-    // This allows operation to continue if the API is temporarily unavailable
+    // If we can't reach the geoblock API, fail closed by default for security
     const message = error instanceof Error ? error.message : String(error);
-    logger?.warn(
-      `[Geoblock] Unable to verify geographic eligibility: ${message}`,
+    if (failOpen) {
+      logger?.warn(
+        `[Geoblock] Unable to verify geographic eligibility (failOpen=true): ${message}`,
+      );
+      return false;
+    }
+    logger?.error(
+      `[Geoblock] Unable to verify geographic eligibility, blocking as precaution: ${message}`,
     );
-    return false;
+    return true;
   }
 }
 
@@ -61,13 +74,27 @@ export async function isGeoblocked(logger?: Logger): Promise<boolean> {
  * Verify geographic eligibility and throw if blocked.
  * Use this for strict enforcement before trading operations.
  *
+ * SECURITY NOTE: If the geoblock API is unreachable, this function throws
+ * a compliance error to prevent potential geographic restriction violations.
+ *
  * @param logger - Logger instance for output
- * @throws Error if user is geographically blocked
+ * @throws Error if user is geographically blocked or API is unreachable
  */
 export async function verifyGeographicEligibility(
   logger?: Logger,
 ): Promise<void> {
-  const response = await checkGeoblock();
+  let response: GeoblockResponse;
+  try {
+    response = await checkGeoblock();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger?.error(
+      `[Geoblock] Unable to verify geographic eligibility, blocking as precaution: ${message}`,
+    );
+    throw new Error(
+      "Geographic eligibility verification failed - unable to reach geoblock API",
+    );
+  }
 
   if (response.blocked) {
     const message = `Trading not available in ${response.country}${response.region ? ` (${response.region})` : ""}`;

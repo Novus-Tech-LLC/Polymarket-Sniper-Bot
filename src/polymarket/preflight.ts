@@ -72,21 +72,17 @@ export const ensureTradingReady = async (
   // @see https://docs.polymarket.com/developers/CLOB/geoblock
   const skipGeoblockCheck = parseBool(readEnv("SKIP_GEOBLOCK_CHECK"), false);
   if (!skipGeoblockCheck) {
-    try {
-      const blocked = await isGeoblocked(params.logger);
-      if (blocked) {
-        params.logger.error(
-          "[Preflight] Geographic restriction: trading not available in your region.",
-        );
-        params.logger.error(
-          "[Preflight] Set SKIP_GEOBLOCK_CHECK=true to bypass (not recommended).",
-        );
-        detectOnly = true;
-      }
-    } catch (error) {
-      params.logger.warn(
-        `[Preflight] Unable to verify geographic eligibility. ${sanitizeErrorMessage(error)}`,
+    // isGeoblocked fails closed by default - if API is unreachable, it returns true (blocked)
+    // This ensures compliance with geographic restrictions even during API outages
+    const blocked = await isGeoblocked(params.logger);
+    if (blocked) {
+      params.logger.error(
+        "[Preflight] Geographic restriction: trading not available in your region.",
       );
+      params.logger.error(
+        "[Preflight] Set SKIP_GEOBLOCK_CHECK=true to bypass (not recommended).",
+      );
+      detectOnly = true;
     }
   } else {
     params.logger.warn(

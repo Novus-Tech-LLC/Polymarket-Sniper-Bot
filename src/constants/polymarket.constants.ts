@@ -78,39 +78,40 @@ export const ORDER_EXECUTION = {
 } as const;
 
 /**
- * Polymarket API Rate Limits (per 10 seconds unless noted)
+ * Polymarket API Rate Limits
+ * All limits are per 10 seconds unless noted otherwise in the comment.
  * These are informational - actual enforcement is done by Cloudflare throttling.
  * @see https://docs.polymarket.com/quickstart/introduction/rate-limits
  */
 export const POLYMARKET_RATE_LIMITS = {
-  /** General rate limiting */
+  /** General rate limiting (per 10 seconds) */
   GENERAL: 15000,
-  /** CLOB API general */
+  /** CLOB API general (per 10 seconds) */
   CLOB_GENERAL: 9000,
-  /** CLOB /book endpoint */
+  /** CLOB /book endpoint (per 10 seconds) */
   CLOB_BOOK: 1500,
-  /** CLOB /books endpoint */
+  /** CLOB /books endpoint (per 10 seconds) */
   CLOB_BOOKS: 500,
-  /** CLOB /price endpoint */
+  /** CLOB /price endpoint (per 10 seconds) */
   CLOB_PRICE: 1500,
-  /** CLOB POST /order endpoint - burst */
+  /** CLOB POST /order endpoint - burst (per 10 seconds) */
   CLOB_ORDER_POST_BURST: 3500,
-  /** CLOB POST /order endpoint - sustained (per 10 minutes) */
+  /** CLOB POST /order endpoint - sustained: 36000 requests per 10 MINUTES (~60/s average) */
   CLOB_ORDER_POST_SUSTAINED: 36000,
-  /** CLOB DELETE /order endpoint - burst */
+  /** CLOB DELETE /order endpoint - burst (per 10 seconds) */
   CLOB_ORDER_DELETE_BURST: 3000,
-  /** Data API general */
+  /** Data API general (per 10 seconds) */
   DATA_API_GENERAL: 1000,
-  /** Data API /trades */
+  /** Data API /trades (per 10 seconds) */
   DATA_API_TRADES: 200,
-  /** Data API /positions */
+  /** Data API /positions (per 10 seconds) */
   DATA_API_POSITIONS: 150,
-  /** GAMMA API general */
+  /** GAMMA API general (per 10 seconds) */
   GAMMA_GENERAL: 4000,
-  /** GAMMA /events */
+  /** GAMMA /events (per 10 seconds) */
   GAMMA_EVENTS: 500,
-  /** GAMMA /markets */
+  /** GAMMA /markets (per 10 seconds) */
   GAMMA_MARKETS: 300,
-  /** Relayer /submit (per 1 minute) */
+  /** Relayer /submit (per 1 MINUTE, not 10 seconds) */
   RELAYER_SUBMIT: 25,
 } as const;
