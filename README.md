@@ -183,40 +183,70 @@ POLYMARKET_API_SECRET=your_clob_api_secret
 POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
 ```
 
-> ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES` and `PUBLIC_KEY`. The quick start above is intentionally minimal to highlight presets.
+> ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES`. `PUBLIC_KEY` is optional and will be derived from `PRIVATE_KEY` when omitted.
 > ✅ **Note:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` are required for CLOB access unless `CLOB_DERIVE_CREDS=true` is set to derive credentials from `PRIVATE_KEY`.
 
-### Quickstart for Live Trading
+### Quickstart (AirVPN/WireGuard already handled), enable builder relayer + approvals
 
-Live trading is locked behind an explicit opt-in and on-chain approvals. Minimum required environment variables:
+Live trading is locked behind an explicit opt-in and on-chain approvals. The bot now supports **gasless relayer approvals** via a separate signer container that holds builder API credentials.
+
+**Minimum required environment variables**
 
 - `ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS`
-- `PRIVATE_KEY`, `PUBLIC_KEY`, `RPC_URL`
-- `COLLATERAL_TOKEN_ADDRESS` (USDC on Polygon)
-- `POLY_CTF_EXCHANGE_ADDRESS` (spender for USDC approvals)
-- `POLY_CTF_ERC1155_ADDRESS` (CTF ERC1155 contract)
+- `PRIVATE_KEY`, `RPC_URL`
+- `COLLATERAL_TOKEN_ADDRESS` (USDC.e on Polygon)
+- `POLY_CTF_ADDRESS` (CTF ERC1155 contract)
+- `POLY_CTF_EXCHANGE_ADDRESS` (spender for USDC + ERC1155 approvals)
+- `APPROVALS_AUTO=true` (auto-approve on startup)
+- `APPROVAL_MIN_USDC=1000` (minimum allowance target)
+- `APPROVAL_MAX_UINT=true` (approve max uint256)
+
+**Relayer signing (recommended, gasless approvals)**
+
+- `SIGNER_URL=http://signer:8080/sign`
+- `RELAYER_URL=https://relayer-v2.polymarket.com/`
+
+The signer container reads these builder credentials:
+
+- `POLY_BUILDER_API_KEY`
+- `POLY_BUILDER_API_SECRET`
+- `POLY_BUILDER_API_PASSPHRASE`
 
 Approvals flow (startup preflight):
 
-- `APPROVALS_AUTO=false` (default): prints exact approval instructions and stays detect-only.
+- `APPROVALS_AUTO=false`: prints exact approval instructions and stays detect-only.
 - `APPROVALS_AUTO=dryrun`: prints the calldata/tx params it would send and stays detect-only.
-- `APPROVALS_AUTO=true`: sends approval txs once, then continues if confirmed.
+- `APPROVALS_AUTO=true`: sends approval txs once (via relayer if configured), then continues if confirmed.
 
-#### How to find the required addresses
+#### Contract addresses (official defaults)
 
-1. Use Polygonscan to inspect a **manual Polymarket trade** from your wallet.
-2. Find the **USDC approval** transaction and copy the `spender` address (this is `POLY_CTF_EXCHANGE_ADDRESS`).
-3. Find the **ERC1155 approval** transaction from the same trade and copy the token contract address (this is `POLY_CTF_ERC1155_ADDRESS`).
-4. Set both env vars (`POLY_CTF_EXCHANGE_ADDRESS` and `POLY_CTF_ERC1155_ADDRESS`) and restart the bot.
+These defaults are now baked into the config and can still be overridden via env vars if needed:
+
+- `POLY_USDCE_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`
+- `POLY_CTF_ADDRESS=0x4d97dcd97ec945f40cf65f87097ace5ea0476045`
+- `POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E`
+- `POLY_NEG_RISK_CTF_EXCHANGE_ADDRESS=0xC5d563A36AE78145C45a50134d48A1215220f80a`
+- `POLY_NEG_RISK_ADAPTER_ADDRESS=0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296`
 
 Dry-run approvals example:
 
 ```env
 ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 APPROVALS_AUTO=dryrun
-APPROVALS_MIN_USDC_ALLOWANCE=1000
-POLY_CTF_EXCHANGE_ADDRESS=0x...
-POLY_CTF_ERC1155_ADDRESS=0x...
+APPROVAL_MIN_USDC=1000
+POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
+POLY_CTF_ADDRESS=0x4d97dcd97ec945f40cf65f87097ace5ea0476045
+```
+
+If `SIGNER_URL` is not provided (or the signer is unavailable), the bot falls back to **on-chain approvals via your EOA** using the configured `RPC_URL`.
+
+### Preflight CLI
+
+Run a full trading preflight (CLOB auth, relayer deployment, approvals, and balances):
+
+```bash
+npm run build
+node dist/tools/preflight.js
 ```
 
 ## CLOB Auth Diagnostics
@@ -433,8 +463,23 @@ docker run --env-file .env polymarket-sniper-bot
 | `ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS` | Per-market cooldown seconds | `300` |
 | `CLOUDFLARE_COOLDOWN_SECONDS` | Pause submits after Cloudflare block | `3600` |
 | `TARGET_ADDRESSES` | (Monitor only) Comma-separated addresses to monitor | `0xabc...,0xdef...` |
-| `PUBLIC_KEY` | (Monitor only) Your Polygon wallet address | `your_wallet_address` |
+| `PUBLIC_KEY` | (Optional) Wallet address override; derived from `PRIVATE_KEY` when omitted | `your_wallet_address` |
 | `ARB_DEBUG_TOP_N` | (Arb only) Log top N pre-filter candidates each scan | `0` |
+
+### Relayer + approvals (recommended)
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `RELAYER_URL` | Polymarket relayer endpoint | `https://relayer-v2.polymarket.com/` |
+| `SIGNER_URL` | Remote signer endpoint in Docker network | `http://signer:8080/sign` |
+| `SIGNER_AUTH_TOKEN` | (Optional) Bearer token shared with signer | `my-token` |
+| `POLY_CTF_ADDRESS` | CTF ERC1155 contract | `0x4d97...` |
+| `POLY_CTF_EXCHANGE_ADDRESS` | CTF exchange spender | `0x4bFb...` |
+| `POLY_NEG_RISK_CTF_EXCHANGE_ADDRESS` | Neg-risk CTF exchange spender | `0xC5d...` |
+| `POLY_NEG_RISK_ADAPTER_ADDRESS` | Neg-risk adapter | `0xd91E...` |
+| `APPROVAL_MIN_USDC` | Minimum USDC approval threshold | `1000` |
+| `APPROVAL_MAX_UINT` | Approve `maxUint256` | `true` |
+| `APPROVALS_AUTO` | Auto-approve on startup | `true` |
 
 ### WireGuard (optional)
 

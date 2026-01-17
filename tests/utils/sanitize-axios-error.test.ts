@@ -25,7 +25,7 @@ test('sanitizeAxiosError redacts sensitive axios fields', () => {
   const sanitized = sanitizeAxiosError(error);
   assert.ok(!sanitized.message.includes('supersecret'));
   assert.ok(!sanitized.message.includes('passphrase'));
-  assert.ok(!sanitized.message.toLowerCase().includes('authorization='));
-  assert.ok(!sanitized.message.toLowerCase().includes('cookie='));
+  assert.ok(!sanitized.message.toLowerCase().includes('bearer token'));
+  assert.ok(!sanitized.message.toLowerCase().includes('session=abc'));
   assert.ok(sanitized.message.includes('<redacted>'));
 });

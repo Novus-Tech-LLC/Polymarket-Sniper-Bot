@@ -10,19 +10,10 @@ const createLogger = () => ({
   debug: () => undefined,
 });
 
-test('checkFundsAndAllowance refresh binds the client updater', async () => {
-  let refreshCalled = false;
+test('checkFundsAndAllowance refreshes via second balance-allowance read', async () => {
   let collateralCalls = 0;
 
   const client = {
-    canL2Auth() {
-      return true;
-    },
-    updateBalanceAllowance() {
-      refreshCalled = true;
-      this.canL2Auth();
-      return Promise.resolve();
-    },
     getBalanceAllowance: async (params: { asset_type: AssetType }) => {
       if (params.asset_type === AssetType.COLLATERAL) {
         collateralCalls += 1;
@@ -43,5 +34,5 @@ test('checkFundsAndAllowance refresh binds the client updater', async () => {
     assert.equal(result.ok, true);
   });
 
-  assert.equal(refreshCalled, true);
+  assert.equal(collateralCalls, 2);
 });

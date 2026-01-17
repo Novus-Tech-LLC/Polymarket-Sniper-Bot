@@ -1,3 +1,4 @@
+import { Wallet } from 'ethers';
 import { DEFAULT_CONFIG, POLYGON_USDC_ADDRESS } from '../constants/polymarket.constants';
 import type { ArbConfig } from '../arbitrage/config';
 import { ARB_PRESETS, DEFAULT_ARB_PRESET, DEFAULT_MONITOR_PRESET, MONITOR_PRESETS } from './presets';
@@ -188,6 +189,15 @@ const parseBool: EnvParser<boolean> = (raw) => {
 };
 
 const parseString: EnvParser<string> = (raw) => raw;
+
+const derivePublicKey = (privateKey: string | undefined): string | undefined => {
+  if (!privateKey) return undefined;
+  try {
+    return new Wallet(privateKey).address;
+  } catch {
+    return undefined;
+  }
+};
 
 const ARB_ENV_MAP = {
   ARB_ENABLED: { key: 'enabled', parse: parseBool },
@@ -555,15 +565,20 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
   const enabledFromMode = mode === 'arb' || mode === 'both';
 
   const decisionsLogRaw = readEnv('ARB_DECISIONS_LOG', overrides);
-  const collateralAddressRaw = readEnv('COLLATERAL_TOKEN_ADDRESS', overrides) || readEnv('USDC_CONTRACT_ADDRESS', overrides);
+  const collateralAddressRaw = readEnv('COLLATERAL_TOKEN_ADDRESS', overrides)
+    || readEnv('USDC_CONTRACT_ADDRESS', overrides)
+    || readEnv('POLY_USDCE_ADDRESS', overrides);
+
+  const privateKey = required('PRIVATE_KEY', overrides);
+  const proxyWallet = readEnv('PUBLIC_KEY', overrides) || derivePublicKey(privateKey);
 
   const config: ArbRuntimeConfig = {
     ...baseConfig,
     enabled: enabledFromPreset && enabledFromMode,
     decisionsLog: decisionsLogRaw === '' ? '' : baseConfig.decisionsLog,
     rpcUrl: required('RPC_URL', overrides),
-    privateKey: required('PRIVATE_KEY', overrides),
-    proxyWallet: readEnv('PUBLIC_KEY', overrides),
+    privateKey,
+    proxyWallet,
     detectOnly: !clobCredsComplete && !clobDeriveEnabled,
     clobCredsComplete,
     clobDeriveEnabled,
@@ -725,11 +740,15 @@ export function loadMonitorConfig(overrides: Overrides = {}): MonitorRuntimeConf
   }
 
   baseConfig.targetAddresses = targetAddresses;
-  baseConfig.proxyWallet = required('PUBLIC_KEY', overrides);
-  baseConfig.privateKey = required('PRIVATE_KEY', overrides);
+  const monitorPrivateKey = required('PRIVATE_KEY', overrides);
+  baseConfig.proxyWallet = readEnv('PUBLIC_KEY', overrides) || derivePublicKey(monitorPrivateKey) || '';
+  baseConfig.privateKey = monitorPrivateKey;
   baseConfig.rpcUrl = required('RPC_URL', overrides);
   baseConfig.collateralTokenAddress =
-    readEnv('COLLATERAL_TOKEN_ADDRESS', overrides) || readEnv('USDC_CONTRACT_ADDRESS', overrides) || POLYGON_USDC_ADDRESS;
+    readEnv('COLLATERAL_TOKEN_ADDRESS', overrides)
+    || readEnv('USDC_CONTRACT_ADDRESS', overrides)
+    || readEnv('POLY_USDCE_ADDRESS', overrides)
+    || POLYGON_USDC_ADDRESS;
   baseConfig.collateralTokenDecimals = readNumber('COLLATERAL_TOKEN_DECIMALS', 6, overrides);
 
   if (presetName !== 'custom') {

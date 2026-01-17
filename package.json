@@ -35,7 +35,8 @@
     "set-token-allowance": "ts-node src/cli/set-token-allowance.command.ts",
     "manual-sell": "ts-node src/cli/manual-sell.command.ts",
     "simulate": "ts-node src/cli/run-simulations.command.ts",
-    "test": "node --test -r ts-node/register/transpile-only tests/arbitrage/*.test.ts"
+    "test": "node --test -r ts-node/register/transpile-only tests/**/*.test.ts",
+    "preflight": "node dist/tools/preflight.js"
   },
   "keywords": [
     "polymarket",
@@ -59,13 +60,16 @@
   },
   "homepage": "https://github.com/your-org/polymarket-sniper-bot#readme",
   "dependencies": {
+    "@polymarket/builder-relayer-client": "^0.0.8",
+    "@polymarket/builder-signing-sdk": "^0.0.8",
     "@polymarket/clob-client": "^4.14.0",
     "axios": "^1.7.9",
     "chalk": "^5.4.1",
     "dotenv": "^16.4.7",
     "ethers": "^5.8.0",
     "mongoose": "^8.9.5",
-    "ora": "^8.2.0"
+    "ora": "^8.2.0",
+    "viem": "^2.27.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

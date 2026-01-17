@@ -1,22 +1,29 @@
 import type { ClobClient } from '@polymarket/clob-client';
 import { AssetType } from '@polymarket/clob-client';
-import { Contract, utils } from 'ethers';
+import { BigNumber, Contract, utils } from 'ethers';
 import type { Wallet } from 'ethers';
-import { resolvePolymarketContracts } from '../polymarket/contracts';
-import { readApprovalsConfig } from '../polymarket/preflight';
+import { ensureApprovals, readApprovalsConfig, resolveApprovalTargets } from '../polymarket/approvals';
+import type { RelayerContext } from '../polymarket/relayer';
 import { buildSignedPath } from './query-string.util';
 import type { Logger } from './logger.util';
 
-const ERC20_APPROVE_ABI = ['function approve(address spender, uint256 amount) returns (bool)'];
+const ERC20_ABI = [
+  'function balanceOf(address owner) view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+];
+const ERC1155_ABI = ['function isApprovedForAll(address owner, address operator) view returns (bool)'];
 const DEFAULT_COLLATERAL_DECIMALS = 6;
 const BALANCE_ALLOWANCE_ENDPOINT = '/balance-allowance';
-const BALANCE_ALLOWANCE_UPDATE_ENDPOINT = '/balance-allowance/update';
 const BALANCE_ALLOWANCE_CACHE_TTL_MS = 15_000;
 const ZERO_ALLOWANCE_COOLDOWN_MS = 5 * 60_000;
 const ZERO_ALLOWANCE_LOG_INTERVAL_MS = 60_000;
+const APPROVAL_RETRY_COOLDOWN_MS = 5 * 60_000;
+const APPROVAL_FOR_ALL_CACHE_TTL_MS = 30_000;
 
 const balanceAllowanceCache = new Map<string, { snapshot: BalanceAllowanceSnapshot; fetchedAt: number }>();
 const zeroAllowanceCooldown = new Map<string, { until: number; lastLogged: number }>();
+const approvalAttemptCooldown = new Map<string, number>();
+const approvalForAllCache = new Map<string, { approved: boolean; fetchedAt: number }>();
 
 export type FundsAllowanceParams = {
   client: ClobClient;
@@ -57,6 +64,11 @@ export const resolveSignerAddress = (client: ClobClient): string => {
   return derived ?? wallet?.address ?? 'unknown';
 };
 
+const resolveTradingAddress = (client: ClobClient): string => {
+  const relayerContext = (client as { relayerContext?: RelayerContext }).relayerContext;
+  return relayerContext?.tradingAddress ?? resolveSignerAddress(client);
+};
+
 export const formatCollateralLabel = (collateralTokenAddress?: string, collateralTokenId?: string): string => {
   const addressLabel = collateralTokenAddress ?? 'unknown';
   return collateralTokenId ? `${addressLabel} (id=${collateralTokenId})` : addressLabel;
@@ -69,27 +81,6 @@ const parseUsdValue = (value: unknown): number => {
 
 const formatUsd = (value: number): string => value.toFixed(2);
 
-const buildApprovalAmount = (requiredUsd: number, maxUsd: number | undefined): number => {
-  if (!maxUsd || maxUsd <= 0) return requiredUsd;
-  return Math.min(requiredUsd, maxUsd);
-};
-
-const submitApproval = async (params: {
-  wallet: Wallet;
-  tokenAddress: string;
-  spender: string;
-  amountUsd: number;
-  decimals: number;
-  logger: Logger;
-}): Promise<void> => {
-  const amount = utils.parseUnits(params.amountUsd.toFixed(params.decimals), params.decimals);
-  const contract = new Contract(params.tokenAddress, ERC20_APPROVE_ABI, params.wallet);
-  params.logger.warn(`[CLOB] Submitting approval tx for ${params.amountUsd.toFixed(2)} collateral tokens.`);
-  const tx = await contract.approve(params.spender, amount);
-  params.logger.info(`[CLOB] Approval tx submitted: ${tx.hash}`);
-  await tx.wait(1);
-  params.logger.info('[CLOB] Approval confirmed.');
-};
 
 export const buildBalanceAllowanceParams = (assetType: AssetType, tokenId?: string): BalanceAllowanceParams => ({
   asset_type: assetType === AssetType.CONDITIONAL ? AssetType.CONDITIONAL : AssetType.COLLATERAL,
@@ -188,21 +179,78 @@ const fetchBalanceAllowance = async (
 const isSnapshotSufficient = (snapshot: BalanceAllowanceSnapshot, requiredUsd: number): boolean =>
   snapshot.balanceUsd >= requiredUsd && snapshot.allowanceUsd >= requiredUsd;
 
-const getBalanceUpdater = (client?: ClobClient): ((params?: BalanceAllowanceParams) => Promise<void>) | null => {
-  if (!client) return null;
-  const updater = (client as { updateBalanceAllowance?: (params?: BalanceAllowanceParams) => Promise<void> })
-    .updateBalanceAllowance;
-  const canL2Auth = (client as unknown as { canL2Auth?: () => void }).canL2Auth;
-  if (typeof updater !== 'function' || typeof canL2Auth !== 'function') {
-    return null;
+const buildOnchainSnapshot = async (params: {
+  client: ClobClient;
+  owner: string;
+  decimals: number;
+  tokenAddress?: string;
+  logger: Logger;
+}): Promise<{ balanceUsd: number; allowanceUsd: number; approvedForAll: boolean }> => {
+  const wallet = (params.client as { wallet?: Wallet }).wallet;
+  if (!wallet) {
+    throw new Error('Missing wallet for onchain checks.');
   }
-  return updater.bind(client);
+  const { contracts, usdcSpenders, erc1155Operators } = resolveApprovalTargets();
+  const usdcContract = new Contract(params.tokenAddress ?? contracts.usdcAddress, ERC20_ABI, wallet.provider ?? wallet);
+  const balance = await usdcContract.balanceOf(params.owner);
+  const allowances = await Promise.all(
+    usdcSpenders.map(async (spender) => usdcContract.allowance(params.owner, spender)),
+  );
+  const minAllowance = allowances.length
+    ? allowances.reduce((min, current) => (current.lt(min) ? current : min), allowances[0])
+    : BigNumber.from(0);
+  const approvedForAll = await Promise.all(
+    erc1155Operators.map(async (operator) => {
+      if (!contracts.ctfErc1155Address) return false;
+      const ctfContract = new Contract(contracts.ctfErc1155Address, ERC1155_ABI, wallet.provider ?? wallet);
+      return ctfContract.isApprovedForAll(params.owner, operator);
+    }),
+  );
+  const allApproved = approvedForAll.length ? approvedForAll.every(Boolean) : false;
+  params.logger.info(
+    `[CLOB][Onchain] owner=${params.owner} balance=${utils.formatUnits(balance, params.decimals)} allowance_min=${utils.formatUnits(minAllowance, params.decimals)} approvedForAll=${allApproved}`,
+  );
+  return {
+    balanceUsd: Number(utils.formatUnits(balance, params.decimals)),
+    allowanceUsd: Number(utils.formatUnits(minAllowance, params.decimals)),
+    approvedForAll: allApproved,
+  };
+};
+
+const fetchApprovedForAll = async (params: {
+  client: ClobClient;
+  owner: string;
+  logger: Logger;
+}): Promise<boolean> => {
+  const cacheKey = `approved:${params.owner}`;
+  const cached = approvalForAllCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.fetchedAt < APPROVAL_FOR_ALL_CACHE_TTL_MS) {
+    return cached.approved;
+  }
+  const wallet = (params.client as { wallet?: Wallet }).wallet;
+  if (!wallet) {
+    throw new Error('Missing wallet for approval checks.');
+  }
+  const { contracts, erc1155Operators } = resolveApprovalTargets();
+  if (!contracts.ctfErc1155Address || erc1155Operators.length === 0) {
+    return false;
+  }
+  const ctfContract = new Contract(contracts.ctfErc1155Address, ERC1155_ABI, wallet.provider ?? wallet);
+  const approvals = await Promise.all(
+    erc1155Operators.map((operator) => ctfContract.isApprovedForAll(params.owner, operator)),
+  );
+  const approved = approvals.every(Boolean);
+  approvalForAllCache.set(cacheKey, { approved, fetchedAt: now });
+  params.logger.info(`[CLOB][Onchain] owner=${params.owner} approvedForAll=${approved}`);
+  return approved;
 };
 
 export const checkFundsAndAllowance = async (params: FundsAllowanceParams): Promise<FundsAllowanceResult> => {
   const bufferBps = params.balanceBufferBps ?? 0;
   const requiredUsd = params.sizeUsd * (1 + bufferBps / 10000);
   const signerAddress = resolveSignerAddress(params.client);
+  const tradingAddress = resolveTradingAddress(params.client);
   const collateralLabel = formatCollateralLabel(params.collateralTokenAddress, params.collateralTokenId);
 
   try {
@@ -215,22 +263,9 @@ export const checkFundsAndAllowance = async (params: FundsAllowanceParams): Prom
     let allowanceUsd = collateralSnapshot.allowanceUsd;
 
     const refreshAndRetry = async (): Promise<void> => {
-      const updater = getBalanceUpdater(params.client);
-      if (!updater || refreshed) return;
+      if (refreshed) return;
       refreshed = true;
       params.logger.info('[CLOB] Refreshing balance/allowance cache before skipping order.');
-      const refreshInfo = buildBalanceAllowanceRequestInfo({
-        client: params.client,
-        endpoint: BALANCE_ALLOWANCE_UPDATE_ENDPOINT,
-        assetType: AssetType.COLLATERAL,
-      });
-      logBalanceAllowanceRequest({
-        logger: params.logger,
-        endpoint: BALANCE_ALLOWANCE_UPDATE_ENDPOINT,
-        signedPath: refreshInfo.signedPath,
-        paramsKeys: refreshInfo.paramsKeys,
-      });
-      await updater(refreshInfo.requestParams);
       collateralSnapshot = await fetchBalanceAllowance(
         params.client,
         AssetType.COLLATERAL,
@@ -296,34 +331,34 @@ export const checkFundsAndAllowance = async (params: FundsAllowanceParams): Prom
                 reason,
               };
             }
-            const spender = resolvePolymarketContracts().ctfExchangeAddress;
-            if (!spender) {
-              params.logger.warn(
-                `[CLOB] Auto-approve requested but POLY_CTF_EXCHANGE_ADDRESS missing. signer=${signerAddress} collateral=${collateralLabel}`,
-              );
-              return {
-                ok: false,
-                requiredUsd,
-                balanceUsd: insufficientSnapshot.balanceUsd,
-                allowanceUsd: insufficientSnapshot.allowanceUsd,
-                reason,
-              };
+
+            const approvalKey = `${tradingAddress}:${params.collateralTokenAddress}`;
+            const lastAttempt = approvalAttemptCooldown.get(approvalKey) ?? 0;
+            if (Date.now() - lastAttempt < APPROVAL_RETRY_COOLDOWN_MS) {
+              params.logger.warn('[CLOB] Auto-approve cooldown active; skipping approval retry.');
+            } else {
+              if (params.autoApproveMaxUsd && params.autoApproveMaxUsd < requiredUsd) {
+                params.logger.warn(
+                  `[CLOB] Auto-approve cap ${formatUsd(params.autoApproveMaxUsd)} is below required ${formatUsd(requiredUsd)}.`,
+                );
+                return {
+                  ok: false,
+                  requiredUsd,
+                  balanceUsd: insufficientSnapshot.balanceUsd,
+                  allowanceUsd: insufficientSnapshot.allowanceUsd,
+                  reason,
+                };
+              }
+              approvalAttemptCooldown.set(approvalKey, Date.now());
+              await ensureApprovals({
+                wallet,
+                owner: tradingAddress,
+                relayer: (params.client as { relayerContext?: RelayerContext }).relayerContext,
+                logger: params.logger,
+                config: approvalsConfig,
+              });
+              await refreshAndRetry();
             }
-            const decimals = params.collateralTokenDecimals ?? DEFAULT_COLLATERAL_DECIMALS;
-            const approvalUsd = buildApprovalAmount(requiredUsd, params.autoApproveMaxUsd);
-            if (params.autoApproveMaxUsd && params.autoApproveMaxUsd < requiredUsd) {
-              params.logger.warn(
-                `[CLOB] Auto-approve cap ${formatUsd(params.autoApproveMaxUsd)} is below required ${formatUsd(requiredUsd)}.`,
-              );
-            }
-            await submitApproval({
-              wallet,
-              tokenAddress: params.collateralTokenAddress,
-              spender,
-              amountUsd: approvalUsd,
-              decimals,
-              logger: params.logger,
-            });
           }
         } else {
           if (insufficientSnapshot.allowanceUsd <= 0) {
@@ -343,6 +378,56 @@ export const checkFundsAndAllowance = async (params: FundsAllowanceParams): Prom
       };
     }
 
+    const approvedForAll = await fetchApprovedForAll({
+      client: params.client,
+      owner: tradingAddress,
+      logger: params.logger,
+    });
+    if (!approvedForAll) {
+      if (params.autoApprove) {
+        const wallet = (params.client as { wallet?: Wallet }).wallet;
+        if (wallet) {
+          const approvalsConfig = readApprovalsConfig();
+          const liveTradingEnabled = process.env.ARB_LIVE_TRADING === 'I_UNDERSTAND_THE_RISKS';
+          if (liveTradingEnabled && approvalsConfig.mode === 'true') {
+            const approvalKey = `${tradingAddress}:erc1155`;
+            const lastAttempt = approvalAttemptCooldown.get(approvalKey) ?? 0;
+            if (Date.now() - lastAttempt >= APPROVAL_RETRY_COOLDOWN_MS) {
+              approvalAttemptCooldown.set(approvalKey, Date.now());
+              await ensureApprovals({
+                wallet,
+                owner: tradingAddress,
+                relayer: (params.client as { relayerContext?: RelayerContext }).relayerContext,
+                logger: params.logger,
+                config: approvalsConfig,
+              });
+              const refreshedApproval = await fetchApprovedForAll({
+                client: params.client,
+                owner: tradingAddress,
+                logger: params.logger,
+              });
+              if (!refreshedApproval) {
+                return {
+                  ok: false,
+                  requiredUsd,
+                  balanceUsd,
+                  allowanceUsd,
+                  reason: 'INSUFFICIENT_ALLOWANCE_OR_APPROVAL',
+                };
+              }
+            }
+          }
+        }
+      }
+      return {
+        ok: false,
+        requiredUsd,
+        balanceUsd,
+        allowanceUsd,
+        reason: 'INSUFFICIENT_ALLOWANCE_OR_APPROVAL',
+      };
+    }
+
     return {
       ok: true,
       requiredUsd,
@@ -354,12 +439,41 @@ export const checkFundsAndAllowance = async (params: FundsAllowanceParams): Prom
     params.logger.warn(
       `[CLOB] Balance/allowance check failed (BALANCE_ALLOWANCE_UNAVAILABLE): required=${formatUsd(requiredUsd)} signer=${signerAddress} collateral=${collateralLabel} error=${message}`,
     );
-    return {
-      ok: true,
-      requiredUsd,
-      balanceUsd: 0,
-      allowanceUsd: 0,
-      reason: 'BALANCE_ALLOWANCE_UNAVAILABLE',
-    };
+    try {
+      const onchain = await buildOnchainSnapshot({
+        client: params.client,
+        owner: tradingAddress,
+        decimals: params.collateralTokenDecimals ?? DEFAULT_COLLATERAL_DECIMALS,
+        tokenAddress: params.collateralTokenAddress,
+        logger: params.logger,
+      });
+      const ok = onchain.balanceUsd >= requiredUsd && onchain.allowanceUsd >= requiredUsd && onchain.approvedForAll;
+      if (!ok) {
+        return {
+          ok: false,
+          requiredUsd,
+          balanceUsd: onchain.balanceUsd,
+          allowanceUsd: onchain.allowanceUsd,
+          reason: 'INSUFFICIENT_BALANCE_OR_ALLOWANCE',
+        };
+      }
+      return {
+        ok: true,
+        requiredUsd,
+        balanceUsd: onchain.balanceUsd,
+        allowanceUsd: onchain.allowanceUsd,
+        reason: 'BALANCE_ALLOWANCE_FALLBACK_ONCHAIN',
+      };
+    } catch (fallbackError) {
+      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      params.logger.warn(`[CLOB] Onchain fallback failed: ${fallbackMessage}`);
+      return {
+        ok: true,
+        requiredUsd,
+        balanceUsd: 0,
+        allowanceUsd: 0,
+        reason: 'BALANCE_ALLOWANCE_UNAVAILABLE',
+      };
+    }
   }
 };
