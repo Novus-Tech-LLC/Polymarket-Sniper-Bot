@@ -51,6 +51,14 @@ export type CreateClientInput = {
   logger?: Logger;
 };
 
+/**
+ * Type for error responses returned by clob-client (instead of thrown exceptions)
+ */
+type ClobErrorResponse = {
+  status?: number;
+  error?: string;
+};
+
 const SERVER_TIME_SKEW_THRESHOLD_SECONDS = 30;
 let polyAddressDiagLogged = false;
 let cachedDerivedCreds: ApiKeyCreds | null = null;
@@ -236,9 +244,26 @@ const verifyCredsWithClient = async (
       creds,
       SignatureType.EOA,
     );
-    await verifyClient.getBalanceAllowance({
+    const response = await verifyClient.getBalanceAllowance({
       asset_type: AssetType.COLLATERAL,
     });
+    // The clob-client returns error objects instead of throwing on HTTP errors
+    // Check if response indicates an error
+    const errorResponse = response as ClobErrorResponse;
+    if (errorResponse.status === 401 || errorResponse.status === 403) {
+      logger?.warn(
+        `[CLOB] Credential verification failed: ${errorResponse.status} ${errorResponse.error ?? "Unauthorized/Invalid api key"}`,
+      );
+      return false;
+    }
+    if (errorResponse.error) {
+      // Some other error returned from server
+      logger?.warn(
+        `[CLOB] Credential verification returned error: ${errorResponse.error}`,
+      );
+      // Treat non-auth errors as transient, re-throw to trigger fallback
+      throw new Error(errorResponse.error);
+    }
     return true;
   } catch (error) {
     const status = (error as { response?: { status?: number } })?.response
@@ -378,7 +403,43 @@ const deriveApiCreds = async (
       return undefined;
     }
 
-    // Valid credentials received, save and return
+    // Verify derived credentials work before caching them
+    logger?.info("[CLOB] Verifying newly derived credentials...");
+    try {
+      const isValid = await verifyCredsWithClient(derived, wallet, logger);
+      if (!isValid) {
+        logger?.error(
+          "[CLOB] Derived credentials failed verification (401/403); NOT caching.",
+        );
+        logger?.error(
+          "[CLOB] The server returned credentials that do not work. This may indicate:",
+        );
+        logger?.error(
+          "[CLOB]   - The wallet has never traded on Polymarket (try making a small trade on the website first)",
+        );
+        logger?.error(
+          "[CLOB]   - The API credentials on the server are corrupted or expired",
+        );
+        logger?.error(
+          "[CLOB]   - Visit https://polymarket.com to connect this wallet and enable trading",
+        );
+        logger?.error(
+          "[CLOB]   - Or visit https://polymarket.com/settings/api to manage API keys manually",
+        );
+        // Do not cache or use these credentials - they don't work
+        return undefined;
+      }
+      logger?.info("[CLOB] Derived credentials verified successfully.");
+    } catch (verifyError) {
+      // Verification encountered a transient error (network, etc.)
+      // In this case, we'll optimistically cache the credentials and let
+      // the preflight check handle verification later
+      logger?.warn(
+        `[CLOB] Credential verification encountered transient error; caching anyway. ${sanitizeErrorMessage(verifyError)}`,
+      );
+    }
+
+    // Valid credentials received and verified, save and return
     cachedDerivedCreds = derived;
     saveCachedCreds({ creds: derived, signerAddress, logger });
     logger?.info("[CLOB] Successfully created/derived API credentials.");

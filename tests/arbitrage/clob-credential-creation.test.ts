@@ -193,3 +193,54 @@ test("verifyCredsWithClient function exists and validates with balance-allowance
     "Verification should log failures",
   );
 });
+
+test("Newly derived credentials are verified before caching", () => {
+  // Verify that newly derived credentials are verified before being cached
+  const factoryCode = fs.readFileSync(
+    "./src/infrastructure/clob-client.factory.ts",
+    "utf-8",
+  );
+
+  assert.ok(
+    factoryCode.includes("Verifying newly derived credentials"),
+    "Factory should verify newly derived credentials",
+  );
+  assert.ok(
+    factoryCode.includes("Derived credentials failed verification (401/403)"),
+    "Factory should detect when derived credentials fail verification",
+  );
+  assert.ok(
+    factoryCode.includes("Derived credentials verified successfully"),
+    "Factory should log when derived credentials are verified",
+  );
+  assert.ok(
+    factoryCode.includes(
+      "The wallet has never traded on Polymarket",
+    ),
+    "Factory should suggest making a trade on Polymarket website",
+  );
+});
+
+test("verifyCredsWithClient handles clob-client error objects (not thrown exceptions)", () => {
+  // The clob-client returns error objects instead of throwing exceptions
+  // Verify our code handles this case
+  const factoryCode = fs.readFileSync(
+    "./src/infrastructure/clob-client.factory.ts",
+    "utf-8",
+  );
+
+  // Check that we have a type for error responses
+  assert.ok(
+    factoryCode.includes("type ClobErrorResponse = {"),
+    "Factory should define ClobErrorResponse type",
+  );
+  // Check that we examine response status from returned error objects
+  assert.ok(
+    factoryCode.includes("const errorResponse = response as ClobErrorResponse"),
+    "Verification should cast response to ClobErrorResponse",
+  );
+  assert.ok(
+    factoryCode.includes("if (errorResponse.status === 401 || errorResponse.status === 403)"),
+    "Verification should detect 401/403 from response objects",
+  );
+});
