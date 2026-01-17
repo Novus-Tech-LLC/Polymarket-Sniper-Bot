@@ -474,12 +474,13 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
     };
   }
   const providedCreds = creds;
-  const deriveEnabled = Boolean(input.deriveApiKey);
-  if (deriveEnabled && creds) {
+  // Use provided credentials as primary auth mode if available
+  // Only derive if user credentials are missing
+  const deriveEnabled = Boolean(input.deriveApiKey) && !creds;
+  if (input.deriveApiKey && creds) {
     input.logger?.info(
-      "[CLOB] Derived creds enabled; ignoring provided API keys.",
+      "[CLOB] User-provided API credentials detected; using them instead of derive mode.",
     );
-    creds = undefined;
   }
 
   if (input.logger && !polyAddressDiagLogged) {
