@@ -23,6 +23,7 @@ import {
   resolveEffectivePolyAddress,
 } from '../clob/addressing';
 import { buildSignedPath } from '../utils/query-string.util';
+import { loadCachedCreds, saveCachedCreds } from '../utils/credential-storage.util';
 
 export type CreateClientInput = {
   rpcUrl: string;
@@ -165,8 +166,19 @@ const canDetectCreateApiKeyFailure = (error: unknown): boolean => {
 };
 
 const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCreds | undefined> => {
+  const signerAddress = await wallet.getAddress();
+  
+  // Try to load from disk cache first
   if (cachedDerivedCreds) {
+    logger?.info('[CLOB] Using in-memory cached derived credentials.');
     return cachedDerivedCreds;
+  }
+  
+  const diskCached = loadCachedCreds({ signerAddress, logger });
+  if (diskCached) {
+    cachedDerivedCreds = diskCached;
+    logger?.info('[CLOB] Using disk-cached derived credentials.');
+    return diskCached;
   }
   
   const deriveClient = new ClobClient(
@@ -190,6 +202,7 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
       const derived = await deriveFn.deriveApiKey();
       if (derived?.key && derived?.secret && derived?.passphrase) {
         cachedDerivedCreds = derived;
+        saveCachedCreds({ creds: derived, signerAddress, logger });
       }
       return cachedDerivedCreds ?? derived;
     } catch (err) {
@@ -216,22 +229,35 @@ const deriveApiCreds = async (wallet: Wallet, logger?: Logger): Promise<ApiKeyCr
   }
 
   try {
+    logger?.info('[CLOB] Attempting to create/derive API credentials from server...');
     const derived = deriveFn.create_or_derive_api_creds
       ? await deriveFn.create_or_derive_api_creds()
       : await deriveFn.createOrDeriveApiKey?.();
     if (derived?.key && derived?.secret && derived?.passphrase) {
       cachedDerivedCreds = derived;
+      saveCachedCreds({ creds: derived, signerAddress, logger });
+      logger?.info('[CLOB] Successfully created/derived API credentials.');
     }
     return cachedDerivedCreds ?? derived;
   } catch (error) {
+    // Log detailed error information
+    const errorDetails = extractDeriveErrorMessage(error);
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    logger?.error(
+      `[CLOB] API key creation failed: status=${status ?? 'unknown'} error=${errorDetails}`,
+    );
+    
     if (canDetectCreateApiKeyFailure(error)) {
       createApiKeyBlocked = true;
       const retrySeconds = parseInt(readEnvValue('AUTH_DERIVE_RETRY_SECONDS') || '600', 10); // Default 10 minutes
       createApiKeyBlockedUntil = Date.now() + retrySeconds * 1000;
-      logger?.warn(`[CLOB] Failed to create API key (400 error); falling back to local derive. Will retry in ${retrySeconds}s. Error: ${extractDeriveErrorMessage(error)}`);
+      logger?.warn(`[CLOB] Failed to create API key (400 error); falling back to local derive. Will retry in ${retrySeconds}s.`);
       return attemptLocalDerive();
     }
-    throw error;
+    
+    // For other errors, try local derive as fallback
+    logger?.warn('[CLOB] API key creation failed with unexpected error; trying local derive fallback.');
+    return attemptLocalDerive();
   }
 };
 
@@ -272,13 +298,6 @@ export async function createPolymarketClient(
     logger: input.logger,
   });
 
-  if (input.logger && !polyAddressDiagLogged) {
-    input.logger.info(
-      `[CLOB][Diag] derivedSignerAddress=${derivedSignerAddress} funderAddress=${funderAddress ?? 'none'} signatureType=${signatureType ?? 'n/a'} effectivePolyAddress=${effectiveAddressResult.effectivePolyAddress}`,
-    );
-    polyAddressDiagLogged = true;
-  }
-
   const signer = buildEffectiveSigner(wallet, effectiveAddressResult.effectivePolyAddress);
 
   let creds: ApiKeyCreds | undefined;
@@ -294,6 +313,24 @@ export async function createPolymarketClient(
   if (deriveEnabled && creds) {
     input.logger?.info('[CLOB] Derived creds enabled; ignoring provided API keys.');
     creds = undefined;
+  }
+
+  if (input.logger && !polyAddressDiagLogged) {
+    // Determine auth mode for logging
+    let authMode = 'NONE';
+    if (providedCreds && !deriveEnabled) {
+      authMode = 'MODE_A_EXPLICIT';
+    } else if (deriveEnabled) {
+      authMode = 'MODE_B_DERIVED';
+    }
+    if (signatureType === SignatureType.POLY_PROXY || signatureType === SignatureType.POLY_GNOSIS_SAFE) {
+      authMode += '_MODE_C_PROXY';
+    }
+    
+    input.logger.info(
+      `[CLOB][Auth] mode=${authMode} signatureType=${signatureType ?? 'default(0)'} signerAddress=${derivedSignerAddress} funderAddress=${funderAddress ?? 'none'} effectivePolyAddress=${effectiveAddressResult.effectivePolyAddress}`,
+    );
+    polyAddressDiagLogged = true;
   }
 
   const client = new ClobClient(
