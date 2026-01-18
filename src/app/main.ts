@@ -14,6 +14,7 @@ import {
   isApiKeyCreds,
 } from "../utils/clob-credentials.util";
 import { ensureTradingReady } from "../polymarket/preflight";
+import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
@@ -86,6 +87,10 @@ async function main(): Promise<void> {
   });
   env.detectOnly = tradingReady.detectOnly;
 
+  // Check if ARB_LIVE_TRADING is set
+  const liveTradingEnabled =
+    process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+
   // Log balances at startup
   try {
     const polBalance = await getPolBalance(client.wallet);
@@ -112,14 +117,24 @@ async function main(): Promise<void> {
     );
     logger.warn("The bot will monitor trades but will NOT submit orders.");
     logger.warn("");
-    logger.warn("Common causes:");
-    logger.warn(
-      "  1. Invalid API credentials (POLYMARKET_API_KEY/SECRET/PASSPHRASE)",
-    );
-    logger.warn("  2. Wallet has never traded on Polymarket website");
-    logger.warn("  3. ARB_LIVE_TRADING not set to 'I_UNDERSTAND_THE_RISKS'");
-    logger.warn("");
-    logger.warn("To fix:");
+    
+    // Get context-aware warnings based on actual failure reasons
+    const warnings = getContextAwareWarnings({
+      liveTradingEnabled,
+      authOk: tradingReady.authOk,
+      approvalsOk: tradingReady.approvalsOk,
+      geoblockPassed: tradingReady.geoblockPassed,
+    });
+    
+    if (warnings.length > 0) {
+      logger.warn("Active blockers:");
+      warnings.forEach((warning, idx) => {
+        logger.warn(`  ${idx + 1}. ${warning}`);
+      });
+      logger.warn("");
+    }
+    
+    logger.warn("General troubleshooting:");
     logger.warn("  - Visit https://polymarket.com and connect your wallet");
     logger.warn("  - Make at least one small trade on the website");
     logger.warn("  - Then restart this bot to generate valid API credentials");

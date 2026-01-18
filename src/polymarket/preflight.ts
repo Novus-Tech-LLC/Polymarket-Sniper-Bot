@@ -17,6 +17,10 @@ import {
 import { resolvePolymarketContracts } from "./contracts";
 import { ensureApprovals, readApprovalsConfig } from "./approvals";
 import { createRelayerContext, deployIfNeeded } from "./relayer";
+import {
+  diagnoseAuthFailure,
+  logAuthDiagnostic,
+} from "../utils/auth-diagnostic.util";
 
 export { readApprovalsConfig };
 
@@ -30,6 +34,16 @@ export type TradingReadyParams = {
   clobCredsComplete: boolean;
   clobDeriveEnabled: boolean;
   collateralTokenDecimals: number;
+};
+
+type AuthFailureContext = {
+  userProvidedKeys: boolean;
+  deriveEnabled: boolean;
+  deriveFailed: boolean;
+  deriveError?: string;
+  verificationFailed: boolean;
+  verificationError?: string;
+  status?: number;
 };
 
 const readEnv = (key: string): string | undefined =>
@@ -48,7 +62,12 @@ const formatUnits = (value: BigNumberish, decimals: number): string =>
 
 export const ensureTradingReady = async (
   params: TradingReadyParams,
-): Promise<{ detectOnly: boolean }> => {
+): Promise<{
+  detectOnly: boolean;
+  authOk: boolean;
+  approvalsOk: boolean;
+  geoblockPassed: boolean;
+}> => {
   const derivedSignerAddress = deriveSignerAddress(params.privateKey);
   if (
     params.configuredPublicKey &&
@@ -67,6 +86,7 @@ export const ensureTradingReady = async (
 
   let detectOnly = params.detectOnly;
   const liveTradingEnabled = isLiveTradingEnabled();
+  let geoblockPassed = true;
 
   // Check geographic eligibility per Polymarket API requirements
   // @see https://docs.polymarket.com/developers/CLOB/geoblock
@@ -83,6 +103,7 @@ export const ensureTradingReady = async (
         "[Preflight] Set SKIP_GEOBLOCK_CHECK=true to bypass (not recommended).",
       );
       detectOnly = true;
+      geoblockPassed = false;
     }
   } else {
     params.logger.warn(
@@ -114,6 +135,22 @@ export const ensureTradingReady = async (
   }
 
   let authOk = false;
+  
+  // Extract derive failure info from client if available
+  const clientWithDeriveInfo = params.client as ClobClient & {
+    deriveFailed?: boolean;
+    deriveError?: string;
+    providedCreds?: ApiKeyCreds;
+  };
+  
+  let authFailureContext: AuthFailureContext = {
+    userProvidedKeys: Boolean(clientWithDeriveInfo.providedCreds),
+    deriveEnabled: params.clobDeriveEnabled,
+    deriveFailed: clientWithDeriveInfo.deriveFailed ?? false,
+    deriveError: clientWithDeriveInfo.deriveError,
+    verificationFailed: false,
+  };
+
   if (params.clobCredsComplete || params.clobDeriveEnabled) {
     try {
       const matrixEnabled =
@@ -129,6 +166,7 @@ export const ensureTradingReady = async (
         if (matrix && !matrix.ok) {
           detectOnly = true;
           authOk = false;
+          authFailureContext.verificationFailed = true;
         } else if (matrix && matrix.ok) {
           authOk = true;
         }
@@ -150,6 +188,9 @@ export const ensureTradingReady = async (
         ) {
           detectOnly = true;
           authOk = false;
+          authFailureContext.verificationFailed = true;
+          authFailureContext.status = preflight.status;
+          authFailureContext.verificationError = "Unauthorized/Invalid api key";
           params.logger.warn(
             "[CLOB] Auth preflight failed; switching to detect-only.",
           );
@@ -158,6 +199,8 @@ export const ensureTradingReady = async (
           );
         } else if (preflight && !preflight.ok) {
           authOk = false;
+          authFailureContext.verificationFailed = true;
+          authFailureContext.status = preflight.status;
           params.logger.warn(
             "[CLOB] Auth preflight failed; continuing with order submissions.",
           );
@@ -167,6 +210,8 @@ export const ensureTradingReady = async (
       }
     } catch (err) {
       const maybeError = err as { code?: string; message?: string };
+      authFailureContext.verificationError = maybeError?.message;
+      
       if (maybeError?.code === "ECONNRESET") {
         params.logger.warn(
           `[CLOB] Auth preflight transient failure; continuing. ${sanitizeErrorMessage(err)}`,
@@ -174,6 +219,7 @@ export const ensureTradingReady = async (
       } else if (isAuthError(err)) {
         detectOnly = true;
         authOk = false;
+        authFailureContext.verificationFailed = true;
         params.logger.warn(
           `[CLOB] Auth preflight failed; switching to detect-only. ${sanitizeErrorMessage(err)}`,
         );
@@ -228,7 +274,7 @@ export const ensureTradingReady = async (
         relayerContext?: ReturnType<typeof createRelayerContext>;
       }
     ).relayerContext = relayer;
-    return { detectOnly: true };
+    return { detectOnly: true, authOk, approvalsOk: false, geoblockPassed };
   }
 
   let approvalResult;
@@ -280,6 +326,22 @@ export const ensureTradingReady = async (
 
   const readyToTrade = !detectOnly && approvalsOk && authOk;
 
+  // Run comprehensive auth diagnostics if auth failed
+  if (!authOk && authFailureContext.verificationFailed) {
+    const diagnostic = diagnoseAuthFailure({
+      userProvidedKeys: authFailureContext.userProvidedKeys,
+      deriveEnabled: authFailureContext.deriveEnabled,
+      deriveFailed: authFailureContext.deriveFailed,
+      deriveError: authFailureContext.deriveError,
+      verificationFailed: authFailureContext.verificationFailed,
+      verificationError: authFailureContext.verificationError,
+      status: authFailureContext.status,
+      walletAddress: derivedSignerAddress,
+      logger: params.logger,
+    });
+    logAuthDiagnostic(diagnostic, params.logger);
+  }
+
   params.logger.info(
     `[Preflight] READY_TO_TRADE=${readyToTrade} reason=${detectOnly ? "CHECKS_FAILED" : "OK"}`,
   );
@@ -300,7 +362,7 @@ export const ensureTradingReady = async (
     }
   ).relayerContext = relayer;
 
-  return { detectOnly };
+  return { detectOnly, authOk, approvalsOk, geoblockPassed };
 };
 
 const logPreflightSummary = (params: {

@@ -531,6 +531,8 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
     executionDisabled: boolean;
     providedCreds?: ApiKeyCreds;
     derivedCreds?: ApiKeyCreds;
+    deriveFailed?: boolean;
+    deriveError?: string;
   }
 > {
   const provider = new providers.JsonRpcProvider(input.rpcUrl);
@@ -663,6 +665,8 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
   await maybeEnableServerTime(client, input.logger);
 
   let derivedCreds: ApiKeyCreds | undefined;
+  let deriveFailed = false;
+  let deriveError: string | undefined;
   if (deriveEnabled) {
     try {
       const derived = await deriveApiCreds(wallet, input.logger);
@@ -673,10 +677,15 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
         input.logger?.info(
           `[CLOB] derived creds derivedKeyDigest=${apiKeyDigest} derivedKeySuffix=${keyIdSuffix}`,
         );
+      } else {
+        deriveFailed = true;
+        deriveError = "Derived credentials incomplete or missing";
       }
     } catch (err) {
+      deriveFailed = true;
+      deriveError = sanitizeErrorMessage(err);
       input.logger?.warn(
-        `[CLOB] Failed to derive API creds: ${sanitizeErrorMessage(err)}`,
+        `[CLOB] Failed to derive API creds: ${deriveError}`,
       );
     }
   }
@@ -733,5 +742,7 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
     executionDisabled: mismatchResult.executionDisabled,
     providedCreds,
     derivedCreds,
+    deriveFailed,
+    deriveError,
   });
 }
