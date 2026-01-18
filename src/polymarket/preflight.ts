@@ -339,7 +339,7 @@ export const ensureTradingReady = async (
       walletAddress: derivedSignerAddress,
       logger: params.logger,
     });
-    logAuthDiagnostic(diagnostic, params.logger);
+    logAuthDiagnostic(diagnostic, params.logger, derivedSignerAddress);
   }
 
   params.logger.info(

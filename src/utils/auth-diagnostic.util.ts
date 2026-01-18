@@ -54,6 +54,7 @@ export function diagnoseAuthFailure(params: {
     verificationFailed,
     verificationError,
     status,
+    walletAddress,
   } = params;
 
   // Case 1: User provided keys but they fail verification with 401
@@ -64,16 +65,25 @@ export function diagnoseAuthFailure(params: {
       errorLower.includes("invalid api key") ||
       errorLower.includes("unauthorized")
     ) {
+      // 401 "Invalid api key" can mean several things:
+      // 1. Using Builder keys as CLOB keys (common mistake)
+      // 2. Keys bound to different wallet than PRIVATE_KEY
+      // 3. Keys are expired/revoked
+      // 4. Keys are from wrong environment (test vs prod)
+      // 
+      // We can't determine which with certainty, so provide comprehensive guidance
       return {
         cause: "WRONG_KEY_TYPE",
-        confidence: "high",
+        confidence: "medium",
         message:
-          "User-provided API credentials are invalid. Most common cause: using Builder API keys instead of CLOB API keys.",
+          "User-provided API credentials are being rejected by Polymarket API (401 Unauthorized). This typically means one of: (1) using Builder API keys instead of CLOB API keys, (2) keys bound to a different wallet, (3) keys are expired/revoked, or (4) using test keys on production.",
         recommendations: [
-          "Verify you are NOT using POLY_BUILDER_API_KEY credentials as POLYMARKET_API_KEY",
-          "Builder keys (from https://docs.polymarket.com/developers/builders/builder-profile) are for gasless transactions ONLY",
-          "CLOB keys must be obtained from https://polymarket.com/settings/api or derived automatically",
-          "Try setting CLOB_DERIVE_CREDS=true and removing POLYMARKET_API_KEY/SECRET/PASSPHRASE",
+          "First, verify you're using CLOB API keys from https://polymarket.com/settings/api (NOT Builder keys from the Developer profile)",
+          "Verify the API keys were generated for THIS wallet address (check the wallet address matches PRIVATE_KEY)",
+          "Check that keys are not expired - try regenerating new keys at https://polymarket.com/settings/api",
+          "Ensure you're not using test/sandbox keys on production environment",
+          "Try setting CLOB_DERIVE_CREDS=true and removing POLYMARKET_API_KEY/SECRET/PASSPHRASE to use auto-derived credentials",
+          "For detailed debugging, enable CLOB_PREFLIGHT_MATRIX=true to test all auth combinations",
         ],
       };
     }
@@ -134,13 +144,14 @@ export function diagnoseAuthFailure(params: {
       cause: "DERIVE_FAILED",
       confidence: "high",
       message:
-        "API credentials were derived but failed verification. This may indicate server-side issues or wallet configuration problems.",
+        "API credentials were derived but failed verification. This usually indicates: (1) the wallet has never traded on Polymarket, or (2) there's a mismatch between the derived credentials and the wallet.",
       recommendations: [
-        "Check if your wallet has the correct permissions on Polymarket",
-        "Verify the wallet address matches your private key",
-        "Try clearing the credential cache: rm -f /data/clob-creds.json",
+        "If this is a NEW wallet: Visit https://polymarket.com, connect this wallet, and make at least ONE trade",
+        "The wallet must have trading history before the API can create/derive credentials",
+        "After making a trade, clear the credential cache: rm -f /data/clob-creds.json",
         "Restart the bot to attempt credential derivation again",
-        "If the issue persists, generate keys manually at https://polymarket.com/settings/api",
+        "Alternative: Generate keys manually at https://polymarket.com/settings/api and use POLYMARKET_API_KEY/SECRET/PASSPHRASE",
+        "Verify the wallet address matches your PRIVATE_KEY (check logs for signer address)",
       ],
     };
   }
@@ -167,10 +178,12 @@ export function diagnoseAuthFailure(params: {
     confidence: "low",
     message: "Authentication failed but the specific cause could not be determined.",
     recommendations: [
-      "Enable detailed diagnostics: CLOB_PREFLIGHT_MATRIX=true",
-      "Check logs for specific error messages",
-      "Verify all required environment variables are set correctly",
+      "Enable detailed diagnostics: set CLOB_PREFLIGHT_MATRIX=true in your .env file and restart",
+      "The matrix mode will test all auth combinations and show exactly which configuration works",
+      "Check logs for specific error messages and status codes",
+      "Verify all required environment variables are set correctly (.env file)",
       "Try the quickstart guide: https://github.com/telix5000/Polymarket-Sniper-Bot#quickstart",
+      "If using manual API keys, try switching to auto-derive: CLOB_DERIVE_CREDS=true",
     ],
   };
 }
@@ -181,11 +194,15 @@ export function diagnoseAuthFailure(params: {
 export function logAuthDiagnostic(
   diagnostic: AuthDiagnosticResult,
   logger: Logger,
+  walletAddress?: string,
 ): void {
   logger.error("=================================================================");
   logger.error("🔍 AUTHENTICATION FAILURE DIAGNOSTIC");
   logger.error("=================================================================");
   logger.error(`Cause: ${diagnostic.cause} (confidence: ${diagnostic.confidence})`);
+  if (walletAddress) {
+    logger.error(`Wallet Address: ${walletAddress}`);
+  }
   logger.error("");
   logger.error(diagnostic.message);
   logger.error("");
