@@ -70,19 +70,20 @@ export function diagnoseAuthFailure(params: {
       // 2. Keys bound to different wallet than PRIVATE_KEY
       // 3. Keys are expired/revoked
       // 4. Keys are from wrong environment (test vs prod)
+      // 5. Wrong signature type (EOA vs Gnosis Safe)
       // 
-      // We can't determine which with certainty, so provide comprehensive guidance
+      // The most common issue is using Builder API keys as CLOB keys
       return {
         cause: "WRONG_KEY_TYPE",
-        confidence: "medium",
+        confidence: "high",
         message:
-          "User-provided API credentials are being rejected by Polymarket API (401 Unauthorized). This typically means one of: (1) using Builder API keys instead of CLOB API keys, (2) keys bound to a different wallet, (3) keys are expired/revoked, or (4) using test keys on production.",
+          "User-provided API credentials are being rejected by Polymarket API (401 Unauthorized). The most common cause is using Builder API keys instead of CLOB API keys. Other possibilities: keys bound to a different wallet, wrong signature type (CLOB_SIGNATURE_TYPE), keys expired/revoked, or using test keys on production.",
         recommendations: [
-          "First, verify you're using CLOB API keys from CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys) (NOT Builder keys from the Developer profile)",
+          "First, verify you're NOT using POLY_BUILDER_API_KEY credentials as POLYMARKET_API_KEY - Builder keys cannot authenticate trading requests",
+          "If you logged into Polymarket via browser, check if you need CLOB_SIGNATURE_TYPE=2 (Gnosis Safe) instead of 0 (EOA)",
           "Verify the API keys were generated for THIS wallet address (check the wallet address matches PRIVATE_KEY)",
-          "Check that keys are not expired - clear cache (rm /data/clob-creds.json) and restart to regenerate",
-          "Ensure you're not using test/sandbox keys on production environment",
           "Try setting CLOB_DERIVE_CREDS=true and removing POLYMARKET_API_KEY/SECRET/PASSPHRASE to use auto-derived credentials",
+          "Check that keys are not expired - clear cache (rm /data/clob-creds.json) and restart to regenerate",
           "For detailed debugging, enable CLOB_PREFLIGHT_MATRIX=true to test all auth combinations",
         ],
       };
