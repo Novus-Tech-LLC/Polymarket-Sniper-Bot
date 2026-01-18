@@ -11,7 +11,8 @@ import {
 } from "../../src/clob/identity-resolver";
 import { SignatureType } from "@polymarket/order-utils";
 
-// Test private key (not a real wallet)
+// Test private key (not a real wallet, for testing purposes only)
+// This key has no associated funds and is only used for unit testing
 const TEST_PRIVATE_KEY =
   "0x1234567890123456789012345678901234567890123456789012345678901234";
 // Note: TEST_SIGNER_ADDRESS would be derived from TEST_PRIVATE_KEY in actual usage

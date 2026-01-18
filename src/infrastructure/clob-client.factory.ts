@@ -630,13 +630,35 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
 
   if (deriveEnabled) {
     try {
-      // Read optional overrides from environment
-      const forceWalletMode = (
-        process.env.CLOB_FORCE_WALLET_MODE as "auto" | "eoa" | "safe" | "proxy" | undefined
-      );
-      const forceL1Auth = (
-        process.env.CLOB_FORCE_L1_AUTH as "auto" | "signer" | "effective" | undefined
-      );
+      // Read and validate optional overrides from environment
+      const forceWalletModeRaw = process.env.CLOB_FORCE_WALLET_MODE;
+      const forceL1AuthRaw = process.env.CLOB_FORCE_L1_AUTH;
+      
+      // Validate CLOB_FORCE_WALLET_MODE
+      let forceWalletMode: "auto" | "eoa" | "safe" | "proxy" | undefined;
+      if (forceWalletModeRaw) {
+        const validModes = ["auto", "eoa", "safe", "proxy"];
+        if (validModes.includes(forceWalletModeRaw)) {
+          forceWalletMode = forceWalletModeRaw as "auto" | "eoa" | "safe" | "proxy";
+        } else {
+          input.logger?.warn(
+            `[CLOB] Invalid CLOB_FORCE_WALLET_MODE="${forceWalletModeRaw}". Must be one of: ${validModes.join(", ")}. Ignoring.`,
+          );
+        }
+      }
+      
+      // Validate CLOB_FORCE_L1_AUTH
+      let forceL1Auth: "auto" | "signer" | "effective" | undefined;
+      if (forceL1AuthRaw) {
+        const validAuth = ["auto", "signer", "effective"];
+        if (validAuth.includes(forceL1AuthRaw)) {
+          forceL1Auth = forceL1AuthRaw as "auto" | "signer" | "effective";
+        } else {
+          input.logger?.warn(
+            `[CLOB] Invalid CLOB_FORCE_L1_AUTH="${forceL1AuthRaw}". Must be one of: ${validAuth.join(", ")}. Ignoring.`,
+          );
+        }
+      }
 
       derivationResult = await deriveCredentialsWithFallback({
         privateKey: input.privateKey,

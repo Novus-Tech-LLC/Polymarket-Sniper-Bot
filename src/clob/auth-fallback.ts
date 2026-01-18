@@ -95,7 +95,13 @@ export function isInvalidL1HeadersError(error: unknown): boolean {
   }
 
   const message = errObj?.message?.toLowerCase() ?? "";
-  const dataStr = JSON.stringify(errObj?.response?.data ?? "").toLowerCase();
+  
+  // Cache the stringified data for efficiency
+  const dataStr = errObj?.response?.data 
+    ? (typeof errObj.response.data === 'string' 
+        ? errObj.response.data.toLowerCase() 
+        : JSON.stringify(errObj.response.data).toLowerCase())
+    : "";
 
   return (
     message.includes("invalid l1 request headers") ||
@@ -118,7 +124,13 @@ export function isCouldNotCreateKeyError(error: unknown): boolean {
   }
 
   const message = errObj?.message?.toLowerCase() ?? "";
-  const dataStr = JSON.stringify(errObj?.response?.data ?? "").toLowerCase();
+  
+  // Cache the stringified data for efficiency
+  const dataStr = errObj?.response?.data 
+    ? (typeof errObj.response.data === 'string' 
+        ? errObj.response.data.toLowerCase() 
+        : JSON.stringify(errObj.response.data).toLowerCase())
+    : "";
 
   return (
     message.includes("could not create api key") ||
