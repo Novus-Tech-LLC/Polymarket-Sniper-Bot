@@ -20,6 +20,8 @@ type ClobErrorLog = ClobErrorPayload & {
   config?: {
     params?: { token_id?: string };
     headers?: Record<string, unknown>;
+    url?: string;
+    method?: string;
   };
 };
 
@@ -115,11 +117,19 @@ export const suppressClobOrderbookErrors = (logger?: Logger): void => {
               },
             };
             if (logger) {
-              logger.warn(
-                `[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`,
-              );
-              if (payload.status === 401 && !presence.secretHeaderPresent) {
-                logger.warn("[CLOB] secret missing from request");
+              // Don't warn about missing apiKey/passphrase for credential creation requests
+              // (POST /auth/api-key) - it's expected not to have these headers when creating them
+              const isCredentialCreationRequest =
+                payload.config?.url?.includes("/auth/api-key") &&
+                payload.config?.method?.toLowerCase() === "post";
+
+              if (!isCredentialCreationRequest) {
+                logger.warn(
+                  `[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`,
+                );
+                if (payload.status === 401 && !presence.secretHeaderPresent) {
+                  logger.warn("[CLOB] secret missing from request");
+                }
               }
             }
           }
