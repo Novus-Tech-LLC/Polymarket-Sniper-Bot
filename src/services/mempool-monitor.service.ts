@@ -100,6 +100,7 @@ export class MempoolMonitorService {
       return;
     }
 
+    // Check if RPC supports eth_newPendingTransactionFilter
     try {
       const filterId = await this.provider.send(
         "eth_newPendingTransactionFilter",
@@ -108,7 +109,16 @@ export class MempoolMonitorService {
       await this.provider.send("eth_uninstallFilter", [filterId]);
     } catch (err) {
       logger.warn(
-        `[Monitor] RPC does not support pending transaction filters; mempool subscription disabled. ${sanitizeErrorMessage(err)}`,
+        `[Monitor] RPC endpoint does not support eth_newPendingTransactionFilter method. ${sanitizeErrorMessage(err)}`,
+      );
+      logger.info(
+        "[Monitor] Mempool monitoring via pending transaction subscription is disabled.",
+      );
+      logger.info(
+        "[Monitor] To enable mempool monitoring, use an RPC provider that supports: eth_newPendingTransactionFilter, eth_subscribe (if websocket).",
+      );
+      logger.info(
+        "[Monitor] Fallback: Polling latest blocks will be used if enabled. Consider upgrading RPC provider for full mempool visibility.",
       );
       return;
     }

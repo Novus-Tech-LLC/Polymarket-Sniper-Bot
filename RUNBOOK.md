@@ -347,7 +347,25 @@ curl -v "https://clob.polymarket.com/auth/derive-api-key" \
 If you encounter issues:
 
 1. Check the [main README](../README.md) for general setup
-2. Review [AUTH_TROUBLESHOOTING.md](../docs/AUTH_TROUBLESHOOTING.md) for common issues
-3. Enable `DEBUG_HTTP_HEADERS=true` and check logs
-4. Verify patch applied: `npm install` shows "Applying patches..."
-5. Test with preflight: `npm run preflight`
+2. Review [CLOB_AUTH_DEBUGGING.md](../docs/CLOB_AUTH_DEBUGGING.md) for comprehensive authentication debugging
+3. Review [AUTH_TROUBLESHOOTING.md](../docs/AUTH_TROUBLESHOOTING.md) for common issues (if exists)
+4. Enable `DEBUG_HTTP_HEADERS=true` and `CLOB_DEBUG_CANON=true` and check logs
+5. Verify patch applied: `npm install` shows "Applying patches..."
+6. Test with preflight: `npm run preflight`
+
+### Debug Environment Variables
+
+For deep authentication debugging, use these environment variables:
+
+```bash
+# Enable detailed request canonicalization logs
+CLOB_DEBUG_CANON=true
+
+# Enable HTTP header logging (redacted)
+DEBUG_HTTP_HEADERS=true
+
+# Enable automatic credential derivation
+CLOB_DERIVE_CREDS=true
+```
+
+See [CLOB_AUTH_DEBUGGING.md](../docs/CLOB_AUTH_DEBUGGING.md) for detailed debugging workflow.
