@@ -190,9 +190,11 @@ CLOB_DERIVE_CREDS=true
 
 Polymarket uses **TWO DIFFERENT credential systems** - confusing them will cause authentication failures:
 
-#### 1. CLOB API Credentials (Required for Trading)
+#### 1. CLOB API Credentials (Required for ALL Trading)
 
-These credentials are used to place and manage orders on the Polymarket CLOB (Central Limit Order Book).
+These credentials are used to place and manage orders on the Polymarket CLOB (Central Limit Order Book). **YOU MUST HAVE THESE TO TRADE.**
+
+**Purpose:** Authenticate API requests to place orders, check balances, manage positions
 
 **Environment Variables:**
 - `POLYMARKET_API_KEY`
@@ -200,14 +202,19 @@ These credentials are used to place and manage orders on the Polymarket CLOB (Ce
 - `POLYMARKET_API_PASSPHRASE`
 
 **How to get them:**
-- **Recommended Method:** Set `CLOB_DERIVE_CREDS=true` to automatically derive credentials from your private key. This is the official Polymarket recommendation.
-- **Manual Method:** Use the Polymarket CLOB client to create credentials programmatically (see Polymarket docs).
+- **ONLY METHOD:** Set `CLOB_DERIVE_CREDS=true` to automatically derive credentials from your private key
+- This is the official Polymarket recommendation per their docs: https://docs.polymarket.com/developers/CLOB/authentication
+- **Note:** There is NO web UI to manually generate CLOB API keys - they must be created/derived programmatically using L1 authentication
 
-> ⚠️ **Common Mistake:** Using Builder API credentials as CLOB credentials. They are NOT interchangeable!
+> ⚠️ **CRITICAL:** Builder API credentials CANNOT be used as CLOB credentials. They authenticate completely different systems.
 
-#### 2. Builder API Credentials (Optional - For Gasless Transactions)
+#### 2. Builder API Credentials (Optional - For Order Attribution & Gasless Transactions)
 
-These credentials are for the Polymarket Builder/Relayer system to execute gasless transactions (like token approvals).
+These credentials are for the Polymarket Builder program and are **ONLY** needed if you're building an app that routes orders for OTHER users and want:
+- Order attribution on the Builder Leaderboard
+- Gasless approval transactions via the relayer
+
+**Purpose:** Track your builder volume, compete for grants, enable gasless approvals
 
 **Environment Variables:**
 - `POLY_BUILDER_API_KEY`
@@ -215,9 +222,16 @@ These credentials are for the Polymarket Builder/Relayer system to execute gasle
 - `POLY_BUILDER_API_PASSPHRASE`
 
 **When to use:**
-- Only needed if you want gasless approval transactions via the relayer
-- Not required for basic trading functionality
-- Can be obtained from the Polymarket Builder profile page
+- Building an application for other users (not for personal trading)
+- Want gasless approval transactions via the relayer (optional optimization)
+- Want to compete on the Builder Leaderboard
+- Can be obtained from: https://docs.polymarket.com/developers/builders/builder-profile
+
+**When NOT needed:**
+- Personal auto-trading (like this bot for your own wallet)
+- Basic trading functionality
+
+> 📖 **Per Polymarket Docs:** "If you're building an app that routes orders for your users, you can add builder credentials to get attribution on the Builder Leaderboard" - [Source](https://docs.polymarket.com/quickstart/first-order)
 
 #### Credential Setup Guide
 
@@ -252,23 +266,41 @@ POLY_BUILDER_API_PASSPHRASE=your_builder_api_passphrase
 
 #### Troubleshooting 401 "Unauthorized/Invalid api key" Errors
 
-If you see this error, check the following:
+If you see this error, follow these steps:
 
-1. **Are you using the right credential type?**
-   - Builder keys (`POLY_BUILDER_*`) cannot be used as CLOB keys (`POLYMARKET_API_*`)
-   - The 401 error from `/balance-allowance` means CLOB credentials are invalid
+1. **Understand which credentials you need:**
+   - **For personal auto-trading:** You need CLOB API credentials (NOT Builder keys)
+   - **Builder keys cannot authenticate trading requests** - they're only for leaderboard attribution
+   - The 401 error from `/balance-allowance` means your **CLOB credentials** are invalid or missing
 
-2. **Try derived credentials instead:**
+2. **If you're using Builder keys as CLOB keys:**
    ```env
+   # ❌ WRONG - This will NOT work:
+   POLYMARKET_API_KEY=<your_builder_api_key>
+   POLYMARKET_API_SECRET=<your_builder_secret>
+   POLYMARKET_API_PASSPHRASE=<your_builder_passphrase>
+   
+   # ✅ CORRECT - Use derived CLOB credentials:
    CLOB_DERIVE_CREDS=true
-   # Comment out or remove POLYMARKET_API_* variables
+   # Remove or comment out POLYMARKET_API_* variables
+   
+   # Builder keys are optional and separate:
+   POLY_BUILDER_API_KEY=<your_builder_api_key>
+   POLY_BUILDER_API_SECRET=<your_builder_secret>
+   POLY_BUILDER_API_PASSPHRASE=<your_builder_passphrase>
    ```
 
-3. **Verify your wallet has traded on Polymarket:**
+3. **Try derived credentials (recommended):**
+   ```env
+   CLOB_DERIVE_CREDS=true
+   # Comment out or remove any POLYMARKET_API_* variables
+   ```
+
+4. **Verify your wallet has traded on Polymarket:**
    - The CLOB may reject credentials if the wallet has never interacted with Polymarket
    - Try making a small trade via the Polymarket website first
 
-4. **Check the preflight summary:**
+5. **Check the preflight summary:**
    ```
    [Preflight][Summary] ... auth_ok=false ready_to_trade=false
    ```

@@ -3,11 +3,13 @@ export const formatClobAuthFailureHint = (deriveEnabled: boolean): string => {
     ? "Derived keys are enabled; ensure the wallet has traded on Polymarket at least once."
     : "If you want wallet-derived keys, set CLOB_DERIVE_CREDS=true (or CLOB_DERIVE_API_KEY=true) and remove manual API keys.";
   return [
-    "[CLOB] Auth hint: If this is a NEW WALLET that has never traded on Polymarket,",
-    "you MUST make at least one trade on https://polymarket.com before the API will create credentials.",
-    "Otherwise, verify POLYMARKET_API_KEY/SECRET/PASSPHRASE are CLOB API keys (not browser/session tokens),",
-    "match the production environment, and regenerate them if rotated.",
-    "IMPORTANT: Builder API keys (POLY_BUILDER_*) are NOT the same as CLOB API keys - they are for gasless relayer transactions only.",
+    "[CLOB] Auth hint: Several possible causes for 401 errors:",
+    "1) If this is a NEW WALLET that has never traded on Polymarket, you MUST make at least one trade on https://polymarket.com first.",
+    "2) If using manual API keys (POLYMARKET_API_*), verify they are CLOB API keys from CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)",
+    "3) Verify the API keys were created for THIS specific wallet address (check logs for wallet address).",
+    "4) Check that keys are not expired - try regenerating new keys.",
+    "5) Ensure you're not using Builder API keys (POLY_BUILDER_*) as CLOB keys - they are for gasless transactions only.",
+    "6) Try enabling CLOB_PREFLIGHT_MATRIX=true for detailed auth debugging.",
     deriveHint,
   ].join(" ");
 };

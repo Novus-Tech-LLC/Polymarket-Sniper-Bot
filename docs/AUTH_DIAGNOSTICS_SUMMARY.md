@@ -109,7 +109,7 @@ revoked, or bound to a different wallet.
 
 Recommended Actions:
   1. Check that POLYMARKET_API_KEY/SECRET/PASSPHRASE are current
-  2. Try regenerating keys at https://polymarket.com/settings/api
+  2. Try regenerating keys at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)
   3. Or switch to derived credentials: set CLOB_DERIVE_CREDS=true
 ```
 
@@ -128,7 +128,7 @@ server-side issues or wallet configuration problems.
 Recommended Actions:
   1. Try clearing the credential cache: rm -f /data/clob-creds.json
   2. Restart the bot to attempt credential derivation again
-  3. If issue persists, generate keys manually at https://polymarket.com/settings/api
+  3. If issue persists, generate keys manually at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)
 ```
 
 ### 5. WRONG_WALLET_BINDING (medium confidence)

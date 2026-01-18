@@ -424,7 +424,7 @@ const deriveApiCreds = async (
           "[CLOB]   - Visit https://polymarket.com to connect this wallet and enable trading",
         );
         logger?.error(
-          "[CLOB]   - Or visit https://polymarket.com/settings/api to manage API keys manually",
+          "[CLOB]   - Or visit CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys) to manage API keys manually",
         );
         // Do not cache or use these credentials - they don't work
         return undefined;
@@ -607,7 +607,7 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
           "[CLOB] Your POLYMARKET_API_KEY, POLYMARKET_API_SECRET, or POLYMARKET_API_PASSPHRASE may be incorrect or expired.",
         );
         input.logger?.warn(
-          "[CLOB] To regenerate credentials: visit https://polymarket.com/settings/api",
+          "[CLOB] To regenerate credentials: visit CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)",
         );
         if (input.deriveApiKey) {
           input.logger?.info(
