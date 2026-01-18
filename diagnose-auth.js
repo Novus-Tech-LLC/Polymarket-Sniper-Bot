@@ -99,11 +99,12 @@ async function checkPolymarketAPI() {
   header('3. Checking Polymarket API Connection');
   
   try {
-    const response = await fetch(`${POLYMARKET_API_URL}/time`);
-    if (response.ok) {
-      const data = await response.json();
+    // Use axios which is already a dependency
+    const axios = require('axios');
+    const response = await axios.get(`${POLYMARKET_API_URL}/time`);
+    if (response.status === 200) {
       log(`✅ Polymarket API is reachable`, 'green');
-      log(`   Server time: ${data.timestamp || 'unknown'}`, 'blue');
+      log(`   Server time: ${response.data.timestamp || 'unknown'}`, 'blue');
       return true;
     } else {
       log(`⚠️  Polymarket API returned status ${response.status}`, 'yellow');
@@ -150,7 +151,23 @@ async function testAuthenticationFlow(wallet) {
         if (creds && creds.key) {
           log(`✅ createApiKey returned credentials`, 'green');
         } else {
-          log(`❌ createApiKey failed`, 'red');
+          log(`❌ createApiKey failed to return valid credentials`, 'red');
+          log(`\n⚠️  POSSIBLE CAUSE: Wallet may not have traded on Polymarket yet`, 'yellow');
+          log(`   If this wallet is new to Polymarket:`, 'yellow');
+          log(`   1. Visit https://polymarket.com`, 'yellow');
+          log(`   2. Connect your wallet (${await wallet.getAddress()})`, 'yellow');
+          log(`   3. Make at least ONE small trade`, 'yellow');
+          log(`   4. Wait for transaction to confirm`, 'yellow');
+          log(`   5. Re-run this diagnostic`, 'yellow');
+          log(`\n   If wallet HAS traded, this could be a network/API issue. Try again in a few minutes.`, 'yellow');
+          return false;
+        }
+      } catch (createError) {
+        const isWalletIssue = createError.message?.includes('Could not create api key') ||
+                              createError.response?.status === 400;
+        
+        if (isWalletIssue) {
+          log(`❌ createApiKey failed: Wallet not eligible for API key creation`, 'red');
           log(`\n⚠️  WALLET HAS NEVER TRADED ON POLYMARKET`, 'yellow');
           log(`   Action required:`, 'yellow');
           log(`   1. Visit https://polymarket.com`, 'yellow');
@@ -158,10 +175,10 @@ async function testAuthenticationFlow(wallet) {
           log(`   3. Make at least ONE small trade`, 'yellow');
           log(`   4. Wait for transaction to confirm`, 'yellow');
           log(`   5. Re-run this diagnostic`, 'yellow');
-          return false;
+        } else {
+          log(`❌ createApiKey failed with error: ${createError.message}`, 'red');
+          log(`   This could be a network issue, rate limiting, or API problem.`, 'yellow');
         }
-      } catch (createError) {
-        log(`❌ createApiKey also failed: ${createError.message}`, 'red');
         return false;
       }
     }
@@ -190,14 +207,26 @@ async function testAuthenticationFlow(wallet) {
           asset_type: 'COLLATERAL'
         });
         
-        if (!result.error && result.status !== 401) {
-          log(`   ✅ ${name} works!`, 'green');
-          return true;
+        // Check if result has data (success) or is an error response
+        if (result && typeof result === 'object') {
+          // ClobClient returns error objects instead of throwing
+          if (result.error || result.status === 401 || result.status === 403) {
+            log(`   ❌ ${name} failed: ${result.error || 'Unauthorized'}`, 'red');
+          } else {
+            // Has data, no error field, not 401/403 status
+            log(`   ✅ ${name} works!`, 'green');
+            return true;
+          }
         } else {
-          log(`   ❌ ${name} failed: ${result.error || 'Unauthorized'}`, 'red');
+          log(`   ❌ ${name} failed: Invalid response`, 'red');
         }
       } catch (error) {
-        log(`   ❌ ${name} failed: ${error.message}`, 'red');
+        const status = error.response?.status;
+        if (status === 401 || status === 403) {
+          log(`   ❌ ${name} failed: ${status} Unauthorized`, 'red');
+        } else {
+          log(`   ❌ ${name} failed: ${error.message}`, 'red');
+        }
       }
     }
     
