@@ -17,6 +17,8 @@ type StoredCredentials = {
   signerAddress: string;
   signatureType?: number;
   funderAddress?: string;
+  /** Whether effective address was used for L1 auth (new in fallback system) */
+  usedEffectiveForL1?: boolean;
 };
 
 const ensureDataDir = (filePath: string): void => {
@@ -48,6 +50,7 @@ export const loadCachedCreds = (params: {
   signerAddress: string;
   signatureType?: number;
   funderAddress?: string;
+  usedEffectiveForL1?: boolean;
   logger?: Logger;
 }): ApiKeyCreds | null => {
   const filePath = resolveCredsPath();
@@ -113,8 +116,9 @@ export const loadCachedCreds = (params: {
     const ageHours = Math.floor(
       (Date.now() - stored.createdAt) / (1000 * 60 * 60),
     );
+    const l1AuthType = stored.usedEffectiveForL1 ? "effective" : "signer";
     params.logger?.info(
-      `[CredStorage] Loaded cached credentials from ${filePath} (age=${ageHours}h signer=${stored.signerAddress})`,
+      `[CredStorage] Loaded cached credentials from ${filePath} (age=${ageHours}h signer=${stored.signerAddress} sigType=${stored.signatureType ?? 0} l1Auth=${l1AuthType})`,
     );
 
     return {
@@ -138,6 +142,7 @@ export const saveCachedCreds = (params: {
   signerAddress: string;
   signatureType?: number;
   funderAddress?: string;
+  usedEffectiveForL1?: boolean;
   logger?: Logger;
 }): boolean => {
   const filePath = resolveCredsPath();
@@ -151,13 +156,15 @@ export const saveCachedCreds = (params: {
       signerAddress: params.signerAddress,
       signatureType: params.signatureType,
       funderAddress: params.funderAddress,
+      usedEffectiveForL1: params.usedEffectiveForL1,
     };
 
     ensureDataDir(filePath);
     fs.writeFileSync(filePath, JSON.stringify(stored, null, 2), "utf-8");
 
+    const l1AuthType = params.usedEffectiveForL1 ? "effective" : "signer";
     params.logger?.info(
-      `[CredStorage] Saved credentials to ${filePath} (signer=${params.signerAddress})`,
+      `[CredStorage] Saved credentials to ${filePath} (signer=${params.signerAddress} sigType=${params.signatureType ?? 0} l1Auth=${l1AuthType})`,
     );
     return true;
   } catch (error) {
