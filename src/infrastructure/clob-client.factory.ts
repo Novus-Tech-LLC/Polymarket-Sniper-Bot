@@ -62,9 +62,8 @@ type ClobErrorResponse = {
 const SERVER_TIME_SKEW_THRESHOLD_SECONDS = 30;
 let polyAddressDiagLogged = false;
 let cachedDerivedCreds: ApiKeyCreds | null = null;
-let createApiKeyBlocked = false;
-let createApiKeyBlockedUntil = 0; // Timestamp for retry backoff
-let deriveFallbackAttempted = false;
+let clockSkewLogged = false;
+let credDerivationAttempted = false;
 
 const readEnvValue = (key: string): string | undefined =>
   process.env[key] ?? process.env[key.toLowerCase()];
@@ -124,23 +123,35 @@ const maybeEnableServerTime = async (
     const serverTimePayload = await client.getServerTime();
     const serverSeconds = extractServerTimeSeconds(serverTimePayload);
     if (serverSeconds === undefined) {
-      logger?.warn("[CLOB] Unable to parse server time; using local clock.");
+      if (!clockSkewLogged) {
+        logger?.warn("[CLOB] Unable to parse server time; using local clock.");
+        clockSkewLogged = true;
+      }
       return;
     }
     const localSeconds = Math.floor(Date.now() / 1000);
     const skewSeconds = Math.abs(serverSeconds - localSeconds);
     if (skewSeconds >= SERVER_TIME_SKEW_THRESHOLD_SECONDS) {
       (client as ClobClient & { useServerTime?: boolean }).useServerTime = true;
-      logger?.warn(
-        `[CLOB] Clock skew ${skewSeconds}s detected; enabling server time for signatures.`,
-      );
+      if (!clockSkewLogged) {
+        logger?.warn(
+          `[CLOB] Clock skew ${skewSeconds}s detected; enabling server time for signatures.`,
+        );
+        clockSkewLogged = true;
+      }
       return;
     }
-    logger?.info(`[CLOB] Clock skew ${skewSeconds}s; using local clock.`);
+    if (!clockSkewLogged) {
+      logger?.info(`[CLOB] Clock skew ${skewSeconds}s; using local clock.`);
+      clockSkewLogged = true;
+    }
   } catch (err) {
-    logger?.warn(
-      `[CLOB] Failed to fetch server time; using local clock. ${sanitizeErrorMessage(err)}`,
-    );
+    if (!clockSkewLogged) {
+      logger?.warn(
+        `[CLOB] Failed to fetch server time; using local clock. ${sanitizeErrorMessage(err)}`,
+      );
+      clockSkewLogged = true;
+    }
   }
 };
 
@@ -288,11 +299,19 @@ const deriveApiCreds = async (
 ): Promise<ApiKeyCreds | undefined> => {
   const signerAddress = await wallet.getAddress();
 
-  // Try to load from disk cache first
+  // Return cached credentials if we already have them
   if (cachedDerivedCreds) {
-    logger?.info("[CLOB] Using in-memory cached derived credentials.");
+    if (!credDerivationAttempted) {
+      logger?.info("[CLOB] Using in-memory cached derived credentials.");
+    }
     return cachedDerivedCreds;
   }
+
+  // Skip if we've already tried and failed
+  if (credDerivationAttempted) {
+    return undefined;
+  }
+  credDerivationAttempted = true;
 
   const diskCached = loadCachedCreds({ signerAddress, logger });
   if (diskCached) {
@@ -338,98 +357,33 @@ const deriveApiCreds = async (
     create_or_derive_api_creds?: () => Promise<ApiKeyCreds>;
     createOrDeriveApiKey?: () => Promise<ApiKeyCreds>;
     deriveApiKey?: () => Promise<ApiKeyCreds>;
+    createApiKey?: () => Promise<ApiKeyCreds>;
   };
 
-  const attemptLocalDerive = async (): Promise<ApiKeyCreds | undefined> => {
-    if (deriveFallbackAttempted) return cachedDerivedCreds ?? undefined;
-    deriveFallbackAttempted = true;
-    if (!deriveFn.deriveApiKey) return undefined;
-    try {
-      const derived = await deriveFn.deriveApiKey();
-      if (derived?.key && derived?.secret && derived?.passphrase) {
-        cachedDerivedCreds = derived;
-        saveCachedCreds({ creds: derived, signerAddress, logger });
-      }
-      return cachedDerivedCreds ?? derived;
-    } catch (err) {
-      logger?.warn(`[CLOB] Local derive failed: ${sanitizeErrorMessage(err)}`);
-      return undefined;
-    }
-  };
-
-  // Check backoff timer
-  const now = Date.now();
-  if (createApiKeyBlocked && createApiKeyBlockedUntil > now) {
-    const remainingSeconds = Math.ceil((createApiKeyBlockedUntil - now) / 1000);
-    logger?.info(
-      `[CLOB] API key creation blocked; retry in ${remainingSeconds}s. Skipping local derive.`,
-    );
-    return undefined;
-  } else if (createApiKeyBlocked && createApiKeyBlockedUntil <= now) {
-    // Retry period expired, reset block
-    logger?.info(
-      "[CLOB] API key creation retry period expired; attempting again.",
-    );
-    createApiKeyBlocked = false;
-    createApiKeyBlockedUntil = 0;
-  }
-
-  // Defensive check: if blocked flag is set but timer expired, we should have reset above
-  if (createApiKeyBlocked) {
-    logger?.warn(
-      "[CLOB] Unexpected state: API key creation blocked without timer. Skipping derive.",
-    );
-    return undefined;
-  }
-
-  try {
-    logger?.info(
-      "[CLOB] Attempting to create/derive API credentials from server...",
-    );
-    const derived = deriveFn.create_or_derive_api_creds
-      ? await deriveFn.create_or_derive_api_creds()
-      : await deriveFn.createOrDeriveApiKey?.();
-
+  // Helper to verify and cache credentials
+  const verifyAndCacheCreds = async (
+    derived: ApiKeyCreds,
+    source: string,
+  ): Promise<ApiKeyCreds | undefined> => {
     // Validate response contains valid credentials before marking success
     if (!derived || !derived.key || !derived.secret || !derived.passphrase) {
       logger?.error(
-        "[CLOB] API key creation returned incomplete credentials (missing key/secret/passphrase)",
+        `[CLOB] ${source} returned incomplete credentials (missing key/secret/passphrase)`,
       );
-      logger?.error(
-        `[CLOB] Response: key=${Boolean(derived?.key)} secret=${Boolean(derived?.secret)} passphrase=${Boolean(derived?.passphrase)}`,
-      );
-      // Do NOT call attemptLocalDerive() - incomplete server response means credentials
-      // were not properly registered, so local derive would produce unregistered credentials
       return undefined;
     }
 
     // Verify derived credentials work before caching them
-    logger?.info("[CLOB] Verifying newly derived credentials...");
+    logger?.info(`[CLOB] Verifying credentials from ${source}...`);
     try {
       const isValid = await verifyCredsWithClient(derived, wallet, logger);
       if (!isValid) {
-        logger?.error(
-          "[CLOB] Derived credentials failed verification (401/403); NOT caching.",
+        logger?.warn(
+          `[CLOB] Credentials from ${source} failed verification (401/403).`,
         );
-        logger?.error(
-          "[CLOB] The server returned credentials that do not work. This may indicate:",
-        );
-        logger?.error(
-          "[CLOB]   - The wallet has never traded on Polymarket (try making a small trade on the website first)",
-        );
-        logger?.error(
-          "[CLOB]   - The API credentials on the server are corrupted or expired",
-        );
-        logger?.error(
-          "[CLOB]   - Visit https://polymarket.com to connect this wallet and enable trading",
-        );
-        logger?.error(
-          "[CLOB]   - Or visit CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys) to manage API keys manually",
-        );
-        // Do not cache or use these credentials - they don't work
         return undefined;
       }
-      logger?.info("[CLOB] Derived credentials verified successfully.");
+      logger?.info(`[CLOB] Credentials from ${source} verified successfully.`);
     } catch (verifyError) {
       // Verification encountered a transient error (network, etc.)
       // In this case, we'll optimistically cache the credentials and let
@@ -442,84 +396,124 @@ const deriveApiCreds = async (
     // Valid credentials received and verified, save and return
     cachedDerivedCreds = derived;
     saveCachedCreds({ creds: derived, signerAddress, logger });
-    logger?.info("[CLOB] Successfully created/derived API credentials.");
+    logger?.info(`[CLOB] Successfully obtained API credentials via ${source}.`);
     return cachedDerivedCreds;
-  } catch (error) {
-    // Log detailed error information
-    const errorDetails = extractDeriveErrorMessage(error);
-    const status = (error as { response?: { status?: number } })?.response
-      ?.status;
-    const responseData = (error as { response?: { data?: unknown } })?.response
-      ?.data;
+  };
 
-    // Log error with full details (excluding secrets)
-    logger?.error(
-      `[CLOB] API key creation failed: status=${status ?? "unknown"} error=${errorDetails}`,
-    );
-    if (responseData) {
-      logger?.error(`[CLOB] Response data: ${JSON.stringify(responseData)}`);
-    }
+  // Strategy: Try deriveApiKey first (for existing wallets), then createApiKey
+  // This is the opposite of what createOrDeriveApiKey does, but it's more reliable
+  // because deriveApiKey works for wallets that have already traded on Polymarket
+  // See: https://github.com/Polymarket/py-clob-client/issues/187
 
-    // Treat 400/401 as definite failures - don't save credentials
-    if (status === 400 || status === 401) {
-      logger?.error(
-        "[CLOB] API key creation failed with 400/401; credentials NOT saved.",
+  // Step 1: Try deriveApiKey first (works for wallets with existing API keys)
+  if (deriveFn.deriveApiKey) {
+    try {
+      logger?.info(
+        "[CLOB] Attempting to derive existing API credentials from server...",
       );
-      if (canDetectCreateApiKeyFailure(error)) {
-        createApiKeyBlocked = true;
-        const retrySeconds = parseInt(
-          readEnvValue("AUTH_DERIVE_RETRY_SECONDS") || "600",
-          10,
-        ); // Default 10 minutes
-        createApiKeyBlockedUntil = Date.now() + retrySeconds * 1000;
-        logger?.error(
-          "[CLOB] =====================================================================",
-        );
-        logger?.error(
-          "[CLOB] FIRST-TIME WALLET DETECTED: Server cannot create API credentials",
-        );
-        logger?.error(
-          "[CLOB] =====================================================================",
-        );
-        logger?.error(
-          "[CLOB] This error occurs when your wallet has never traded on Polymarket.",
-        );
-        logger?.error("[CLOB] ");
-        logger?.error("[CLOB] TO FIX THIS:");
-        logger?.error(
-          "[CLOB]   1. Visit https://polymarket.com and connect this wallet",
-        );
-        logger?.error("[CLOB]   2. Make a small test trade on any market");
-        logger?.error(
-          "[CLOB]   3. Wait a few minutes for the transaction to confirm",
-        );
-        logger?.error("[CLOB]   4. Restart this bot");
-        logger?.error("[CLOB] ");
-        logger?.error(
-          `[CLOB] The bot will automatically retry credential creation in ${retrySeconds}s.`,
-        );
-        logger?.error(
-          "[CLOB] Until then, the bot will operate in detect-only mode (no trades).",
-        );
-        logger?.error(
-          "[CLOB] =====================================================================",
-        );
-        // Local derivation would produce credentials not registered with the server,
-        // causing 401 errors. The server must register credentials first.
-        return undefined;
+      const derived = await deriveFn.deriveApiKey();
+      const result = await verifyAndCacheCreds(derived, "deriveApiKey");
+      if (result) {
+        return result;
       }
-      // For other 400/401 errors (e.g., auth issues with existing credentials),
-      // try local derive since credentials may already be registered on the server
-      // and just need to be re-derived locally to match
-      return attemptLocalDerive();
+      // If verification failed, continue to try createApiKey
+      logger?.info(
+        "[CLOB] deriveApiKey credentials didn't verify; trying createApiKey...",
+      );
+    } catch (deriveError) {
+      const deriveStatus = (
+        deriveError as { response?: { status?: number } }
+      )?.response?.status;
+      const deriveMsg = extractDeriveErrorMessage(deriveError);
+      logger?.info(
+        `[CLOB] deriveApiKey failed (status=${deriveStatus ?? "unknown"}): ${deriveMsg || "unknown error"}`,
+      );
+      // Continue to try createApiKey
     }
-
-    // For other errors, try local derive as fallback
-    logger?.warn(
-      "[CLOB] API key creation failed with unexpected error; trying local derive fallback.",
-    );
-    return attemptLocalDerive();
   }
+
+  // Step 2: Try createApiKey (for new wallets or if derive failed)
+  try {
+    logger?.info("[CLOB] Attempting to create new API credentials...");
+    if (deriveFn.createApiKey) {
+      const created = await deriveFn.createApiKey();
+      const result = await verifyAndCacheCreds(created, "createApiKey");
+      if (result) {
+        return result;
+      }
+    }
+  } catch (createError) {
+    const createStatus = (createError as { response?: { status?: number } })
+      ?.response?.status;
+    const createMsg = extractDeriveErrorMessage(createError);
+    logger?.info(
+      `[CLOB] createApiKey failed (status=${createStatus ?? "unknown"}): ${createMsg || "unknown error"}`,
+    );
+
+    // If createApiKey failed with "Could not create api key", the wallet may need
+    // to interact with Polymarket first
+    if (canDetectCreateApiKeyFailure(createError)) {
+      logger?.error(
+        "[CLOB] =====================================================================",
+      );
+      logger?.error(
+        "[CLOB] API KEY CREATION FAILED: Server cannot create credentials for this wallet",
+      );
+      logger?.error(
+        "[CLOB] =====================================================================",
+      );
+      logger?.error(
+        "[CLOB] Both deriveApiKey and createApiKey failed. Possible causes:",
+      );
+      logger?.error(
+        "[CLOB]   - The wallet has never interacted with Polymarket",
+      );
+      logger?.error(
+        "[CLOB]   - The wallet needs to enable trading on polymarket.com first",
+      );
+      logger?.error("[CLOB] ");
+      logger?.error("[CLOB] TO FIX THIS:");
+      logger?.error(
+        "[CLOB]   1. Visit https://polymarket.com and connect this wallet",
+      );
+      logger?.error(
+        "[CLOB]   2. Enable trading and make a small test trade on any market",
+      );
+      logger?.error(
+        "[CLOB]   3. Wait a few minutes for the transaction to confirm",
+      );
+      logger?.error("[CLOB]   4. Restart this bot");
+      logger?.error(
+        "[CLOB] =====================================================================",
+      );
+    }
+  }
+
+  // Step 3: As last resort, try the combined createOrDeriveApiKey
+  try {
+    logger?.info(
+      "[CLOB] Attempting createOrDeriveApiKey as final fallback...",
+    );
+    const combined = deriveFn.createOrDeriveApiKey
+      ? await deriveFn.createOrDeriveApiKey()
+      : undefined;
+    if (combined) {
+      const result = await verifyAndCacheCreds(combined, "createOrDeriveApiKey");
+      if (result) {
+        return result;
+      }
+    }
+  } catch (combinedError) {
+    const combinedMsg = extractDeriveErrorMessage(combinedError);
+    logger?.warn(
+      `[CLOB] createOrDeriveApiKey fallback failed: ${combinedMsg || "unknown error"}`,
+    );
+  }
+
+  logger?.error(
+    "[CLOB] All credential derivation methods failed. Bot will run in detect-only mode.",
+  );
+  return undefined;
 };
 
 export async function createPolymarketClient(input: CreateClientInput): Promise<

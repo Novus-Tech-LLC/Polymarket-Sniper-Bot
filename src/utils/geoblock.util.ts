@@ -2,6 +2,9 @@ import { POLYMARKET_API } from "../constants/polymarket.constants";
 import { httpGet } from "./fetch-data.util";
 import type { Logger } from "./logger.util";
 
+// Flag to prevent duplicate geoblock log messages
+let geoblockLogged = false;
+
 /**
  * Response from the Polymarket geoblock API
  * @see https://docs.polymarket.com/developers/CLOB/geoblock
@@ -44,28 +47,40 @@ export async function isGeoblocked(
     const response = await checkGeoblock();
 
     if (response.blocked) {
-      logger?.warn(
-        `[Geoblock] Trading restricted: country=${response.country} region=${response.region} ip=${response.ip}`,
-      );
+      if (!geoblockLogged) {
+        logger?.warn(
+          `[Geoblock] Trading restricted: country=${response.country} region=${response.region} ip=${response.ip}`,
+        );
+        geoblockLogged = true;
+      }
       return true;
     }
 
-    logger?.info(
-      `[Geoblock] Trading allowed: country=${response.country} region=${response.region}`,
-    );
+    if (!geoblockLogged) {
+      logger?.info(
+        `[Geoblock] Trading allowed: country=${response.country} region=${response.region}`,
+      );
+      geoblockLogged = true;
+    }
     return false;
   } catch (error) {
     // If we can't reach the geoblock API, fail closed by default for security
     const message = error instanceof Error ? error.message : String(error);
     if (failOpen) {
-      logger?.warn(
-        `[Geoblock] Unable to verify geographic eligibility (failOpen=true): ${message}`,
-      );
+      if (!geoblockLogged) {
+        logger?.warn(
+          `[Geoblock] Unable to verify geographic eligibility (failOpen=true): ${message}`,
+        );
+        geoblockLogged = true;
+      }
       return false;
     }
-    logger?.error(
-      `[Geoblock] Unable to verify geographic eligibility, blocking as precaution: ${message}`,
-    );
+    if (!geoblockLogged) {
+      logger?.error(
+        `[Geoblock] Unable to verify geographic eligibility, blocking as precaution: ${message}`,
+      );
+      geoblockLogged = true;
+    }
     return true;
   }
 }

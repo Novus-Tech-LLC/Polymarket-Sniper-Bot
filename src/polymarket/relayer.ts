@@ -39,6 +39,9 @@ const parseRelayerTxType = (
   return undefined;
 };
 
+// Flag to prevent duplicate "relayer disabled" messages
+let relayerDisabledLogged = false;
+
 export const createRelayerContext = (params: {
   privateKey: string;
   rpcUrl: string;
@@ -70,9 +73,13 @@ export const createRelayerContext = (params: {
 
   // Need either signer URL or builder credentials for relayer
   if (!signerUrl && !(builderApiKey && builderSecret && builderPassphrase)) {
-    params.logger?.info(
-      "[Relayer] Neither SIGNER_URL nor builder credentials provided; relayer disabled.",
-    );
+    // Only log this message once to avoid duplicate logs in mode=both
+    if (!relayerDisabledLogged) {
+      params.logger?.info(
+        "[Relayer] Neither SIGNER_URL nor builder credentials provided; relayer disabled.",
+      );
+      relayerDisabledLogged = true;
+    }
     return {
       enabled: false,
       signerAddress: account.address,

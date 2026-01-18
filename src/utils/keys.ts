@@ -3,6 +3,9 @@ import type { Logger } from "./logger.util";
 const readEnv = (key: string): string | undefined =>
   process.env[key] ?? process.env[key.toLowerCase()];
 
+// Flag to prevent duplicate "Private key validated" messages
+let privateKeyValidatedLogged = false;
+
 /**
  * Parse and normalize a private key from environment
  * Accepts either 64 hex chars or 0x + 64 hex chars
@@ -44,9 +47,13 @@ export const parsePrivateKey = (params?: {
   }
 
   const normalized = `0x${withoutPrefix}`;
-  params?.logger?.info(
-    `[Keys] Private key format validated successfully (32 bytes, hex)`,
-  );
+  // Only log the first time to avoid duplicate messages in mode=both
+  if (!privateKeyValidatedLogged) {
+    params?.logger?.info(
+      `[Keys] Private key format validated successfully (32 bytes, hex)`,
+    );
+    privateKeyValidatedLogged = true;
+  }
 
   return normalized;
 };

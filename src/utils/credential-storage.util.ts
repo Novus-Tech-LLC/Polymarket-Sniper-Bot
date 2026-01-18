@@ -6,6 +6,9 @@ import type { Logger } from "./logger.util";
 const CREDS_FILE_PATH = "/data/clob-creds.json";
 const CREDS_FILE_PATH_FALLBACK = "./data/clob-creds.json";
 
+// Flag to prevent duplicate "No cached credentials found" messages
+let noCachedCredsLogged = false;
+
 type StoredCredentials = {
   key: string;
   secret: string;
@@ -47,9 +50,13 @@ export const loadCachedCreds = (params: {
 
   try {
     if (!fs.existsSync(filePath)) {
-      params.logger?.info(
-        `[CredStorage] No cached credentials found at ${filePath}`,
-      );
+      // Only log this message once to avoid duplicate messages in mode=both
+      if (!noCachedCredsLogged) {
+        params.logger?.info(
+          `[CredStorage] No cached credentials found at ${filePath}`,
+        );
+        noCachedCredsLogged = true;
+      }
       return null;
     }
 
