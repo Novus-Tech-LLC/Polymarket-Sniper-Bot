@@ -69,7 +69,7 @@ function isClobErrorResponse(response: unknown): response is ClobErrorResponse {
   const obj = response as Record<string, unknown>;
   return (
     (typeof obj.status === "number" && obj.status >= 400) ||
-    typeof obj.error === "string"
+    (typeof obj.error === "string" && obj.error.length > 0)
   );
 }
 
