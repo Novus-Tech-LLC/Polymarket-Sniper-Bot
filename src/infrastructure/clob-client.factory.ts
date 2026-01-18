@@ -41,6 +41,7 @@ import {
 } from "../utils/l1-auth-headers.util";
 import { deriveCredentialsWithFallback } from "../clob/credential-derivation-v2";
 import { logAuthIdentity } from "../clob/identity-resolver";
+import { asClobSigner } from "../utils/clob-signer.util";
 
 export type CreateClientInput = {
   rpcUrl: string;
@@ -311,7 +312,7 @@ const verifyCredsWithClient = async (
     const verifyClient = new ClobClient(
       POLYMARKET_API.BASE_URL,
       Chain.POLYGON,
-      wallet,
+      asClobSigner(wallet),
       creds,
       signatureType,
     );
@@ -611,7 +612,7 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
   const tempClient = new ClobClient(
     POLYMARKET_API.BASE_URL,
     Chain.POLYGON,
-    signer,
+    asClobSigner(signer),
     undefined, // No creds needed for server time
     SignatureType.EOA,
   );
@@ -720,7 +721,7 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
   const client = new ClobClient(
     POLYMARKET_API.BASE_URL,
     Chain.POLYGON,
-    signer,
+    asClobSigner(signer),
     creds,
     effectiveSignatureType,
     funderAddress,

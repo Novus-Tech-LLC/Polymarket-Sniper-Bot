@@ -42,8 +42,10 @@ export const estimateGasFees = async (
 
   try {
     const feeData = await params.provider.getFeeData();
+    const block = await params.provider.getBlock("latest");
+    const baseFeePerGas = block?.baseFeePerGas ?? feeData.gasPrice ?? null;
     params.logger?.info(
-      `[Gas] RPC feeData maxPriorityFeePerGas=${feeData.maxPriorityFeePerGas ? formatUnits(feeData.maxPriorityFeePerGas, "gwei") : "null"} gwei maxFeePerGas=${feeData.maxFeePerGas ? formatUnits(feeData.maxFeePerGas, "gwei") : "null"} gwei lastBaseFeePerGas=${feeData.lastBaseFeePerGas ? formatUnits(feeData.lastBaseFeePerGas, "gwei") : "null"} gwei`,
+      `[Gas] RPC feeData maxPriorityFeePerGas=${feeData.maxPriorityFeePerGas ? formatUnits(feeData.maxPriorityFeePerGas, "gwei") : "null"} gwei maxFeePerGas=${feeData.maxFeePerGas ? formatUnits(feeData.maxFeePerGas, "gwei") : "null"} gwei baseFeePerGas=${baseFeePerGas ? formatUnits(baseFeePerGas, "gwei") : "null"} gwei`,
     );
 
     // Calculate maxPriorityFeePerGas with floor
@@ -58,7 +60,7 @@ export const estimateGasFees = async (
     maxPriorityFeePerGas = applyMultiplier(maxPriorityFeePerGas, multiplier);
 
     // Calculate maxFeePerGas
-    const baseFee = feeData.lastBaseFeePerGas ?? parseGwei(30);
+    const baseFee = baseFeePerGas ?? parseGwei(30);
     let maxFeePerGas = baseFee * 2n + maxPriorityFeePerGas;
 
     // Apply floor from RPC feeData
