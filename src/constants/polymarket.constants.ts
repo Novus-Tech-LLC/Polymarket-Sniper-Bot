@@ -62,6 +62,8 @@ export const POLYMARKET_API = {
   GAMMA_API_BASE_URL: "https://gamma-api.polymarket.com",
   /** Geoblock API - Geographic eligibility check */
   GEOBLOCK_ENDPOINT: "https://polymarket.com/api/geoblock",
+  /** Main Polymarket website - for user onboarding/trading activation */
+  WEBSITE_URL: "https://polymarket.com",
   ACTIVITY_ENDPOINT: (user: string) =>
     `${POLYMARKET_API.DATA_API_BASE_URL}/activity?user=${user}`,
   POSITIONS_ENDPOINT: (user: string) =>

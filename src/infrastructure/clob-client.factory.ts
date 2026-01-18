@@ -70,14 +70,16 @@ type VerifyCredsResult = {
 /**
  * All signature types to try in order when auto-detecting.
  * The bot will try each one until it finds one that works.
- * - EOA (0): Standard externally owned account wallet
- * - POLY_PROXY (1): Polymarket proxy wallet  
- * - POLY_GNOSIS_SAFE (2): Gnosis Safe (created when logging in via browser)
+ * 
+ * Order rationale (by likelihood for typical users):
+ * 1. EOA (0): Most common - standard externally owned account wallet
+ * 2. POLY_GNOSIS_SAFE (2): Second most common - created when users log in via browser
+ * 3. POLY_PROXY (1): Least common - older Polymarket proxy wallet format
  */
 const ALL_SIGNATURE_TYPES = [
   SignatureType.EOA,              // 0 - Standard EOA wallet (most common)
   SignatureType.POLY_GNOSIS_SAFE, // 2 - Gnosis Safe (browser login creates this)
-  SignatureType.POLY_PROXY,       // 1 - Polymarket proxy wallet
+  SignatureType.POLY_PROXY,       // 1 - Polymarket proxy wallet (legacy)
 ];
 
 const SERVER_TIME_SKEW_THRESHOLD_SECONDS = 30;
@@ -367,7 +369,7 @@ const verifyCredsWithAutoSignatureType = async (
     `[CLOB] ❌ Credential verification failed with ALL signature types (tried: ${typesToTry.map(t => `${t}=${signatureTypeLabel(t)}`).join(", ")})`,
   );
   logger?.error(
-    `[CLOB] This usually means the wallet has never traded on Polymarket. Visit https://polymarket.com, connect your wallet, and make at least one trade.`,
+    `[CLOB] This usually means the wallet has never traded on Polymarket. Visit ${POLYMARKET_API.WEBSITE_URL}, connect your wallet, and make at least one trade.`,
   );
   return undefined;
 };
