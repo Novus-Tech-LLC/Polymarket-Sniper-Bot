@@ -35,6 +35,10 @@ import {
   loadCachedCreds,
   saveCachedCreds,
 } from "../utils/credential-storage.util";
+import {
+  loadL1AuthConfig,
+  logL1AuthDiagnostics,
+} from "../utils/l1-auth-headers.util";
 
 export type CreateClientInput = {
   rpcUrl: string;
@@ -845,6 +849,9 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
   // Derive if user credentials are missing OR if they failed verification
   const deriveEnabled = Boolean(input.deriveApiKey) && !creds;
 
+  // Load L1 authentication configuration
+  const l1AuthConfig = loadL1AuthConfig();
+
   if (input.logger && !polyAddressDiagLogged) {
     // Determine auth mode for logging
     let authMode = "NONE";
@@ -881,6 +888,14 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
         `[CLOB][Auth] Using ${walletMode}: signer=${derivedSignerAddress} (EOA for signing), maker/funder=${funderAddress} (proxy for orders)`,
       );
     }
+
+    // Log L1 authentication configuration
+    logL1AuthDiagnostics(
+      l1AuthConfig,
+      derivedSignerAddress,
+      effectiveAddressResult.effectivePolyAddress,
+      input.logger,
+    );
 
     polyAddressDiagLogged = true;
   }
