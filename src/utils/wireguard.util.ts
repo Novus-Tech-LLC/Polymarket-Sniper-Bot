@@ -223,7 +223,9 @@ const applyDnsFallback = async (
         "code" in readErr &&
         readErr.code === "ENOENT";
       if (!isNotFound) {
-        logger.warn(`Could not read ${RESOLV_CONF}: ${(readErr as Error).message}`);
+        logger.warn(
+          `Could not read ${RESOLV_CONF}: ${(readErr as Error).message}`,
+        );
       }
     }
 

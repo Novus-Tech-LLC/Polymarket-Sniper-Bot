@@ -101,6 +101,44 @@ async function main(): Promise<void> {
     logger.error("Failed to fetch balances", err as Error);
   }
 
+  // Log prominent trading status banner
+  if (env.detectOnly) {
+    logger.warn(
+      "=====================================================================",
+    );
+    logger.warn("⚠️  TRADING DISABLED - Running in DETECT-ONLY mode");
+    logger.warn(
+      "=====================================================================",
+    );
+    logger.warn("The bot will monitor trades but will NOT submit orders.");
+    logger.warn("");
+    logger.warn("Common causes:");
+    logger.warn(
+      "  1. Invalid API credentials (POLYMARKET_API_KEY/SECRET/PASSPHRASE)",
+    );
+    logger.warn("  2. Wallet has never traded on Polymarket website");
+    logger.warn("  3. ARB_LIVE_TRADING not set to 'I_UNDERSTAND_THE_RISKS'");
+    logger.warn("");
+    logger.warn("To fix:");
+    logger.warn("  - Visit https://polymarket.com and connect your wallet");
+    logger.warn("  - Make at least one small trade on the website");
+    logger.warn("  - Then restart this bot to generate valid API credentials");
+    logger.warn(
+      "  - Or generate API keys at https://polymarket.com/settings/api",
+    );
+    logger.warn(
+      "=====================================================================",
+    );
+  } else {
+    logger.info(
+      "=====================================================================",
+    );
+    logger.info("✅ TRADING ENABLED - Bot will submit orders");
+    logger.info(
+      "=====================================================================",
+    );
+  }
+
   const executor = new TradeExecutorService({
     client,
     proxyWallet: env.proxyWallet,

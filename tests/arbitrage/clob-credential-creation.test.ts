@@ -214,9 +214,7 @@ test("Newly derived credentials are verified before caching", () => {
     "Factory should log when derived credentials are verified",
   );
   assert.ok(
-    factoryCode.includes(
-      "The wallet has never traded on Polymarket",
-    ),
+    factoryCode.includes("The wallet has never traded on Polymarket"),
     "Factory should suggest making a trade on Polymarket website",
   );
 });
@@ -240,7 +238,9 @@ test("verifyCredsWithClient handles clob-client error objects (not thrown except
     "Verification should cast response to ClobErrorResponse",
   );
   assert.ok(
-    factoryCode.includes("if (errorResponse.status === 401 || errorResponse.status === 403)"),
+    factoryCode.includes(
+      "if (errorResponse.status === 401 || errorResponse.status === 403)",
+    ),
     "Verification should detect 401/403 from response objects",
   );
 });

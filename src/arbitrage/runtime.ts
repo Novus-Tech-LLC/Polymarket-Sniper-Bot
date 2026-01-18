@@ -80,6 +80,46 @@ export async function startArbitrageEngine(
   });
   config.detectOnly = tradingReady.detectOnly;
 
+  // Log prominent trading status banner for ARB mode
+  if (config.detectOnly) {
+    logger.warn(
+      "=====================================================================",
+    );
+    logger.warn("⚠️  ARB TRADING DISABLED - Running in DETECT-ONLY mode");
+    logger.warn(
+      "=====================================================================",
+    );
+    logger.warn(
+      "The arbitrage engine will scan for opportunities but will NOT trade.",
+    );
+    logger.warn("");
+    logger.warn("Common causes:");
+    logger.warn(
+      "  1. Invalid API credentials (POLYMARKET_API_KEY/SECRET/PASSPHRASE)",
+    );
+    logger.warn("  2. Wallet has never traded on Polymarket website");
+    logger.warn("  3. ARB_LIVE_TRADING not set to 'I_UNDERSTAND_THE_RISKS'");
+    logger.warn("");
+    logger.warn("To fix:");
+    logger.warn("  - Visit https://polymarket.com and connect your wallet");
+    logger.warn("  - Make at least one small trade on the website");
+    logger.warn("  - Then restart this bot to generate valid API credentials");
+    logger.warn(
+      "  - Or generate API keys at https://polymarket.com/settings/api",
+    );
+    logger.warn(
+      "=====================================================================",
+    );
+  } else {
+    logger.info(
+      "=====================================================================",
+    );
+    logger.info("✅ ARB TRADING ENABLED - Engine will execute trades");
+    logger.info(
+      "=====================================================================",
+    );
+  }
+
   const stateStore = new InMemoryStateStore(
     config.stateDir,
     config.snapshotState,

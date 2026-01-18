@@ -601,6 +601,12 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
         input.logger?.warn(
           "[CLOB] User-provided API credentials failed verification (401/403).",
         );
+        input.logger?.warn(
+          "[CLOB] Your POLYMARKET_API_KEY, POLYMARKET_API_SECRET, or POLYMARKET_API_PASSPHRASE may be incorrect or expired.",
+        );
+        input.logger?.warn(
+          "[CLOB] To regenerate credentials: visit https://polymarket.com/settings/api",
+        );
         if (input.deriveApiKey) {
           input.logger?.info(
             "[CLOB] Will attempt to derive new credentials as fallback.",
