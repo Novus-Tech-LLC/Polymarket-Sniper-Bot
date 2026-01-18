@@ -80,7 +80,7 @@ export function diagnoseAuthFailure(params: {
   if (
     deriveEnabled &&
     deriveFailed &&
-    (deriveError ?? "").toLowerCase().includes("could not create api key")
+    (deriveError ?? "").toLowerCase().match(/could not create|cannot create/i)
   ) {
     return {
       cause: "WALLET_NOT_ACTIVATED",
@@ -131,7 +131,20 @@ export function diagnoseAuthFailure(params: {
   }
 
   // Case 5: Network/connectivity errors
-  if ((verificationError ?? "").toLowerCase().includes("network")) {
+  const errorText = (verificationError ?? "").toLowerCase();
+  const networkPatterns = [
+    /network/i,
+    /timeout/i,
+    /timed out/i,
+    /connection/i,
+    /econnrefused/i,
+    /enotfound/i,
+    /econnreset/i,
+    /etimedout/i,
+    /unreachable/i,
+    /dns/i,
+  ];
+  if (networkPatterns.some((pattern) => pattern.test(errorText))) {
     return {
       cause: "NETWORK_ERROR",
       confidence: "high",

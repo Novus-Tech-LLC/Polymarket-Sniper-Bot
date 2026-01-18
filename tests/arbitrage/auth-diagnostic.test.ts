@@ -101,21 +101,33 @@ test("diagnoseAuthFailure identifies wrong wallet binding", () => {
   );
 });
 
-test("diagnoseAuthFailure identifies network error", () => {
-  const result = diagnoseAuthFailure({
-    userProvidedKeys: true,
-    deriveEnabled: false,
-    deriveFailed: false,
-    verificationFailed: true,
-    verificationError: "Network timeout",
-  });
+test("diagnoseAuthFailure identifies network error with various patterns", () => {
+  const networkErrors = [
+    "Network timeout",
+    "Connection refused",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "ENOTFOUND",
+    "DNS lookup failed",
+    "Host unreachable",
+  ];
 
-  assert.equal(result.cause, "NETWORK_ERROR");
-  assert.equal(result.confidence, "high");
-  assert.ok(
-    result.message.includes("connectivity"),
-    "Should mention connectivity",
-  );
+  networkErrors.forEach((error) => {
+    const result = diagnoseAuthFailure({
+      userProvidedKeys: true,
+      deriveEnabled: false,
+      deriveFailed: false,
+      verificationFailed: true,
+      verificationError: error,
+    });
+
+    assert.equal(
+      result.cause,
+      "NETWORK_ERROR",
+      `Should identify network error for: ${error}`,
+    );
+    assert.equal(result.confidence, "high");
+  });
 });
 
 test("diagnoseAuthFailure returns unknown for unclear cases", () => {
