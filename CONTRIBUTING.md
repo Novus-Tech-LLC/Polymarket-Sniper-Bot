@@ -24,9 +24,9 @@ Thank you for your interest in contributing to Polymarket Sniper Bot! This docum
    # Click the "Fork" button on GitHub
    ```
 
-2. **Clone your fork**
+2. **Clone your fork** (replace `<your-github-username>` with your actual GitHub username)
    ```bash
-   git clone https://github.com/YOUR-USERNAME/Polymarket-Sniper-Bot.git
+   git clone https://github.com/<your-github-username>/Polymarket-Sniper-Bot.git
    cd Polymarket-Sniper-Bot
    ```
 
