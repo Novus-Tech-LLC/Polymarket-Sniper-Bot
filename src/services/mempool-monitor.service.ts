@@ -68,14 +68,7 @@ export class MempoolMonitorService {
     this.provider = new JsonRpcProvider(env.rpcUrl);
     this.isRunning = true;
 
-    // Subscribe to pending transactions
-    this.provider.on("pending", (txHash: string) => {
-      if (this.isRunning) {
-        void this.handlePendingTransaction(txHash).catch(() => {
-          // Silently handle errors for mempool monitoring
-        });
-      }
-    });
+    await this.enablePendingSubscription();
 
     // Also monitor Polymarket API for recent orders (hybrid approach)
     // This helps catch orders that might not be in mempool yet
@@ -99,6 +92,35 @@ export class MempoolMonitorService {
       clearInterval(this.timer);
     }
     this.deps.logger.info("Mempool monitoring stopped");
+  }
+
+  private async enablePendingSubscription(): Promise<void> {
+    const { logger } = this.deps;
+    if (!this.provider) {
+      return;
+    }
+
+    try {
+      const filterId = await this.provider.send(
+        "eth_newPendingTransactionFilter",
+        [],
+      );
+      await this.provider.send("eth_uninstallFilter", [filterId]);
+    } catch (err) {
+      logger.warn(
+        `[Monitor] RPC does not support pending transaction filters; mempool subscription disabled. ${sanitizeErrorMessage(err)}`,
+      );
+      return;
+    }
+
+    // Subscribe to pending transactions
+    this.provider.on("pending", (txHash: string) => {
+      if (this.isRunning) {
+        void this.handlePendingTransaction(txHash).catch(() => {
+          // Silently handle errors for mempool monitoring
+        });
+      }
+    });
   }
 
   private async handlePendingTransaction(txHash: string): Promise<void> {
