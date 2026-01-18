@@ -97,7 +97,23 @@ export function diagnoseAuthFailure(params: {
     };
   }
 
-  // Case 3: Derive enabled but derived creds fail verification
+  // Case 3: Neither user keys nor derive worked
+  if (userProvidedKeys && verificationFailed && deriveEnabled && deriveFailed) {
+    return {
+      cause: "WRONG_WALLET_BINDING",
+      confidence: "medium",
+      message:
+        "Both user-provided credentials AND derived credentials failed. The keys may be bound to a different wallet than PRIVATE_KEY.",
+      recommendations: [
+        "Verify PRIVATE_KEY matches the wallet that owns/created the API keys",
+        "Check PUBLIC_KEY (if set) matches the derived address from PRIVATE_KEY",
+        "Remove POLYMARKET_API_KEY/SECRET/PASSPHRASE and rely on CLOB_DERIVE_CREDS=true",
+        "Or generate new keys for this specific wallet at https://polymarket.com/settings/api",
+      ],
+    };
+  }
+
+  // Case 4: Derive enabled but derived creds fail verification
   if (deriveEnabled && deriveFailed && verificationFailed) {
     return {
       cause: "DERIVE_FAILED",
@@ -110,22 +126,6 @@ export function diagnoseAuthFailure(params: {
         "Try clearing the credential cache: rm -f /data/clob-creds.json",
         "Restart the bot to attempt credential derivation again",
         "If the issue persists, generate keys manually at https://polymarket.com/settings/api",
-      ],
-    };
-  }
-
-  // Case 4: Neither user keys nor derive worked
-  if (userProvidedKeys && verificationFailed && deriveEnabled && deriveFailed) {
-    return {
-      cause: "WRONG_WALLET_BINDING",
-      confidence: "medium",
-      message:
-        "Both user-provided credentials AND derived credentials failed. The keys may be bound to a different wallet than PRIVATE_KEY.",
-      recommendations: [
-        "Verify PRIVATE_KEY matches the wallet that owns/created the API keys",
-        "Check PUBLIC_KEY (if set) matches the derived address from PRIVATE_KEY",
-        "Remove POLYMARKET_API_KEY/SECRET/PASSPHRASE and rely on CLOB_DERIVE_CREDS=true",
-        "Or generate new keys for this specific wallet at https://polymarket.com/settings/api",
       ],
     };
   }
