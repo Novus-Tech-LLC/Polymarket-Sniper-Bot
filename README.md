@@ -822,11 +822,46 @@ To identify successful traders to track:
 | `npm run arbitrage` | Run the arbitrage engine |
 | `npm run test` | Run unit/integration tests |
 
+## 🩺 Troubleshooting Authentication
+
+If you encounter authentication errors (401 "Unauthorized/Invalid api key"), run the diagnostic tool:
+
+```bash
+node diagnose-auth.js
+```
+
+This will:
+- ✅ Check your environment variables
+- ✅ Verify wallet connection and balance
+- ✅ Test Polymarket API connectivity
+- ✅ Attempt credential derivation and verification
+- ✅ Auto-detect the correct signature type
+- ✅ Provide actionable error messages
+
+### Common Issues
+
+**"Unauthorized/Invalid api key" Error**
+- **Cause**: Query parameter signature mismatch (fixed in latest version)
+- **Solution**: Pull latest changes and run `npm install` to apply the updated patch
+
+**"Could not create api key" Error**
+- **Cause**: Wallet has never traded on Polymarket
+- **Solution**: 
+  1. Visit https://polymarket.com
+  2. Connect your wallet (the one from PRIVATE_KEY)
+  3. Make at least ONE small trade (even $1)
+  4. Wait for transaction confirmation (1-2 minutes)
+  5. Restart the bot
+
+**Still Having Issues?**
+See [Authentication Fix Documentation](./AUTHENTICATION_FIX.md) for detailed technical information about the recent authentication fix.
+
 ## 📚 Documentation
 
 - **[Complete Guide](./docs/GUIDE.md)**: Detailed setup, configuration, and troubleshooting
 - **[Authentication Troubleshooting](./docs/AUTH_TROUBLESHOOTING.md)**: Fixing authentication issues
 - **[Credentials Explained](./docs/CREDENTIALS_EXPLAINED.md)**: Understanding CLOB vs Builder credentials
+- **[Authentication Fix](./AUTHENTICATION_FIX.md)**: Technical details about the authentication fix
 - **[Architecture Overview](#-architecture)**: System design and component overview
 
 ## 🤝 Contributing
