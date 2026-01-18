@@ -125,6 +125,7 @@ const maybeEnableServerTime = async (
     if (serverSeconds === undefined) {
       if (!clockSkewLogged) {
         logger?.warn("[CLOB] Unable to parse server time; using local clock.");
+        clockSkewLogged = true;
       }
       return;
     }
@@ -149,6 +150,7 @@ const maybeEnableServerTime = async (
       logger?.warn(
         `[CLOB] Failed to fetch server time; using local clock. ${sanitizeErrorMessage(err)}`,
       );
+      clockSkewLogged = true;
     }
   }
 };
@@ -355,6 +357,7 @@ const deriveApiCreds = async (
     create_or_derive_api_creds?: () => Promise<ApiKeyCreds>;
     createOrDeriveApiKey?: () => Promise<ApiKeyCreds>;
     deriveApiKey?: () => Promise<ApiKeyCreds>;
+    createApiKey?: () => Promise<ApiKeyCreds>;
   };
 
   // Helper to verify and cache credentials
@@ -432,11 +435,8 @@ const deriveApiCreds = async (
   // Step 2: Try createApiKey (for new wallets or if derive failed)
   try {
     logger?.info("[CLOB] Attempting to create new API credentials...");
-    const deriveFnWithCreate = deriveFn as ClobClient & {
-      createApiKey?: () => Promise<ApiKeyCreds>;
-    };
-    if (deriveFnWithCreate.createApiKey) {
-      const created = await deriveFnWithCreate.createApiKey();
+    if (deriveFn.createApiKey) {
+      const created = await deriveFn.createApiKey();
       const result = await verifyAndCacheCreds(created, "createApiKey");
       if (result) {
         return result;

@@ -71,6 +71,7 @@ export async function isGeoblocked(
         logger?.warn(
           `[Geoblock] Unable to verify geographic eligibility (failOpen=true): ${message}`,
         );
+        geoblockLogged = true;
       }
       return false;
     }
@@ -78,6 +79,7 @@ export async function isGeoblocked(
       logger?.error(
         `[Geoblock] Unable to verify geographic eligibility, blocking as precaution: ${message}`,
       );
+      geoblockLogged = true;
     }
     return true;
   }
