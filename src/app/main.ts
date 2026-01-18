@@ -139,7 +139,7 @@ async function main(): Promise<void> {
     logger.warn("  - Make at least one small trade on the website");
     logger.warn("  - Then restart this bot to generate valid API credentials");
     logger.warn(
-      "  - Or generate API keys at https://polymarket.com/settings/api",
+      "  - Or generate API keys at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)",
     );
     logger.warn(
       "=====================================================================",

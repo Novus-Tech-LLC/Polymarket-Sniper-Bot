@@ -78,9 +78,9 @@ export function diagnoseAuthFailure(params: {
         message:
           "User-provided API credentials are being rejected by Polymarket API (401 Unauthorized). This typically means one of: (1) using Builder API keys instead of CLOB API keys, (2) keys bound to a different wallet, (3) keys are expired/revoked, or (4) using test keys on production.",
         recommendations: [
-          "First, verify you're using CLOB API keys from https://polymarket.com/settings/api (NOT Builder keys from the Developer profile)",
+          "First, verify you're using CLOB API keys from CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys) (NOT Builder keys from the Developer profile)",
           "Verify the API keys were generated for THIS wallet address (check the wallet address matches PRIVATE_KEY)",
-          "Check that keys are not expired - try regenerating new keys at https://polymarket.com/settings/api",
+          "Check that keys are not expired - clear cache (rm /data/clob-creds.json) and restart to regenerate",
           "Ensure you're not using test/sandbox keys on production environment",
           "Try setting CLOB_DERIVE_CREDS=true and removing POLYMARKET_API_KEY/SECRET/PASSPHRASE to use auto-derived credentials",
           "For detailed debugging, enable CLOB_PREFLIGHT_MATRIX=true to test all auth combinations",
@@ -95,7 +95,7 @@ export function diagnoseAuthFailure(params: {
       recommendations: [
         "Check that POLYMARKET_API_KEY/SECRET/PASSPHRASE are current and not expired",
         "Verify the keys are bound to the wallet address in use (check PRIVATE_KEY matches the wallet that created the keys)",
-        "Try regenerating keys at https://polymarket.com/settings/api",
+        "Try clearing credential cache (rm /data/clob-creds.json) and restarting to regenerate keys",
         "Or switch to derived credentials: set CLOB_DERIVE_CREDS=true and remove explicit keys",
       ],
     };
@@ -133,7 +133,7 @@ export function diagnoseAuthFailure(params: {
         "Verify PRIVATE_KEY matches the wallet that owns/created the API keys",
         "Check PUBLIC_KEY (if set) matches the derived address from PRIVATE_KEY",
         "Remove POLYMARKET_API_KEY/SECRET/PASSPHRASE and rely on CLOB_DERIVE_CREDS=true",
-        "Or generate new keys for this specific wallet at https://polymarket.com/settings/api",
+        "Or generate new keys for this specific wallet at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)",
       ],
     };
   }
@@ -150,7 +150,7 @@ export function diagnoseAuthFailure(params: {
         "The wallet must have trading history before the API can create/derive credentials",
         "After making a trade, clear the credential cache: rm -f /data/clob-creds.json",
         "Restart the bot to attempt credential derivation again",
-        "Alternative: Generate keys manually at https://polymarket.com/settings/api and use POLYMARKET_API_KEY/SECRET/PASSPHRASE",
+        "Alternative: Generate keys manually at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys) and use POLYMARKET_API_KEY/SECRET/PASSPHRASE",
         "Verify the wallet address matches your PRIVATE_KEY (check logs for signer address)",
       ],
     };

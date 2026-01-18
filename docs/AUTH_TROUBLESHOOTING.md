@@ -29,20 +29,16 @@ You're using **Builder API credentials** (`POLY_BUILDER_API_KEY`) as CLOB creden
   - Environment variables: `POLY_BUILDER_API_KEY`, `POLY_BUILDER_API_SECRET`, `POLY_BUILDER_API_PASSPHRASE`
 
 - **CLOB keys**: For placing orders on the order book (required for trading)
-  - Get from: https://polymarket.com/settings/api
+  - Get from: Set `CLOB_DERIVE_CREDS=true` - bot creates them automatically via L1 authentication
   - Used for: Submitting orders, checking balances, managing positions
   - Environment variables: `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
+  - Reference: https://docs.polymarket.com/developers/CLOB/authentication
 
 **Solution:**
-1. Remove `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` from your `.env`
+1. Remove any `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` from your `.env`
 2. Set `CLOB_DERIVE_CREDS=true` to automatically derive CLOB credentials
-3. Restart the bot
-
-**Alternative solution:**
-1. Go to https://polymarket.com/settings/api
-2. Generate new CLOB API keys (not Builder keys!)
-3. Update your `.env` with the correct CLOB keys
-4. Restart the bot
+3. Ensure `PRIVATE_KEY` is set correctly
+4. Restart the bot - it will automatically create CLOB credentials using L1 authentication
 
 ---
 
@@ -77,24 +73,19 @@ The Polymarket API needs to register your wallet address in their system before 
 Your CLOB API keys may be:
 - Expired
 - Revoked
-- Regenerated on the Polymarket website (old keys invalidated)
+- Cached but no longer valid
 
 **Solution:**
-1. Visit https://polymarket.com/settings/api
-2. Generate new CLOB API keys
-3. Update your `.env` with the new keys:
-   ```
-   POLYMARKET_API_KEY=your_new_api_key
-   POLYMARKET_API_SECRET=your_new_api_secret
-   POLYMARKET_API_PASSPHRASE=your_new_passphrase
-   ```
-4. Restart the bot
+Clear the credential cache and let the bot regenerate:
+1. Delete cached credentials: `rm -f /data/clob-creds.json`
+2. Ensure `CLOB_DERIVE_CREDS=true` is set in `.env`
+3. Remove any manual `POLYMARKET_API_KEY/SECRET/PASSPHRASE` from `.env`
+4. Restart the bot - it will automatically create new credentials
 
-**Alternative solution (recommended):**
-Switch to derived credentials for automatic key management:
-1. Remove `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE` from `.env`
-2. Set `CLOB_DERIVE_CREDS=true`
-3. Restart the bot
+**Why this works:**
+- CLOB API credentials can only be created/derived programmatically (no web UI exists)
+- The bot automatically creates them using L1 authentication (signing with your private key)
+- See: https://docs.polymarket.com/developers/CLOB/authentication
 
 ---
 
@@ -112,7 +103,7 @@ The API keys in your `.env` file are bound to a different wallet address than th
 2. If you set `PUBLIC_KEY`, make sure it matches the address derived from `PRIVATE_KEY`
 3. Either:
    - **Option A**: Remove `POLYMARKET_API_KEY/SECRET/PASSPHRASE` and use `CLOB_DERIVE_CREDS=true`
-   - **Option B**: Generate new CLOB keys for this specific wallet at https://polymarket.com/settings/api
+   - **Option B**: Generate new CLOB keys for this specific wallet at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)
 
 **To check your wallet address:**
 ```bash
@@ -143,7 +134,8 @@ The server created API credentials but they don't work. This can happen due to:
    rm -f ./data/clob-creds.json
    ```
 2. Restart the bot to retry credential derivation
-3. If it fails again, manually generate keys at https://polymarket.com/settings/api
+3. If it fails again, check that your wallet has traded on Polymarket at least once (see Scenario 2)
+4. Try enabling detailed diagnostics: `CLOB_PREFLIGHT_MATRIX=true`
 
 ---
 
