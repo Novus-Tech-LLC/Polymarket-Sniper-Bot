@@ -71,7 +71,7 @@ export function diagnoseAuthFailure(params: {
       // 3. Keys are expired/revoked
       // 4. Keys are from wrong environment (test vs prod)
       // 5. Wrong signature type (EOA vs Gnosis Safe)
-      // 
+      //
       // The most common issue is using Builder API keys as CLOB keys
       return {
         cause: "WRONG_KEY_TYPE",
@@ -177,7 +177,8 @@ export function diagnoseAuthFailure(params: {
   return {
     cause: "UNKNOWN",
     confidence: "low",
-    message: "Authentication failed but the specific cause could not be determined.",
+    message:
+      "Authentication failed but the specific cause could not be determined.",
     recommendations: [
       "Enable detailed diagnostics: set CLOB_PREFLIGHT_MATRIX=true in your .env file and restart",
       "The matrix mode will test all auth combinations and show exactly which configuration works",
@@ -197,10 +198,16 @@ export function logAuthDiagnostic(
   logger: Logger,
   walletAddress?: string,
 ): void {
-  logger.error("=================================================================");
+  logger.error(
+    "=================================================================",
+  );
   logger.error("🔍 AUTHENTICATION FAILURE DIAGNOSTIC");
-  logger.error("=================================================================");
-  logger.error(`Cause: ${diagnostic.cause} (confidence: ${diagnostic.confidence})`);
+  logger.error(
+    "=================================================================",
+  );
+  logger.error(
+    `Cause: ${diagnostic.cause} (confidence: ${diagnostic.confidence})`,
+  );
   if (walletAddress) {
     logger.error(`Wallet Address: ${walletAddress}`);
   }
@@ -211,7 +218,9 @@ export function logAuthDiagnostic(
   diagnostic.recommendations.forEach((rec, idx) => {
     logger.error(`  ${idx + 1}. ${rec}`);
   });
-  logger.error("=================================================================");
+  logger.error(
+    "=================================================================",
+  );
 }
 
 /**
@@ -255,7 +264,9 @@ export function getContextAwareWarnings(params: {
   }
 
   if (!params.geoblockPassed) {
-    warnings.push("Geographic restriction: trading not available in your region");
+    warnings.push(
+      "Geographic restriction: trading not available in your region",
+    );
   }
 
   if (!params.liveTradingEnabled && warnings.length === 0) {

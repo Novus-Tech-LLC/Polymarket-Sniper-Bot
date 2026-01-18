@@ -135,14 +135,14 @@ export const ensureTradingReady = async (
   }
 
   let authOk = false;
-  
+
   // Extract derive failure info from client if available
   const clientWithDeriveInfo = params.client as ClobClient & {
     deriveFailed?: boolean;
     deriveError?: string;
     providedCreds?: ApiKeyCreds;
   };
-  
+
   let authFailureContext: AuthFailureContext = {
     userProvidedKeys: Boolean(clientWithDeriveInfo.providedCreds),
     deriveEnabled: params.clobDeriveEnabled,
@@ -211,7 +211,7 @@ export const ensureTradingReady = async (
     } catch (err) {
       const maybeError = err as { code?: string; message?: string };
       authFailureContext.verificationError = maybeError?.message;
-      
+
       if (maybeError?.code === "ECONNRESET") {
         params.logger.warn(
           `[CLOB] Auth preflight transient failure; continuing. ${sanitizeErrorMessage(err)}`,

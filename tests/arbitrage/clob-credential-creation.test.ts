@@ -106,9 +106,9 @@ test("Successful POST /auth/api-key with valid response: cache written with cred
     "Factory should cache credentials on success",
   );
   assert.ok(
-    factoryCode.includes(
-      "saveCachedCreds({ creds: derived, signerAddress, logger })",
-    ),
+    factoryCode.includes("saveCachedCreds({") &&
+      factoryCode.includes("creds: derived") &&
+      factoryCode.includes("signerAddress"),
     "Factory should save credentials to disk on success",
   );
   assert.ok(

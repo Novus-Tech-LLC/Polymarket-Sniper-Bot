@@ -15,6 +15,8 @@ type StoredCredentials = {
   passphrase: string;
   createdAt: number;
   signerAddress: string;
+  signatureType?: number;
+  funderAddress?: string;
 };
 
 const ensureDataDir = (filePath: string): void => {
@@ -44,6 +46,8 @@ const resolveCredsPath = (): string => {
  */
 export const loadCachedCreds = (params: {
   signerAddress: string;
+  signatureType?: number;
+  funderAddress?: string;
   logger?: Logger;
 }): ApiKeyCreds | null => {
   const filePath = resolveCredsPath();
@@ -71,6 +75,31 @@ export const loadCachedCreds = (params: {
         `[CredStorage] Cached credentials for different signer (cached=${stored.signerAddress} current=${params.signerAddress}); ignoring.`,
       );
       return null;
+    }
+
+    // Validate signature type and funder address match (if stored)
+    if (
+      stored.signatureType !== undefined &&
+      params.signatureType !== undefined
+    ) {
+      if (stored.signatureType !== params.signatureType) {
+        params.logger?.warn(
+          `[CredStorage] Cached credentials for different signature type (cached=${stored.signatureType} current=${params.signatureType}); ignoring and will re-derive.`,
+        );
+        return null;
+      }
+    }
+
+    if (stored.funderAddress && params.funderAddress) {
+      if (
+        stored.funderAddress.toLowerCase() !==
+        params.funderAddress.toLowerCase()
+      ) {
+        params.logger?.warn(
+          `[CredStorage] Cached credentials for different funder address (cached=${stored.funderAddress} current=${params.funderAddress}); ignoring and will re-derive.`,
+        );
+        return null;
+      }
     }
 
     // Validate credentials are complete
@@ -107,6 +136,8 @@ export const loadCachedCreds = (params: {
 export const saveCachedCreds = (params: {
   creds: ApiKeyCreds;
   signerAddress: string;
+  signatureType?: number;
+  funderAddress?: string;
   logger?: Logger;
 }): boolean => {
   const filePath = resolveCredsPath();
@@ -118,6 +149,8 @@ export const saveCachedCreds = (params: {
       passphrase: params.creds.passphrase,
       createdAt: Date.now(),
       signerAddress: params.signerAddress,
+      signatureType: params.signatureType,
+      funderAddress: params.funderAddress,
     };
 
     ensureDataDir(filePath);

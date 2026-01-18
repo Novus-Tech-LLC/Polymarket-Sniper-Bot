@@ -105,6 +105,22 @@ let credDerivationAttempted = false;
 const readEnvValue = (key: string): string | undefined =>
   process.env[key] ?? process.env[key.toLowerCase()];
 
+const readSignatureType = (): number | undefined => {
+  // Try new names first, then fall back to old names
+  const value =
+    readEnvValue("POLYMARKET_SIGNATURE_TYPE") ??
+    readEnvValue("CLOB_SIGNATURE_TYPE");
+  return parseSignatureType(value);
+};
+
+const readFunderAddress = (): string | undefined => {
+  // Try new names first, then fall back to old names
+  return (
+    readEnvValue("POLYMARKET_PROXY_ADDRESS") ??
+    readEnvValue("CLOB_FUNDER_ADDRESS")
+  );
+};
+
 const buildEffectiveSigner = (
   wallet: Wallet,
   effectivePolyAddress: string,
@@ -416,6 +432,8 @@ let cachedSignatureType: number | undefined;
 
 const deriveApiCreds = async (
   wallet: Wallet,
+  signatureType?: number,
+  funderAddress?: string,
   logger?: Logger,
 ): Promise<DeriveCredsResult | undefined> => {
   const signerAddress = await wallet.getAddress();
@@ -437,7 +455,12 @@ const deriveApiCreds = async (
   }
   credDerivationAttempted = true;
 
-  const diskCached = loadCachedCreds({ signerAddress, logger });
+  const diskCached = loadCachedCreds({
+    signerAddress,
+    signatureType,
+    funderAddress,
+    logger,
+  });
   if (diskCached) {
     // Verify cached credentials before using them - try all signature types
     logger?.info("[CLOB] Verifying disk-cached credentials...");
@@ -535,7 +558,13 @@ const deriveApiCreds = async (
       // Valid credentials received and verified, save and return
       cachedDerivedCreds = derived;
       cachedSignatureType = verifyResult.signatureType;
-      saveCachedCreds({ creds: derived, signerAddress, logger });
+      saveCachedCreds({
+        creds: derived,
+        signerAddress,
+        signatureType,
+        funderAddress,
+        logger,
+      });
       logger?.info(
         `[CLOB] Successfully created/derived API credentials via ${source}.`,
       );
@@ -548,7 +577,13 @@ const deriveApiCreds = async (
         `[CLOB] Credential verification encountered transient error; caching anyway. ${sanitizeErrorMessage(verifyError)}`,
       );
       cachedDerivedCreds = derived;
-      saveCachedCreds({ creds: derived, signerAddress, logger });
+      saveCachedCreds({
+        creds: derived,
+        signerAddress,
+        signatureType,
+        funderAddress,
+        logger,
+      });
       logger?.info(
         `[CLOB] Successfully created/derived API credentials via ${source}.`,
       );
@@ -697,10 +732,28 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
 
   const derivedSignerAddress = resolveDerivedSignerAddress(input.privateKey);
   const signatureType = parseSignatureType(
-    input.signatureType ?? readEnvValue("CLOB_SIGNATURE_TYPE"),
+    input.signatureType ?? readSignatureType(),
   );
-  const funderAddress =
-    input.funderAddress ?? readEnvValue("CLOB_FUNDER_ADDRESS");
+  const funderAddress = input.funderAddress ?? readFunderAddress();
+
+  // Safety check: if signature_type is 1 or 2, funder address is required
+  if (signatureType === 1 || signatureType === 2) {
+    if (!funderAddress) {
+      const errorMsg = `[CLOB] FATAL: signature_type=${signatureType} requires POLYMARKET_PROXY_ADDRESS (or CLOB_FUNDER_ADDRESS) to be set. This is the Polymarket proxy wallet/deposit address (maker/funder), not the EOA signer address.`;
+      input.logger?.error(errorMsg);
+      input.logger?.error(
+        "[CLOB] For browser wallets: Set POLYMARKET_SIGNATURE_TYPE=2 AND POLYMARKET_PROXY_ADDRESS=<your-proxy-wallet-address>",
+      );
+      input.logger?.error(
+        "[CLOB] The signer (PRIVATE_KEY) remains your EOA, but maker/funder must be the proxy address.",
+      );
+      throw new Error(errorMsg);
+    }
+    input.logger?.info(
+      `[CLOB] Using signature_type=${signatureType} with funder/proxy address=${funderAddress}`,
+    );
+  }
+
   const polyAddressOverride =
     input.polyAddressOverride ?? readEnvValue("CLOB_POLY_ADDRESS_OVERRIDE");
   const effectiveAddressResult = resolveEffectivePolyAddress({
@@ -806,9 +859,28 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
       authMode += "_MODE_C_PROXY";
     }
 
+    // Determine wallet mode for clarity
+    const walletMode =
+      signatureType === SignatureType.EOA || signatureType === undefined
+        ? "EOA (direct wallet)"
+        : signatureType === SignatureType.POLY_PROXY
+          ? "Proxy Wallet"
+          : "Gnosis Safe";
+
     input.logger.info(
-      `[CLOB][Auth] mode=${authMode} signatureType=${signatureType ?? "default(0)/auto-detect"} signerAddress=${derivedSignerAddress} funderAddress=${funderAddress ?? "none"} effectivePolyAddress=${effectiveAddressResult.effectivePolyAddress}`,
+      `[CLOB][Auth] mode=${authMode} signatureType=${signatureType ?? "default(0)/auto-detect"} walletMode="${walletMode}" signerAddress=${derivedSignerAddress} funderAddress=${funderAddress ?? "none"} effectivePolyAddress=${effectiveAddressResult.effectivePolyAddress}`,
     );
+
+    // Add clarity log for proxy/safe mode
+    if (
+      signatureType === SignatureType.POLY_PROXY ||
+      signatureType === SignatureType.POLY_GNOSIS_SAFE
+    ) {
+      input.logger.info(
+        `[CLOB][Auth] Using ${walletMode}: signer=${derivedSignerAddress} (EOA for signing), maker/funder=${funderAddress} (proxy for orders)`,
+      );
+    }
+
     polyAddressDiagLogged = true;
   }
 
@@ -827,7 +899,12 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
   let deriveError: string | undefined;
   if (deriveEnabled) {
     try {
-      const deriveResult = await deriveApiCreds(wallet, input.logger);
+      const deriveResult = await deriveApiCreds(
+        wallet,
+        signatureType,
+        funderAddress,
+        input.logger,
+      );
       if (
         deriveResult?.creds?.key &&
         deriveResult?.creds?.secret &&

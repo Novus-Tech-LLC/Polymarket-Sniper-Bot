@@ -98,7 +98,7 @@ export async function startArbitrageEngine(
       "The arbitrage engine will scan for opportunities but will NOT trade.",
     );
     logger.warn("");
-    
+
     // Get context-aware warnings based on actual failure reasons
     const warnings = getContextAwareWarnings({
       liveTradingEnabled,
@@ -106,7 +106,7 @@ export async function startArbitrageEngine(
       approvalsOk: tradingReady.approvalsOk,
       geoblockPassed: tradingReady.geoblockPassed,
     });
-    
+
     if (warnings.length > 0) {
       logger.warn("Active blockers:");
       warnings.forEach((warning, idx) => {
@@ -114,7 +114,7 @@ export async function startArbitrageEngine(
       });
       logger.warn("");
     }
-    
+
     logger.warn("General troubleshooting:");
     logger.warn("  - Visit https://polymarket.com and connect your wallet");
     logger.warn("  - Make at least one small trade on the website");

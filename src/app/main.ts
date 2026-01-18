@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     );
     logger.warn("The bot will monitor trades but will NOT submit orders.");
     logger.warn("");
-    
+
     // Get context-aware warnings based on actual failure reasons
     const warnings = getContextAwareWarnings({
       liveTradingEnabled,
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
       approvalsOk: tradingReady.approvalsOk,
       geoblockPassed: tradingReady.geoblockPassed,
     });
-    
+
     if (warnings.length > 0) {
       logger.warn("Active blockers:");
       warnings.forEach((warning, idx) => {
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
       });
       logger.warn("");
     }
-    
+
     logger.warn("General troubleshooting:");
     logger.warn("  - Visit https://polymarket.com and connect your wallet");
     logger.warn("  - Make at least one small trade on the website");
