@@ -160,20 +160,6 @@ CLOB_FORCE_SIGNATURE_TYPE=0  # 0=EOA, 1=Proxy, 2=Gnosis Safe
 
 **Warning**: Only use this if you know exactly which signature type your wallet needs. Incorrect values will cause authentication failures.
 
-### L1 Address Mode (Advanced)
-
-Control which address is used for L1 authentication:
-
-```bash
-CLOB_L1_ADDRESS_MODE=signer  # Default: use signer EOA for L1 auth
-# or
-CLOB_L1_ADDRESS_MODE=maker   # Use maker/funder address for L1 auth (not recommended)
-```
-
-**Default behavior** (recommended):
-- L1 auth (derive/create API keys): Uses **signer** address
-- L2 trading: Uses **maker/funder** address (if signature_type=2)
-
 ---
 
 ## Troubleshooting
@@ -258,7 +244,7 @@ Expected logs:
 ```
 [CLOB][Auth] mode=MODE_B_DERIVED_MODE_C_PROXY signatureType=2 walletMode="Gnosis Safe"
 [CLOB][Auth] Using Gnosis Safe: signer=0x9B9883... (EOA for signing), maker/funder=0xb40336... (proxy for orders)
-[L1Auth] Configuration: addressMode: default (signer), debugHttpHeaders: true
+[L1Auth] forceSignatureType: auto-detect, debugHttpHeaders: true
 [L1Auth] HTTP Request Debug: Method: GET, Path: /auth/derive-api-key
 ```
 
@@ -341,8 +327,7 @@ curl -v "https://clob.polymarket.com/auth/derive-api-key" \
 | `POLYMARKET_SIGNATURE_TYPE` | No | Auto-detect | 0=EOA, 1=Proxy, 2=Gnosis Safe |
 | `POLYMARKET_PROXY_ADDRESS` | Conditional | - | Required if signature_type=1 or 2 |
 | `DEBUG_HTTP_HEADERS` | No | `false` | Log HTTP headers (redacted) |
-| `CLOB_L1_ADDRESS_MODE` | No | `signer` | Address for L1 auth: `signer` or `maker` |
-| `CLOB_FORCE_SIGNATURE_TYPE` | No | - | Override auto-detection: 0, 1, or 2 |
+| `CLOB_FORCE_SIGNATURE_TYPE` | No | Auto-detect | Override signature type: 0, 1, or 2 |
 | `ARB_LIVE_TRADING` | Yes | - | Must be `I_UNDERSTAND_THE_RISKS` |
 
 ---

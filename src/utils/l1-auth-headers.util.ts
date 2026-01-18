@@ -5,8 +5,6 @@ import type { Logger } from "./logger.util";
  * Configuration for L1 authentication
  */
 export type L1AuthConfig = {
-  /** Address mode: 'signer' uses the EOA signer address, 'maker' uses the maker/funder address */
-  addressMode?: "signer" | "maker";
   /** Force a specific signature type (overrides auto-detection) */
   forceSignatureType?: 0 | 1 | 2;
   /** Enable debug logging of HTTP headers (redacted) */
@@ -67,7 +65,7 @@ export async function buildL1Headers(
 
   // Get the address to use for authentication
   const signerAddress = await signer.getAddress();
-  const effectiveAddress = signerAddress; // In future, could use config.addressMode to select maker vs signer
+  const effectiveAddress = signerAddress; // Always use signer for L1 auth
 
   // Build EIP-712 signature for L1 auth
   // The signature is over: address, timestamp, nonce, and a fixed message
@@ -93,8 +91,17 @@ export async function buildL1Headers(
     message: "This message attests that I control the given wallet",
   };
 
-  // Sign the typed data
-  const signature = await (signer as Wallet)._signTypedData(domain, types, value);
+  // Sign the typed data - use proper type checking
+  let signature: string;
+  if ("_signTypedData" in signer && typeof signer._signTypedData === "function") {
+    // Wallet instance with _signTypedData method
+    signature = await signer._signTypedData(domain, types, value);
+  } else {
+    // Fall back to public method if available (JsonRpcSigner)
+    throw new Error(
+      "L1 auth requires a Wallet instance with _signTypedData support",
+    );
+  }
 
   const headers: L1AuthHeaders = {
     POLY_ADDRESS: effectiveAddress,
@@ -109,7 +116,9 @@ export async function buildL1Headers(
     logger.debug(`  Method: ${request.method}`);
     logger.debug(`  Path: ${request.pathWithQuery}`);
     if (request.body) {
-      logger.debug(`  Body: ${request.body.substring(0, 100)}${request.body.length > 100 ? "..." : ""}`);
+      // Hash the body instead of logging raw content
+      const bodyHash = `<${request.body.length} bytes>`;
+      logger.debug(`  Body: ${bodyHash}`);
     }
     logger.debug("[L1Auth] HTTP Headers (redacted):");
     logger.debug(`  POLY_ADDRESS: ${headers.POLY_ADDRESS}`);
@@ -126,11 +135,6 @@ export async function buildL1Headers(
  */
 export function loadL1AuthConfig(): L1AuthConfig {
   const config: L1AuthConfig = {};
-
-  const addressMode = process.env.CLOB_L1_ADDRESS_MODE?.toLowerCase();
-  if (addressMode === "signer" || addressMode === "maker") {
-    config.addressMode = addressMode;
-  }
 
   const forceSignatureType = process.env.CLOB_FORCE_SIGNATURE_TYPE;
   if (forceSignatureType !== undefined) {
@@ -160,7 +164,6 @@ export function logL1AuthDiagnostics(
   if (!logger) return;
 
   logger.info("[L1Auth] Configuration:");
-  logger.info(`  addressMode: ${config.addressMode ?? "default (signer)"}`);
   logger.info(`  forceSignatureType: ${config.forceSignatureType ?? "auto-detect"}`);
   logger.info(`  debugHttpHeaders: ${config.debugHttpHeaders ?? false}`);
   logger.info(`  signerAddress: ${signerAddress}`);

@@ -81,8 +81,8 @@ test("buildL1Headers logs debug info when enabled", async () => {
 
   // Check that signature is redacted
   assert.ok(
-    debugLog.match(/POLY_SIGNATURE: \w{4}\.\.\.\w{4}/),
-    "Signature should be redacted",
+    debugLog.match(/POLY_SIGNATURE: 0x\w{2}\.\.\.\w{4}/),
+    "Signature should be redacted to format 0xAB...1234",
   );
 });
 
@@ -90,13 +90,11 @@ test("loadL1AuthConfig loads from environment variables", () => {
   const originalEnv = { ...process.env };
 
   try {
-    process.env.CLOB_L1_ADDRESS_MODE = "signer";
     process.env.CLOB_FORCE_SIGNATURE_TYPE = "2";
     process.env.DEBUG_HTTP_HEADERS = "true";
 
     const config = loadL1AuthConfig();
 
-    assert.equal(config.addressMode, "signer");
     assert.equal(config.forceSignatureType, 2);
     assert.equal(config.debugHttpHeaders, true);
   } finally {
@@ -109,13 +107,11 @@ test("loadL1AuthConfig handles missing environment variables", () => {
   const originalEnv = { ...process.env };
 
   try {
-    delete process.env.CLOB_L1_ADDRESS_MODE;
     delete process.env.CLOB_FORCE_SIGNATURE_TYPE;
     delete process.env.DEBUG_HTTP_HEADERS;
 
     const config = loadL1AuthConfig();
 
-    assert.equal(config.addressMode, undefined);
     assert.equal(config.forceSignatureType, undefined);
     assert.equal(config.debugHttpHeaders, undefined);
   } finally {
@@ -159,7 +155,6 @@ test("logL1AuthDiagnostics logs configuration", () => {
 
   logL1AuthDiagnostics(
     {
-      addressMode: "signer",
       forceSignatureType: 2,
       debugHttpHeaders: true,
     },
@@ -170,7 +165,6 @@ test("logL1AuthDiagnostics logs configuration", () => {
 
   const logOutput = logs.join("\n");
   assert.ok(logOutput.includes("[L1Auth] Configuration:"));
-  assert.ok(logOutput.includes("addressMode: signer"));
   assert.ok(logOutput.includes("forceSignatureType: 2"));
   assert.ok(logOutput.includes("debugHttpHeaders: true"));
   assert.ok(logOutput.includes("signerAddress:"));
