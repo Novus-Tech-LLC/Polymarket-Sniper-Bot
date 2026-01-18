@@ -473,13 +473,13 @@ const deriveApiCreds = async (
         ); // Default 10 minutes
         createApiKeyBlockedUntil = Date.now() + retrySeconds * 1000;
         logger?.error(
-          "[CLOB] ═══════════════════════════════════════════════════════════════════",
+          "[CLOB] =====================================================================",
         );
         logger?.error(
           "[CLOB] FIRST-TIME WALLET DETECTED: Server cannot create API credentials",
         );
         logger?.error(
-          "[CLOB] ═══════════════════════════════════════════════════════════════════",
+          "[CLOB] =====================================================================",
         );
         logger?.error(
           "[CLOB] This error occurs when your wallet has never traded on Polymarket.",
@@ -490,7 +490,7 @@ const deriveApiCreds = async (
           "[CLOB]   1. Visit https://polymarket.com and connect this wallet",
         );
         logger?.error(
-          "[CLOB]   2. Make a small test trade (even $1) on any market",
+          "[CLOB]   2. Make a small test trade on any market",
         );
         logger?.error(
           "[CLOB]   3. Wait a few minutes for the transaction to confirm",
@@ -504,7 +504,7 @@ const deriveApiCreds = async (
           "[CLOB] Until then, the bot will operate in detect-only mode (no trades).",
         );
         logger?.error(
-          "[CLOB] ═══════════════════════════════════════════════════════════════════",
+          "[CLOB] =====================================================================",
         );
         // Local derivation would produce credentials not registered with the server,
         // causing 401 errors. The server must register credentials first.
