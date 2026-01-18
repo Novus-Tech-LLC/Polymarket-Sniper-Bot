@@ -1,4 +1,4 @@
-import { BigNumber, Contract, constants, utils } from "ethers";
+import { Contract, Interface, MaxUint256, formatUnits, parseUnits } from "ethers";
 import type { Wallet } from "ethers";
 import type { Logger } from "../utils/logger.util";
 import { estimateGasFees, retryTxWithBackoff } from "../utils/gas";
@@ -35,8 +35,8 @@ export type ApprovalDecision = {
 };
 
 export type ApprovalSnapshot = {
-  usdcBalance: BigNumber;
-  allowances: Array<{ spender: string; allowance: BigNumber }>;
+  usdcBalance: bigint;
+  allowances: Array<{ spender: string; allowance: bigint }>;
   erc1155Approvals: Array<{ operator: string; approved: boolean }>;
 };
 
@@ -97,13 +97,13 @@ export const resolveApprovalTargets = () => {
 };
 
 export const getApprovalDecision = (params: {
-  allowance: BigNumber;
-  minAllowance: BigNumber;
+  allowance: bigint;
+  minAllowance: bigint;
   approvedForAll: boolean;
   force: boolean;
 }): ApprovalDecision => {
   return {
-    needsErc20: params.force || params.allowance.lt(params.minAllowance),
+    needsErc20: params.force || params.allowance < params.minAllowance,
     needsErc1155: params.force || !params.approvedForAll,
   };
 };
@@ -143,13 +143,13 @@ export const fetchApprovalSnapshot = async (params: {
   );
 
   params.logger.info(
-    `[Preflight][Approvals] USDC balance=${utils.formatUnits(usdcBalance, 6)} owner=${params.owner}`,
+    `[Preflight][Approvals] USDC balance=${formatUnits(usdcBalance, 6)} owner=${params.owner}`,
   );
 
   // Log detailed allowance state for each spender
   allowances.forEach(({ spender, allowance }) => {
-    const allowanceFormatted = utils.formatUnits(allowance, 6);
-    const sufficient = allowance.gt(0) ? "✅" : "❌";
+    const allowanceFormatted = formatUnits(allowance, 6);
+    const sufficient = allowance > 0n ? "✅" : "❌";
     params.logger.info(
       `[Preflight][Approvals][USDC] ${sufficient} spender=${spender} allowance=${allowanceFormatted}`,
     );
@@ -195,7 +195,7 @@ export const ensureApprovals = async (params: {
     return { ok: false, snapshot };
   }
 
-  const minAllowance = utils.parseUnits(params.config.minUsdcAllowanceRaw, 6);
+  const minAllowance = parseUnits(params.config.minUsdcAllowanceRaw, 6);
   const snapshot = await fetchApprovalSnapshot({
     wallet: params.wallet,
     owner: params.owner,
@@ -203,7 +203,7 @@ export const ensureApprovals = async (params: {
   });
 
   const approvalAmount = params.config.approveMaxUint
-    ? constants.MaxUint256
+    ? MaxUint256
     : minAllowance;
   const approvalsToSend: Array<{
     label: string;
@@ -212,8 +212,8 @@ export const ensureApprovals = async (params: {
     type: "erc20" | "erc1155";
     spender: string;
   }> = [];
-  const erc20Interface = new utils.Interface(ERC20_ABI);
-  const erc1155Interface = new utils.Interface(ERC1155_ABI);
+  const erc20Interface = new Interface(ERC20_ABI);
+  const erc1155Interface = new Interface(ERC1155_ABI);
 
   snapshot.allowances.forEach(({ spender, allowance }) => {
     const decision = getApprovalDecision({
@@ -360,7 +360,7 @@ export const ensureApprovals = async (params: {
 
   const approvalsOk =
     refreshed.allowances.every(({ allowance }) =>
-      allowance.gte(minAllowance),
+      allowance >= minAllowance,
     ) && refreshed.erc1155Approvals.every(({ approved }) => approved);
 
   if (!approvalsOk) {
@@ -378,7 +378,7 @@ const buildTxOverrides = async (
   wallet: Wallet,
   gasBumpBps: number,
   logger: Logger,
-): Promise<{ maxPriorityFeePerGas?: BigNumber; maxFeePerGas?: BigNumber }> => {
+): Promise<{ maxPriorityFeePerGas?: bigint; maxFeePerGas?: bigint }> => {
   if (!wallet.provider) return {};
 
   // Use EIP-1559 gas estimation with proper floors for Polygon

@@ -1,4 +1,4 @@
-import type { Wallet, providers } from "ethers";
+import type { JsonRpcSigner, Wallet } from "ethers";
 import type { Logger } from "./logger.util";
 
 /**
@@ -54,7 +54,7 @@ const redactHeaderValue = (value: string): string => {
  * @returns L1 authentication headers
  */
 export async function buildL1Headers(
-  signer: Wallet | providers.JsonRpcSigner,
+  signer: Wallet | JsonRpcSigner,
   chainId: number,
   request: L1RequestDetails,
   config?: L1AuthConfig,
@@ -94,10 +94,14 @@ export async function buildL1Headers(
   // Sign the typed data - use proper type checking
   let signature: string;
   if (
+    "signTypedData" in signer &&
+    typeof signer.signTypedData === "function"
+  ) {
+    signature = await signer.signTypedData(domain, types, value);
+  } else if (
     "_signTypedData" in signer &&
     typeof signer._signTypedData === "function"
   ) {
-    // Wallet instance with _signTypedData method
     signature = await signer._signTypedData(domain, types, value);
   } else {
     // Fall back to public method if available (JsonRpcSigner)

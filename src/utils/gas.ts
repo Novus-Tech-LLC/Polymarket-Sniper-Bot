@@ -1,9 +1,8 @@
-import { BigNumber, utils } from "ethers";
-import type { providers } from "ethers";
+import { formatUnits, parseUnits, type Provider } from "ethers";
 import type { Logger } from "./logger.util";
 
 export type GasEstimateParams = {
-  provider: providers.Provider;
+  provider: Provider;
   logger?: Logger;
   multiplier?: number;
   maxPriorityFeeGwei?: number;
@@ -11,15 +10,20 @@ export type GasEstimateParams = {
 };
 
 export type GasEstimate = {
-  maxPriorityFeePerGas: BigNumber;
-  maxFeePerGas: BigNumber;
+  maxPriorityFeePerGas: bigint;
+  maxFeePerGas: bigint;
 };
 
 const readEnv = (key: string): string | undefined =>
   process.env[key] ?? process.env[key.toLowerCase()];
 
-const parseGwei = (gwei: number): BigNumber =>
-  utils.parseUnits(String(gwei), "gwei");
+const parseGwei = (gwei: number): bigint =>
+  parseUnits(String(gwei), "gwei");
+
+const applyMultiplier = (value: bigint, multiplier: number): bigint => {
+  const factor = BigInt(Math.floor(multiplier * 100));
+  return (value * factor) / 100n;
+};
 
 /**
  * Estimates EIP-1559 gas fees for Polygon with safe defaults
@@ -39,42 +43,40 @@ export const estimateGasFees = async (
   try {
     const feeData = await params.provider.getFeeData();
     params.logger?.info(
-      `[Gas] RPC feeData maxPriorityFeePerGas=${feeData.maxPriorityFeePerGas ? utils.formatUnits(feeData.maxPriorityFeePerGas, "gwei") : "null"} gwei maxFeePerGas=${feeData.maxFeePerGas ? utils.formatUnits(feeData.maxFeePerGas, "gwei") : "null"} gwei lastBaseFeePerGas=${feeData.lastBaseFeePerGas ? utils.formatUnits(feeData.lastBaseFeePerGas, "gwei") : "null"} gwei`,
+      `[Gas] RPC feeData maxPriorityFeePerGas=${feeData.maxPriorityFeePerGas ? formatUnits(feeData.maxPriorityFeePerGas, "gwei") : "null"} gwei maxFeePerGas=${feeData.maxFeePerGas ? formatUnits(feeData.maxFeePerGas, "gwei") : "null"} gwei lastBaseFeePerGas=${feeData.lastBaseFeePerGas ? formatUnits(feeData.lastBaseFeePerGas, "gwei") : "null"} gwei`,
     );
 
     // Calculate maxPriorityFeePerGas with floor
     let maxPriorityFeePerGas =
-      feeData.maxPriorityFeePerGas || parseGwei(minPriorityFeeGwei);
+      feeData.maxPriorityFeePerGas ?? parseGwei(minPriorityFeeGwei);
     const minPriorityFee = parseGwei(minPriorityFeeGwei);
-    if (maxPriorityFeePerGas.lt(minPriorityFee)) {
+    if (maxPriorityFeePerGas < minPriorityFee) {
       maxPriorityFeePerGas = minPriorityFee;
     }
 
     // Apply multiplier
-    maxPriorityFeePerGas = maxPriorityFeePerGas
-      .mul(Math.floor(multiplier * 100))
-      .div(100);
+    maxPriorityFeePerGas = applyMultiplier(maxPriorityFeePerGas, multiplier);
 
     // Calculate maxFeePerGas
-    const baseFee = feeData.lastBaseFeePerGas || parseGwei(30);
-    let maxFeePerGas = baseFee.mul(2).add(maxPriorityFeePerGas);
+    const baseFee = feeData.lastBaseFeePerGas ?? parseGwei(30);
+    let maxFeePerGas = baseFee * 2n + maxPriorityFeePerGas;
 
     // Apply floor from RPC feeData
-    if (feeData.maxFeePerGas && maxFeePerGas.lt(feeData.maxFeePerGas)) {
+    if (feeData.maxFeePerGas && maxFeePerGas < feeData.maxFeePerGas) {
       maxFeePerGas = feeData.maxFeePerGas;
     }
 
     // Apply configured floor
     const minMaxFee = parseGwei(minMaxFeeGwei);
-    if (maxFeePerGas.lt(minMaxFee)) {
+    if (maxFeePerGas < minMaxFee) {
       maxFeePerGas = minMaxFee;
     }
 
     // Apply multiplier
-    maxFeePerGas = maxFeePerGas.mul(Math.floor(multiplier * 100)).div(100);
+    maxFeePerGas = applyMultiplier(maxFeePerGas, multiplier);
 
     params.logger?.info(
-      `[Gas] Selected maxPriorityFeePerGas=${utils.formatUnits(maxPriorityFeePerGas, "gwei")} gwei maxFeePerGas=${utils.formatUnits(maxFeePerGas, "gwei")} gwei multiplier=${multiplier}`,
+      `[Gas] Selected maxPriorityFeePerGas=${formatUnits(maxPriorityFeePerGas, "gwei")} gwei maxFeePerGas=${formatUnits(maxFeePerGas, "gwei")} gwei multiplier=${multiplier}`,
     );
 
     return {
@@ -86,20 +88,21 @@ export const estimateGasFees = async (
     params.logger?.warn(
       `[Gas] Failed to fetch fee data, using defaults: ${error}`,
     );
-    const maxPriorityFeePerGas = parseGwei(minPriorityFeeGwei)
-      .mul(Math.floor(multiplier * 100))
-      .div(100);
-    const maxFeePerGas = parseGwei(minMaxFeeGwei)
-      .mul(Math.floor(multiplier * 100))
-      .div(100);
+    const maxPriorityFeePerGas = parseGwei(minPriorityFeeGwei);
+    const maxPriorityFeePerGasScaled = applyMultiplier(
+      maxPriorityFeePerGas,
+      multiplier,
+    );
+    const maxFeePerGas = parseGwei(minMaxFeeGwei);
+    const maxFeePerGasScaled = applyMultiplier(maxFeePerGas, multiplier);
 
     params.logger?.info(
-      `[Gas] Fallback maxPriorityFeePerGas=${utils.formatUnits(maxPriorityFeePerGas, "gwei")} gwei maxFeePerGas=${utils.formatUnits(maxFeePerGas, "gwei")} gwei`,
+      `[Gas] Fallback maxPriorityFeePerGas=${formatUnits(maxPriorityFeePerGasScaled, "gwei")} gwei maxFeePerGas=${formatUnits(maxFeePerGasScaled, "gwei")} gwei`,
     );
 
     return {
-      maxPriorityFeePerGas,
-      maxFeePerGas,
+      maxPriorityFeePerGas: maxPriorityFeePerGasScaled,
+      maxFeePerGas: maxFeePerGasScaled,
     };
   }
 };

@@ -1,5 +1,5 @@
-import { Contract, constants, utils } from "ethers";
-import type { BigNumber, Wallet } from "ethers";
+import { Contract, MaxUint256, ZeroAddress, parseUnits } from "ethers";
+import type { Wallet } from "ethers";
 import type { ClobClient } from "@polymarket/clob-client";
 import { OrderType, Side } from "@polymarket/clob-client";
 import type { Logger } from "../../utils/logger.util";
@@ -38,7 +38,7 @@ class AllowanceManager {
   private readonly spender: string;
   private readonly logger: Logger;
   private readonly approveUnlimited: boolean;
-  private cachedAllowance: BigNumber = constants.Zero;
+  private cachedAllowance: bigint = 0n;
   private lastChecked = 0;
   private lastApprovalAt = 0;
 
@@ -60,7 +60,7 @@ class AllowanceManager {
     return new Contract(this.tokenAddress, ERC20_ABI, this.wallet);
   }
 
-  async getAllowance(now: number): Promise<BigNumber> {
+  async getAllowance(now: number): Promise<bigint> {
     if (now - this.lastChecked < 30_000) {
       return this.cachedAllowance;
     }
@@ -73,9 +73,9 @@ class AllowanceManager {
     return allowance;
   }
 
-  async ensureAllowance(requiredAmount: BigNumber, now: number): Promise<void> {
+  async ensureAllowance(requiredAmount: bigint, now: number): Promise<void> {
     const allowance = await this.getAllowance(now);
-    if (allowance.gte(requiredAmount)) return;
+    if (allowance >= requiredAmount) return;
 
     if (now - this.lastApprovalAt < APPROVAL_COOLDOWN_MS) {
       throw new Error("approval_cooldown");
@@ -91,9 +91,7 @@ class AllowanceManager {
       throw new Error("approval_blocked");
     }
 
-    const approveAmount = this.approveUnlimited
-      ? constants.MaxUint256
-      : requiredAmount;
+    const approveAmount = this.approveUnlimited ? MaxUint256 : requiredAmount;
     this.logger.info(
       `[ARB] Approving collateral allowance ${approveAmount.toString()}`,
     );
@@ -123,7 +121,7 @@ export class ArbTradeExecutor implements TradeExecutor {
     this.config = params.config;
     this.logger = params.logger;
     const contracts = resolvePolymarketContracts();
-    const spender = contracts.ctfExchangeAddress ?? constants.AddressZero;
+    const spender = contracts.ctfExchangeAddress ?? ZeroAddress;
     if (!contracts.ctfExchangeAddress) {
       this.logger.warn(
         "[ARB] Missing POLY_CTF_EXCHANGE_ADDRESS; forcing detect-only.",
@@ -171,7 +169,7 @@ export class ArbTradeExecutor implements TradeExecutor {
 
     try {
       const totalUsd = plan.sizeUsd * 2;
-      const requiredAmount = utils.parseUnits(
+      const requiredAmount = parseUnits(
         totalUsd.toFixed(this.config.collateralTokenDecimals),
         this.config.collateralTokenDecimals,
       );

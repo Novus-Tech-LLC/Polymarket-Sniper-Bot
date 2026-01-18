@@ -1,5 +1,5 @@
 import type { ApiKeyCreds, ClobClient } from "@polymarket/clob-client";
-import { utils, type BigNumberish } from "ethers";
+import { formatUnits, type BigNumberish } from "ethers";
 import type { Wallet } from "ethers";
 import { isAuthError } from "../infrastructure/clob-auth";
 import {
@@ -57,8 +57,8 @@ const parseBool = (raw: string | undefined, fallback: boolean): boolean => {
 const isLiveTradingEnabled = (): boolean =>
   readEnv("ARB_LIVE_TRADING") === "I_UNDERSTAND_THE_RISKS";
 
-const formatUnits = (value: BigNumberish, decimals: number): string =>
-  Number(utils.formatUnits(value, decimals)).toFixed(2);
+const formatUnitsValue = (value: BigNumberish, decimals: number): string =>
+  Number(formatUnits(value, decimals)).toFixed(2);
 
 export const ensureTradingReady = async (
   params: TradingReadyParams,
@@ -297,14 +297,14 @@ export const ensureTradingReady = async (
   }
 
   if (approvalResult) {
-    const balanceDisplay = formatUnits(
+    const balanceDisplay = formatUnitsValue(
       approvalResult.snapshot.usdcBalance,
       params.collateralTokenDecimals,
     );
     const allowanceDetails = approvalResult.snapshot.allowances
       .map(
         ({ spender, allowance }) =>
-          `${spender}=${formatUnits(allowance, params.collateralTokenDecimals)}`,
+          `${spender}=${formatUnitsValue(allowance, params.collateralTokenDecimals)}`,
       )
       .join(" ");
     const approvedForAll = approvalResult.snapshot.erc1155Approvals.every(

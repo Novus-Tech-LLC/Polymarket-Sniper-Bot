@@ -1,6 +1,6 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import { AssetType } from "@polymarket/clob-client";
-import { BigNumber, Contract, utils } from "ethers";
+import { Contract, formatUnits } from "ethers";
 import type { Wallet } from "ethers";
 import {
   ensureApprovals,
@@ -301,10 +301,10 @@ const buildOnchainSnapshot = async (params: {
   );
   const minAllowance = allowances.length
     ? allowances.reduce(
-        (min, current) => (current.lt(min) ? current : min),
+        (min, current) => (current < min ? current : min),
         allowances[0],
       )
-    : BigNumber.from(0);
+    : 0n;
   const approvedForAll = await Promise.all(
     erc1155Operators.map(async (operator) => {
       if (!contracts.ctfErc1155Address) return false;
@@ -320,11 +320,11 @@ const buildOnchainSnapshot = async (params: {
     ? approvedForAll.every(Boolean)
     : false;
   params.logger.info(
-    `[CLOB][Onchain] owner=${params.owner} balance=${utils.formatUnits(balance, params.decimals)} allowance_min=${utils.formatUnits(minAllowance, params.decimals)} approvedForAll=${allApproved}`,
+    `[CLOB][Onchain] owner=${params.owner} balance=${formatUnits(balance, params.decimals)} allowance_min=${formatUnits(minAllowance, params.decimals)} approvedForAll=${allApproved}`,
   );
   return {
-    balanceUsd: Number(utils.formatUnits(balance, params.decimals)),
-    allowanceUsd: Number(utils.formatUnits(minAllowance, params.decimals)),
+    balanceUsd: Number(formatUnits(balance, params.decimals)),
+    allowanceUsd: Number(formatUnits(minAllowance, params.decimals)),
     approvedForAll: allApproved,
   };
 };

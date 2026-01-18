@@ -1,4 +1,4 @@
-import { Wallet, providers } from "ethers";
+import { JsonRpcProvider, JsonRpcSigner, Wallet } from "ethers";
 import {
   AssetType,
   ClobClient,
@@ -222,7 +222,7 @@ const logAuthHeaderPresence = async (
   if (!logger) return;
   try {
     const signer = (
-      client as ClobClient & { signer?: Wallet | providers.JsonRpcSigner }
+      client as ClobClient & { signer?: Wallet | JsonRpcSigner }
     ).signer;
     if (!signer) return;
     const signatureType = (
@@ -438,7 +438,7 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
     deriveError?: string;
   }
 > {
-  const provider = new providers.JsonRpcProvider(input.rpcUrl);
+  const provider = new JsonRpcProvider(input.rpcUrl);
   const wallet = new Wallet(input.privateKey, provider);
   setupClobHeaderKeyLogging(input.logger);
 

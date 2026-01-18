@@ -2,7 +2,7 @@ import type { ClobClient } from "@polymarket/clob-client";
 import type { RuntimeEnv } from "../config/env";
 import type { Logger } from "../utils/logger.util";
 import type { TradeSignal } from "../domain/trade.types";
-import { ethers } from "ethers";
+import { JsonRpcProvider } from "ethers";
 import { httpGet } from "../utils/fetch-data.util";
 import axios from "axios";
 import {
@@ -38,7 +38,7 @@ interface ActivityResponse {
 
 export class MempoolMonitorService {
   private readonly deps: MempoolMonitorDeps;
-  private provider?: ethers.providers.JsonRpcProvider;
+  private provider?: JsonRpcProvider;
   private isRunning = false;
   private readonly processedHashes: Set<string> = new Set();
   private readonly targetAddresses: Set<string> = new Set();
@@ -65,7 +65,7 @@ export class MempoolMonitorService {
       `Target addresses: ${env.targetAddresses.map((addr) => addr.toLowerCase()).join(", ") || "none"}`,
     );
 
-    this.provider = new ethers.providers.JsonRpcProvider(env.rpcUrl);
+    this.provider = new JsonRpcProvider(env.rpcUrl);
     this.isRunning = true;
 
     // Subscribe to pending transactions
