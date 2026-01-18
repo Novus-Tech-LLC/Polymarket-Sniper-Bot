@@ -507,7 +507,8 @@ const deriveApiCreds = async (
     Chain.POLYGON,
     wallet,
     undefined,
-    SignatureType.EOA,
+    signatureType ?? SignatureType.EOA,
+    funderAddress,
   );
   const deriveFn = deriveClient as ClobClient & {
     create_or_derive_api_creds?: () => Promise<ApiKeyCreds>;
@@ -900,7 +901,7 @@ export async function createPolymarketClient(input: CreateClientInput): Promise<
   if (deriveEnabled) {
     try {
       const deriveResult = await deriveApiCreds(
-        wallet,
+        signer,
         signatureType,
         funderAddress,
         input.logger,
