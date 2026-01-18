@@ -36,6 +36,7 @@ import {
   saveCachedCreds,
   clearCachedCreds,
 } from "../utils/credential-storage.util";
+import { asClobSigner } from "../utils/clob-signer.util";
 
 /**
  * Result of credential derivation
@@ -70,7 +71,7 @@ async function verifyCredentials(params: {
     const client = new ClobClient(
       POLYMARKET_API.BASE_URL,
       Chain.POLYGON,
-      params.wallet,
+      asClobSigner(params.wallet),
       params.creds,
       params.signatureType,
     );
@@ -171,7 +172,7 @@ async function attemptDerive(params: {
     const client = new ClobClient(
       POLYMARKET_API.BASE_URL,
       Chain.POLYGON,
-      params.wallet,
+      asClobSigner(params.wallet),
       undefined, // No creds yet
       params.attempt.signatureType,
       params.funderAddress,
