@@ -34,6 +34,7 @@ import {
 import {
   loadCachedCreds,
   saveCachedCreds,
+  clearCachedCreds,
 } from "../utils/credential-storage.util";
 
 /**
@@ -320,9 +321,6 @@ export async function deriveCredentialsWithFallback(
         "[CredDerive] Cached credentials failed verification; will re-derive",
       );
       // Clear invalid cache
-      const { clearCachedCreds } = await import(
-        "../utils/credential-storage.util"
-      );
       clearCachedCreds(params.logger);
     }
   } else {
