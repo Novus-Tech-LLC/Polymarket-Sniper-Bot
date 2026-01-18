@@ -85,6 +85,8 @@ async function verifyCredentials(params: {
       params.logger?.debug(
         `[CredDerive] Verification failed: ${errorResponse.status} ${errorResponse.error ?? "Unauthorized"}`,
       );
+      // Log auth diagnostic info on failure
+      logAuthDiagnostics(params);
       return false;
     }
 
@@ -92,6 +94,7 @@ async function verifyCredentials(params: {
       params.logger?.debug(
         `[CredDerive] Verification returned error: ${errorResponse.error}`,
       );
+      logAuthDiagnostics(params);
       return false;
     }
 
@@ -103,6 +106,8 @@ async function verifyCredentials(params: {
       params.logger?.debug(
         `[CredDerive] Verification failed: ${status} Unauthorized`,
       );
+      // Log auth diagnostic info on failure
+      logAuthDiagnostics(params);
       return false;
     }
 
@@ -112,6 +117,42 @@ async function verifyCredentials(params: {
     );
     return false;
   }
+}
+
+/**
+ * Log authentication diagnostics when verification fails
+ */
+function logAuthDiagnostics(params: {
+  creds: ApiKeyCreds;
+  wallet: Wallet;
+  signatureType: number;
+  logger?: Logger;
+}): void {
+  if (!params.logger) return;
+
+  // Log header presence
+  params.logger.debug("[CredDerive] Auth Diagnostics:");
+  params.logger.debug(`  signatureType: ${params.signatureType}`);
+  params.logger.debug(`  walletAddress: ${params.wallet.address}`);
+  params.logger.debug(
+    `  apiKey: ${params.creds.key ? params.creds.key.slice(0, 8) + "..." + params.creds.key.slice(-4) : "missing"}`,
+  );
+  params.logger.debug(
+    `  secret: ${params.creds.secret ? params.creds.secret.slice(0, 8) + "..." + params.creds.secret.slice(-4) + ` (length=${params.creds.secret.length})` : "missing"}`,
+  );
+  params.logger.debug(
+    `  passphrase: ${params.creds.passphrase ? params.creds.passphrase.slice(0, 4) + "..." + params.creds.passphrase.slice(-4) : "missing"}`,
+  );
+
+  // Detect secret encoding
+  const secret = params.creds.secret;
+  const hasBase64Chars = secret.includes("+") || secret.includes("/");
+  const hasBase64UrlChars = secret.includes("-") || secret.includes("_");
+  const hasPadding = secret.endsWith("=");
+
+  params.logger.debug(
+    `  secretEncoding: ${hasBase64Chars ? "likely base64" : hasBase64UrlChars ? "likely base64url" : "unknown"} (hasBase64Chars=${hasBase64Chars} hasBase64UrlChars=${hasBase64UrlChars} hasPadding=${hasPadding})`,
+  );
 }
 
 /**
