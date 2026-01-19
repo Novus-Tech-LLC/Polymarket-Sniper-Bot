@@ -23,6 +23,8 @@
   ],
   "scripts": {
     "build": "tsc",
+    "build:rust": "cd rust-clob-bridge && cargo build --release",
+    "build:all": "npm run build:rust && npm run build",
     "start": "node dist/app/main.js",
     "dev": "ts-node src/app/main.ts",
     "lint": "eslint .",
@@ -41,6 +43,7 @@
     "clob:probe": "ts-node scripts/clob_auth_probe.ts",
     "clob:matrix": "DEBUG_PREFLIGHT_MATRIX=true ts-node scripts/clob_auth_probe.ts",
     "auth:probe": "ts-node src/clob/auth-probe.ts",
+    "auth:probe:rust": "ts-node src/rust-bridge/auth-probe.ts",
     "auth:probe:minimal": "ts-node scripts/minimal_auth_probe.ts",
     "auth:probe:simple": "ts-node scripts/auth_probe.ts",
     "auth:probe:legacy": "ts-node scripts/clob_auth_probe.ts",

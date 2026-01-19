@@ -1,0 +1,20 @@
+[package]
+name = "polymarket-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Bridge for Polymarket CLOB operations using the official Rust SDK"
+
+[dependencies]
+polymarket-client-sdk = { version = "0.3", features = ["clob", "tracing"] }
+tokio = { version = "1.45", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+rust_decimal = "1.39"
+rust_decimal_macros = "1.39"
+
+[[bin]]
+name = "polymarket-bridge"
+path = "src/main.rs"

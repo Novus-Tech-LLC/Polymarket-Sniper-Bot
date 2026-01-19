@@ -16,11 +16,51 @@
 
 ## ✨ What's New
 
+- 🦀 **Rust SDK Integration** - Optional use of official Polymarket Rust SDK for more reliable authentication
 - 🧠 **Adaptive Learning System** - Learns from trade outcomes to prevent bad trades
 - 🔐 **Simplified Authentication** - Uses `createOrDeriveApiKey()` for clean credential management
 - 📊 **Clean Logging** - ✅ for success, ❌ for failures - easy to troubleshoot
 - 🛡️ **Rate-Limited Error Logs** - No more log spam on repeated auth failures
 - ⚡ **Single-Flight Derivation** - Prevents concurrent credential derivation attempts
+
+## 🦀 Rust CLOB Bridge (New)
+
+For users experiencing persistent authentication issues with the JavaScript SDK, we now offer integration with the **official Polymarket Rust CLOB SDK** (`rs-clob-client`). This provides:
+
+- **More reliable authentication** - The Rust SDK handles CREATE2 address derivation correctly
+- **Auto-detection of signature type** - Tries all authentication modes automatically  
+- **Cleaner error messages** - Structured diagnostic output
+- **Official SDK support** - Maintained by the Polymarket team
+
+### Using the Rust Auth Probe
+
+```bash
+# Build the Rust bridge (requires Rust 1.88+)
+npm run build:rust
+
+# Run the authentication probe
+npm run auth:probe:rust
+```
+
+The probe will try all authentication configurations and report which one works:
+
+```
+======================================================================
+✅ AUTHENTICATION SUCCESSFUL
+======================================================================
+
+Working Configuration:
+  Signature Type: GnosisSafe
+  Funder Address: 0x52d7008a5Cb5661dFed5573BB34E69772CDf0346
+
+Account Status:
+  Balance: 125.50 USDC
+  Allowance: unlimited
+
+Recommended Environment Variables:
+  POLYMARKET_SIGNATURE_TYPE=2
+  POLYMARKET_PROXY_ADDRESS=0x52d7008a5Cb5661dFed5573BB34E69772CDf0346
+```
 
 ## Contact 
 
@@ -153,11 +193,17 @@ polymarket-sniper-bot/
 │   │   └── simple-auth.ts # Simplified auth module
 │   ├── config/           # Configuration management
 │   ├── infrastructure/   # External service integrations
+│   ├── rust-bridge/      # Rust SDK integration
+│   │   ├── client.ts     # Bridge client
+│   │   └── adapter.ts    # ClobClient adapter
 │   ├── services/         # Core business logic
 │   └── utils/            # Utility functions
+├── rust-clob-bridge/     # Rust CLOB SDK wrapper
+│   ├── Cargo.toml        # Rust dependencies
+│   └── src/main.rs       # Bridge binary
 ├── docs/                 # Documentation
 ├── docker-compose.yml    # Docker Compose configuration
-├── Dockerfile           # Docker image definition
+├── Dockerfile           # Docker image definition (multi-stage with Rust)
 └── package.json         # Project dependencies
 ```
 
