@@ -21,9 +21,24 @@ import type { ApiKeyCreds } from "@polymarket/clob-client";
 import { Wallet } from "ethers";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
 import { asClobSigner } from "../utils/clob-signer.util";
+import {
+  AuthLogger,
+  redactApiKey,
+  createCredentialFingerprint,
+} from "../utils/auth-logger";
 
 const CLOB_HOST = POLYMARKET_API.BASE_URL;
 const CHAIN_ID = Chain.POLYGON;
+
+/**
+ * Credential fingerprint type (safe to log)
+ */
+export interface CredentialFingerprint {
+  apiKeySuffix: string;
+  secretLen: number;
+  passphraseLen?: number;
+  secretEncodingGuess: string;
+}
 
 /**
  * Auth Story - single structured summary per run
@@ -35,9 +50,19 @@ export interface AuthStory {
   signerAddress: string;
   signatureType?: number;
   funderAddress?: string;
+  clobHost: string;
+  chainId: number;
   credentialsObtained: boolean;
-  apiKeySuffix?: string;
+  derivedCredFingerprint?: CredentialFingerprint;
   verificationPassed: boolean;
+  attempts: Array<{
+    attemptId: string;
+    mode: string;
+    sigType: number;
+    httpStatus?: number;
+    errorTextShort?: string;
+    success: boolean;
+  }>;
   errorMessage?: string;
   durationMs: number;
 }
@@ -60,6 +85,7 @@ export interface MinimalAuthConfig {
   signatureType?: number; // Optional: 0=EOA, 1=Proxy, 2=GnosisSafe
   funderAddress?: string; // Optional: For Proxy/Safe modes
   logLevel?: "debug" | "info" | "error"; // Default: "info"
+  logger?: AuthLogger; // Optional: Custom auth logger
 }
 
 /**
@@ -88,35 +114,6 @@ function extractErrorStatus(error: unknown): number | undefined {
 }
 
 /**
- * Redact secret for logging (show only last 4-6 chars)
- */
-function redactSecret(secret: string): string {
-  // For short strings, use fixed redaction to avoid revealing too much
-  if (secret.length <= 8) {
-    return "***";
-  }
-  // For longer strings, show last 6 chars
-  return `***${secret.slice(-6)}`;
-}
-
-/**
- * Log based on level
- */
-function log(
-  level: "debug" | "info" | "error",
-  message: string,
-  config: MinimalAuthConfig,
-): void {
-  const logLevel = config.logLevel ?? "info";
-  const levelPriority = { debug: 0, info: 1, error: 2 };
-
-  if (levelPriority[level] >= levelPriority[logLevel]) {
-    const prefix = level === "error" ? "❌" : level === "info" ? "ℹ️" : "🔍";
-    console.log(`${prefix} [MinimalAuth] ${message}`);
-  }
-}
-
-/**
  * Update the auth story with final duration
  * Note: This function mutates the story object for efficiency
  */
@@ -142,6 +139,9 @@ export async function authenticateMinimal(
   const runId = generateRunId();
   const startTime = Date.now();
 
+  // Create or reuse logger (if provided, ensure runId matches)
+  const logger = config.logger ? config.logger : new AuthLogger(runId);
+
   // Initialize story
   const story: AuthStory = {
     runId,
@@ -150,8 +150,11 @@ export async function authenticateMinimal(
     signerAddress: "",
     signatureType: config.signatureType,
     funderAddress: config.funderAddress,
+    clobHost: CLOB_HOST,
+    chainId: CHAIN_ID,
     credentialsObtained: false,
     verificationPassed: false,
+    attempts: [],
     durationMs: 0,
   };
 
@@ -159,7 +162,7 @@ export async function authenticateMinimal(
     // Validate private key
     if (!config.privateKey) {
       story.errorMessage = "Private key is required";
-      log("error", story.errorMessage, config);
+      logger.error(story.errorMessage, { category: "IDENTITY" });
       return { success: false, story: updateStoryDuration(story, startTime) };
     }
 
@@ -170,14 +173,13 @@ export async function authenticateMinimal(
     const wallet = new Wallet(pk);
     story.signerAddress = wallet.address;
 
-    log(
-      "info",
+    logger.info(
       `Authenticating wallet ${wallet.address.slice(0, 10)}...${wallet.address.slice(-6)}`,
-      config,
+      { category: "IDENTITY", signerAddress: wallet.address },
     );
 
     // Step 1: Create CLOB client
-    log("debug", "Creating ClobClient...", config);
+    logger.debug("Creating ClobClient...", { category: "IDENTITY" });
     const client = new ClobClient(
       CLOB_HOST,
       CHAIN_ID,
@@ -188,7 +190,24 @@ export async function authenticateMinimal(
     );
 
     // Step 2: Call createOrDeriveApiKey() - just like Python agents
-    log("info", "Calling createOrDeriveApiKey()...", config);
+    logger.info("Calling createOrDeriveApiKey()...", {
+      category: "CRED_DERIVE",
+    });
+
+    // Add attempt record
+    const attemptId = "A";
+    story.attempts.push({
+      attemptId,
+      mode:
+        config.signatureType === 2
+          ? "SAFE"
+          : config.signatureType === 1
+            ? "PROXY"
+            : "EOA",
+      sigType: config.signatureType ?? 0,
+      success: false,
+    });
+
     let creds: ApiKeyCreds;
     try {
       creds = await client.createOrDeriveApiKey();
@@ -196,16 +215,25 @@ export async function authenticateMinimal(
       const message = error instanceof Error ? error.message : String(error);
       const status = extractErrorStatus(error);
 
+      // Update attempt with error
+      story.attempts[0].httpStatus = status;
+      story.attempts[0].errorTextShort = message.slice(0, 100);
+
       if (
         status === 400 &&
         message.toLowerCase().includes("could not create")
       ) {
         story.errorMessage = "Wallet must trade on Polymarket first";
-        log("error", "Wallet has never traded on Polymarket", config);
-        log("info", "Visit https://polymarket.com and make a trade", config);
+        logger.error("Wallet has never traded on Polymarket", {
+          category: "CRED_DERIVE",
+          status,
+        });
+        logger.info("Visit https://polymarket.com and make a trade", {
+          category: "CRED_DERIVE",
+        });
       } else {
         story.errorMessage = `Failed to derive credentials: ${message}`;
-        log("error", story.errorMessage, config);
+        logger.error(story.errorMessage, { category: "CRED_DERIVE", status });
       }
 
       return { success: false, story: updateStoryDuration(story, startTime) };
@@ -214,26 +242,32 @@ export async function authenticateMinimal(
     // Validate credentials
     if (!creds || !creds.key || !creds.secret || !creds.passphrase) {
       story.errorMessage = "Credentials incomplete";
-      log("error", "Credentials missing required fields", config);
+      story.attempts[0].errorTextShort = "Credentials missing required fields";
+      logger.error("Credentials missing required fields", {
+        category: "CRED_DERIVE",
+      });
       return { success: false, story: updateStoryDuration(story, startTime) };
     }
 
+    // Create credential fingerprint (safe to log)
+    const fingerprint = createCredentialFingerprint(creds);
     story.credentialsObtained = true;
-    story.apiKeySuffix = redactSecret(creds.key);
-    log("info", `Credentials obtained (key: ${story.apiKeySuffix})`, config);
-    log(
-      "debug",
-      `Secret length: ${creds.secret.length}, Passphrase length: ${creds.passphrase.length}`,
-      config,
-    );
+    story.derivedCredFingerprint = fingerprint;
+
+    logger.info(`Credentials obtained (key: ***${fingerprint.apiKeySuffix})`, {
+      category: "CRED_DERIVE",
+      ...fingerprint,
+    });
 
     // Step 3: Set credentials on client (like Python: client.set_api_creds())
     // Note: JS/TS ClobClient stores credentials in the 'creds' property directly
-    log("debug", "Setting credentials on client...", config);
+    logger.debug("Setting credentials on client...", { category: "IDENTITY" });
     (client as ClobClient & { creds?: ApiKeyCreds }).creds = creds;
 
     // Step 4: Verify with a simple API call
-    log("info", "Verifying credentials with /balance-allowance...", config);
+    logger.info("Verifying credentials with /balance-allowance...", {
+      category: "PREFLIGHT",
+    });
     try {
       const response = await client.getBalanceAllowance({
         asset_type: AssetType.COLLATERAL,
@@ -243,21 +277,37 @@ export async function authenticateMinimal(
       const errorResponse = response as { status?: number; error?: string };
       if (errorResponse.status === 401 || errorResponse.status === 403) {
         story.errorMessage = `Verification failed: ${errorResponse.status} ${errorResponse.error ?? "Unauthorized"}`;
-        log("error", story.errorMessage, config);
+        story.attempts[0].httpStatus = errorResponse.status;
+        story.attempts[0].errorTextShort =
+          errorResponse.error ?? "Unauthorized";
+        logger.error(story.errorMessage, {
+          category: "PREFLIGHT",
+          status: errorResponse.status,
+        });
         return { success: false, story: updateStoryDuration(story, startTime) };
       }
 
       if (errorResponse.error) {
         story.errorMessage = `Verification error: ${errorResponse.error}`;
-        log("error", story.errorMessage, config);
+        story.attempts[0].errorTextShort = errorResponse.error;
+        logger.error(story.errorMessage, { category: "PREFLIGHT" });
         return { success: false, story: updateStoryDuration(story, startTime) };
       }
 
+      // Success!
       story.verificationPassed = true;
       story.success = true;
+      story.attempts[0].success = true;
+      story.attempts[0].httpStatus = 200;
 
       const finalStory = updateStoryDuration(story, startTime);
-      log("info", `✅ Auth successful (${finalStory.durationMs}ms)`, config);
+      logger.info(`✅ Auth successful (${finalStory.durationMs}ms)`, {
+        category: "IDENTITY",
+        durationMs: finalStory.durationMs,
+      });
+
+      // Flush deduplication before returning
+      logger.flushDeduplication();
 
       return {
         success: true,
@@ -272,13 +322,16 @@ export async function authenticateMinimal(
           : String(verifyError);
       const status = extractErrorStatus(verifyError);
 
+      story.attempts[0].httpStatus = status;
+      story.attempts[0].errorTextShort = message.slice(0, 100);
+
       if (status === 401 || status === 403) {
         story.errorMessage = `Verification failed: ${status} Unauthorized`;
       } else {
         story.errorMessage = `Verification error: ${message}`;
       }
 
-      log("error", story.errorMessage, config);
+      logger.error(story.errorMessage, { category: "PREFLIGHT", status });
       return { success: false, story: updateStoryDuration(story, startTime) };
     }
   } catch (unexpectedError) {
@@ -287,30 +340,42 @@ export async function authenticateMinimal(
         ? unexpectedError.message
         : String(unexpectedError);
     story.errorMessage = `Unexpected error: ${message}`;
-    log("error", story.errorMessage, config);
+    logger.error(story.errorMessage, { category: "IDENTITY" });
     return { success: false, story: updateStoryDuration(story, startTime) };
+  } finally {
+    // Always flush deduplication
+    logger.flushDeduplication();
   }
 }
 
 /**
- * Print Auth Story in JSON format
+ * Print Auth Story in JSON format (single structured output)
  */
-export function printAuthStory(story: AuthStory): void {
-  console.log("\n" + "=".repeat(60));
-  console.log("AUTH STORY");
-  console.log("=".repeat(60));
-  console.log(JSON.stringify(story, null, 2));
-  console.log("=".repeat(60));
-
-  if (story.success) {
-    console.log("✅ Authentication successful - ready to trade");
+export function printAuthStory(
+  story: AuthStory,
+  format: "json" | "pretty" = "json",
+): void {
+  if (format === "json") {
+    // Pure JSON output - single line for easy parsing
+    console.log(JSON.stringify(story));
   } else {
-    console.log("❌ Authentication failed");
-    if (story.errorMessage) {
-      console.log(`   Reason: ${story.errorMessage}`);
+    // Pretty format with header/footer (for human readability)
+    console.log("\n" + "=".repeat(60));
+    console.log("AUTH STORY");
+    console.log("=".repeat(60));
+    console.log(JSON.stringify(story, null, 2));
+    console.log("=".repeat(60));
+
+    if (story.success) {
+      console.log("✅ Authentication successful - ready to trade");
+    } else {
+      console.log("❌ Authentication failed");
+      if (story.errorMessage) {
+        console.log(`   Reason: ${story.errorMessage}`);
+      }
     }
+    console.log("=".repeat(60) + "\n");
   }
-  console.log("=".repeat(60) + "\n");
 }
 
 /**

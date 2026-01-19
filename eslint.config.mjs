@@ -27,5 +27,19 @@ export default [
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
+  // Strict rules for auth files - no console.log allowed
+  {
+    files: [
+      'src/clob/credential-derivation-v2.ts',
+      'src/clob/auth-fallback.ts',
+      'src/utils/clob-auth-headers.util.ts',
+      'src/utils/l1-auth-headers.util.ts',
+      'src/utils/auth-diagnostic.util.ts',
+      'src/infrastructure/clob-client.factory.ts',
+    ],
+    rules: {
+      'no-console': 'error', // Block console.log in auth files (use structured logger)
+    },
+  },
 ];
 

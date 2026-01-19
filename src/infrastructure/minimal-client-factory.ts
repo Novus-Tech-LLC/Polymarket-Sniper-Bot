@@ -114,7 +114,8 @@ export async function createMinimalPolymarketClient(
       creds = authResult.creds;
       derivedCreds = authResult.creds;
 
-      const keySuffix = authResult.story.apiKeySuffix ?? "???";
+      const keySuffix =
+        authResult.story.derivedCredFingerprint?.apiKeySuffix ?? "???";
       logger?.info(
         `[MinimalClient] ✅ Credentials derived (key: ${keySuffix})`,
       );
