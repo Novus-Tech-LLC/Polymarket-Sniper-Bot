@@ -463,9 +463,17 @@ const readClobCreds = (
  * Following pmxt's approach: just provide PRIVATE_KEY and credentials are
  * automatically derived. This returns true by default unless explicitly
  * disabled with CLOB_DERIVE_CREDS=false.
+ *
+ * Key precedence (first one found wins):
+ * 1. CLOB_DERIVE_CREDS
+ * 2. CLOB_DERIVE_API_KEY
+ * 3. POLYMARKET_DERIVE_API_KEY
+ * 4. POLY_DERIVE_API_KEY
+ *
+ * If none are set, defaults to true (enabled).
  */
 const readClobDeriveEnabled = (overrides?: Overrides): boolean => {
-  // Check if any CLOB_DERIVE_* key is explicitly set
+  // Check if any CLOB_DERIVE_* key is explicitly set (first one wins)
   for (const key of CLOB_DERIVE_KEYS) {
     const raw = readEnv(key, overrides);
     if (raw !== undefined) {

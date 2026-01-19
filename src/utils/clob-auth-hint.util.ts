@@ -2,7 +2,7 @@ export const formatClobAuthFailureHint = (deriveEnabled: boolean): string => {
   // Note: deriveEnabled defaults to true now (pmxt-style)
   const deriveHint = deriveEnabled
     ? "Credential derivation is enabled (default); ensure the wallet has traded on Polymarket at least once."
-    : "Credential derivation is disabled; to enable auto-derivation from PRIVATE_KEY, remove CLOB_DERIVE_CREDS=false or set it to true.";
+    : "Credential derivation is disabled; to enable auto-derivation from PRIVATE_KEY, set CLOB_DERIVE_CREDS=true or remove it from your configuration.";
   return [
     "[CLOB] Auth hint: Several possible causes for 401 errors:",
     "1) If this is a NEW WALLET that has never traded on Polymarket, you MUST make at least one trade on https://polymarket.com first.",
