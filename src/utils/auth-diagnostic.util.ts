@@ -142,6 +142,10 @@ export function diagnoseAuthFailure(params: {
 
   // Case 4: Derived credentials were created but L2 auth rejected them
   // This is the MOST COMMON scenario when credentials are derived but 401 is returned
+  // Root causes in order of likelihood:
+  // 1. WRONG SIGNATURE TYPE (browser wallets need POLYMARKET_SIGNATURE_TYPE=2)
+  // 2. Missing POLYMARKET_PROXY_ADDRESS for Safe/Proxy wallets
+  // 3. Wallet never traded (least likely if user has used Polymarket website)
   if (
     !userProvidedKeys &&
     deriveEnabled &&
@@ -149,20 +153,25 @@ export function diagnoseAuthFailure(params: {
     verificationFailed &&
     status === 401
   ) {
+    const messageParts = [
+      "API credentials were derived successfully, but verification with Polymarket CLOB failed (401 Unauthorized).",
+      "MOST LIKELY CAUSES (in order):",
+      "(1) Wrong signature type - browser wallets need POLYMARKET_SIGNATURE_TYPE=2 and POLYMARKET_PROXY_ADDRESS",
+      "(2) Missing proxy address for Safe/Proxy wallet",
+      "(3) Wallet never traded on Polymarket (if neither above applies)",
+    ];
     return {
       cause: "DERIVED_KEYS_REJECTED",
-      confidence: "high", // Changed to high - this is the most common scenario
-      message:
-        "API credentials were derived successfully, but verification with Polymarket CLOB failed (401 Unauthorized). " +
-        "This almost always means the wallet has NEVER TRADED on Polymarket yet. " +
-        "Polymarket requires at least one on-chain trade to register a wallet before API credentials can work.",
+      confidence: "high",
+      message: messageParts.join(" "),
       recommendations: [
-        "⚠️  REQUIRED: Visit https://polymarket.com and connect this wallet",
-        "⚠️  REQUIRED: Make at least ONE trade on any market (even $1 is sufficient)",
-        "Wait 1-2 minutes for the trade to confirm on-chain",
+        "🔍 FIRST: Run 'npm run wallet:detect' to identify your wallet type and correct configuration",
+        "⚠️  If you logged in via browser (MetaMask, etc.): Set POLYMARKET_SIGNATURE_TYPE=2",
+        "⚠️  AND set POLYMARKET_PROXY_ADDRESS=<your-polymarket-deposit-address> (found in Polymarket UI under Profile/Wallet)",
+        "⚠️  The deposit address is NOT your EOA/signer address - it's your Polymarket proxy wallet",
         "Clear cached credentials: rm -f /data/clob-creds.json",
-        "Restart the bot - credentials will be derived and should work",
-        "Note: There is no way to bypass this requirement - the wallet MUST trade first",
+        "Restart the bot after setting the correct configuration",
+        "If none of the above apply: Visit https://polymarket.com and make at least ONE trade",
       ],
     };
   }
@@ -192,19 +201,27 @@ export function diagnoseAuthFailure(params: {
   }
 
   // Case 5: Derive enabled but derived creds fail verification
+  // This happens when credential derivation goes through but verification returns 401
   if (deriveEnabled && deriveFailed && verificationFailed) {
+    const messageParts = [
+      "API credentials were derived but failed verification (401).",
+      "MOST LIKELY CAUSES (in order of likelihood):",
+      "(1) Wrong signature type - browser wallets need POLYMARKET_SIGNATURE_TYPE=2 AND POLYMARKET_PROXY_ADDRESS",
+      "(2) Missing POLYMARKET_PROXY_ADDRESS for Safe/Proxy wallets",
+      "(3) Wallet has never traded on Polymarket (only if you've NEVER used Polymarket)",
+    ];
     return {
       cause: "DERIVE_FAILED",
       confidence: "high",
-      message:
-        "API credentials were derived but failed verification. This usually indicates: (1) the wallet has never traded on Polymarket, or (2) there's a mismatch between the derived credentials and the wallet.",
+      message: messageParts.join(" "),
       recommendations: [
-        "If this is a NEW wallet: Visit https://polymarket.com, connect this wallet, and make at least ONE trade",
-        "The wallet must have trading history before the API can create/derive credentials",
-        "After making a trade, clear the credential cache: rm -f /data/clob-creds.json",
-        "Restart the bot to attempt credential derivation again",
-        "Alternative: Generate keys manually at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys) and use POLYMARKET_API_KEY/SECRET/PASSPHRASE",
-        "Verify the wallet address matches your PRIVATE_KEY (check logs for signer address)",
+        "🔍 FIRST: Run 'npm run wallet:detect' to identify your wallet type",
+        "⚠️  If you logged in via browser: Set POLYMARKET_SIGNATURE_TYPE=2",
+        "⚠️  AND set POLYMARKET_PROXY_ADDRESS=<your-polymarket-deposit-address>",
+        "   (Find this in Polymarket UI: Profile → Wallet → Deposit Address)",
+        "Clear cached credentials: rm -f /data/clob-creds.json",
+        "Restart the bot after updating configuration",
+        "If you've NEVER used Polymarket: Visit https://polymarket.com and make one trade first",
       ],
     };
   }

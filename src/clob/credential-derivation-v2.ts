@@ -533,14 +533,22 @@ async function attemptDerive(params: {
     });
 
     if (!isValid) {
-      // Provide more actionable error message
-      // This scenario typically means the wallet has never traded on Polymarket
-      // The API returns "credentials" but they don't work because the wallet isn't registered
+      // Provide actionable error message with multiple possible causes
+      // 401 verification failure can have several root causes, ordered by likelihood:
+      // 1. Wrong signature type (very common - browser wallets need POLYMARKET_SIGNATURE_TYPE=2)
+      // 2. Missing proxy/funder address (for Safe/Proxy wallets)
+      // 3. Wallet never traded on Polymarket
+      const errorDetails = [
+        `Credentials derived but failed verification (401) with sigType=${params.attempt.signatureType}.`,
+        "MOST LIKELY CAUSES (in order):",
+        "(1) Wrong signature type - browser wallets need POLYMARKET_SIGNATURE_TYPE=2 AND POLYMARKET_PROXY_ADDRESS",
+        "(2) Missing proxy address - Safe/Proxy wallets need POLYMARKET_PROXY_ADDRESS set to your Polymarket deposit address",
+        "(3) Wallet not registered - if neither above applies, visit https://polymarket.com and make one trade",
+        "Run 'npm run wallet:detect' to identify your correct wallet configuration.",
+      ];
       return {
         success: false,
-        error:
-          "Credentials derived but failed verification (401). This usually means the wallet has never traded on Polymarket. " +
-          "Visit https://polymarket.com, connect your wallet, and make at least one small trade to register it.",
+        error: errorDetails.join(" "),
         statusCode: 401,
       };
     }
