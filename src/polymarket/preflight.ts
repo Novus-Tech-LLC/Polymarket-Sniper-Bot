@@ -131,6 +131,33 @@ export const ensureTradingReady = async (
   };
   const selectedMode = modeMap[signatureType] ?? "EOA";
 
+  // Helper to create AuthAttempt objects
+  const createAuthAttempt = (
+    attemptId: string,
+    options: {
+      httpStatus?: number;
+      errorCode?: string;
+      errorTextShort?: string;
+      success: boolean;
+      verifyEndpoint?: string;
+      signedPath?: string;
+    },
+  ): AuthAttempt => ({
+    attemptId,
+    mode: selectedMode,
+    sigType: signatureType,
+    l1Auth: effectiveAddress,
+    maker: funderAddress ?? effectiveAddress,
+    funder: funderAddress ?? effectiveAddress,
+    verifyEndpoint: options.verifyEndpoint ?? "/balance-allowance",
+    signedPath: options.signedPath ?? "/balance-allowance",
+    usedAxiosParams: false,
+    httpStatus: options.httpStatus,
+    errorCode: options.errorCode,
+    errorTextShort: options.errorTextShort,
+    success: options.success,
+  });
+
   // Set identity on auth story
   authStory.setIdentity({
     orderIdentity: {
@@ -251,38 +278,22 @@ export const ensureTradingReady = async (
           authOk = false;
           authFailureContext.verificationFailed = true;
           // Add matrix attempt to auth story
-          const matrixAttempt: AuthAttempt = {
-            attemptId: "MATRIX",
-            mode: selectedMode,
-            sigType: signatureType,
-            l1Auth: effectiveAddress,
-            maker: funderAddress ?? effectiveAddress,
-            funder: funderAddress ?? effectiveAddress,
-            verifyEndpoint: "/balance-allowance",
-            signedPath: "/balance-allowance",
-            usedAxiosParams: false,
-            httpStatus: 401,
-            errorTextShort: "Matrix auth failed",
-            success: false,
-          };
-          authStory.addAttempt(matrixAttempt);
+          authStory.addAttempt(
+            createAuthAttempt("MATRIX", {
+              httpStatus: 401,
+              errorTextShort: "Matrix auth failed",
+              success: false,
+            }),
+          );
         } else if (matrix && matrix.ok) {
           authOk = true;
           // Add success attempt to auth story
-          const matrixAttempt: AuthAttempt = {
-            attemptId: "MATRIX",
-            mode: selectedMode,
-            sigType: signatureType,
-            l1Auth: effectiveAddress,
-            maker: funderAddress ?? effectiveAddress,
-            funder: funderAddress ?? effectiveAddress,
-            verifyEndpoint: "/balance-allowance",
-            signedPath: "/balance-allowance",
-            usedAxiosParams: false,
-            httpStatus: 200,
-            success: true,
-          };
-          authStory.addAttempt(matrixAttempt);
+          authStory.addAttempt(
+            createAuthAttempt("MATRIX", {
+              httpStatus: 200,
+              success: true,
+            }),
+          );
         }
       } else {
         const preflight = await runClobAuthPreflight({
@@ -312,21 +323,13 @@ export const ensureTradingReady = async (
             formatClobAuthFailureHint(params.clobDeriveEnabled),
           );
           // Add failed attempt to auth story
-          const preflightAttempt: AuthAttempt = {
-            attemptId: "A",
-            mode: selectedMode,
-            sigType: signatureType,
-            l1Auth: effectiveAddress,
-            maker: funderAddress ?? effectiveAddress,
-            funder: funderAddress ?? effectiveAddress,
-            verifyEndpoint: "/balance-allowance",
-            signedPath: "/balance-allowance",
-            usedAxiosParams: false,
-            httpStatus: preflight.status,
-            errorTextShort: preflight.reason ?? "Unauthorized",
-            success: false,
-          };
-          authStory.addAttempt(preflightAttempt);
+          authStory.addAttempt(
+            createAuthAttempt("A", {
+              httpStatus: preflight.status,
+              errorTextShort: preflight.reason ?? "Unauthorized",
+              success: false,
+            }),
+          );
         } else if (preflight && !preflight.ok) {
           authOk = false;
           authFailureContext.verificationFailed = true;
@@ -335,55 +338,33 @@ export const ensureTradingReady = async (
             "[CLOB] Auth preflight failed; continuing with order submissions.",
           );
           // Add failed attempt to auth story
-          const preflightAttempt: AuthAttempt = {
-            attemptId: "A",
-            mode: selectedMode,
-            sigType: signatureType,
-            l1Auth: effectiveAddress,
-            maker: funderAddress ?? effectiveAddress,
-            funder: funderAddress ?? effectiveAddress,
-            verifyEndpoint: "/balance-allowance",
-            signedPath: "/balance-allowance",
-            usedAxiosParams: false,
-            httpStatus: preflight.status,
-            errorTextShort: preflight.reason ?? "Unknown error",
-            success: false,
-          };
-          authStory.addAttempt(preflightAttempt);
+          authStory.addAttempt(
+            createAuthAttempt("A", {
+              httpStatus: preflight.status,
+              errorTextShort: preflight.reason ?? "Unknown error",
+              success: false,
+            }),
+          );
         } else if (preflight && preflight.ok) {
           authOk = true;
           // Add success attempt to auth story
-          const preflightAttempt: AuthAttempt = {
-            attemptId: "A",
-            mode: selectedMode,
-            sigType: signatureType,
-            l1Auth: effectiveAddress,
-            maker: funderAddress ?? effectiveAddress,
-            funder: funderAddress ?? effectiveAddress,
-            verifyEndpoint: "/balance-allowance",
-            signedPath: "/balance-allowance",
-            usedAxiosParams: false,
-            httpStatus: preflight.status ?? 200,
-            success: true,
-          };
-          authStory.addAttempt(preflightAttempt);
+          authStory.addAttempt(
+            createAuthAttempt("A", {
+              httpStatus: preflight.status ?? 200,
+              success: true,
+            }),
+          );
         } else if (!preflight) {
           // Preflight returned null - likely no creds available or backoff
           // Add attempt showing auth check was skipped
-          const skippedAttempt: AuthAttempt = {
-            attemptId: "A",
-            mode: selectedMode,
-            sigType: signatureType,
-            l1Auth: effectiveAddress,
-            maker: funderAddress ?? effectiveAddress,
-            funder: funderAddress ?? effectiveAddress,
-            verifyEndpoint: "/balance-allowance",
-            signedPath: "n/a",
-            usedAxiosParams: false,
-            errorTextShort: "No credentials available or backoff",
-            success: false,
-          };
-          authStory.addAttempt(skippedAttempt);
+          authStory.addAttempt(
+            createAuthAttempt("A", {
+              verifyEndpoint: "/balance-allowance",
+              signedPath: "n/a",
+              errorTextShort: "No credentials available or backoff",
+              success: false,
+            }),
+          );
         }
       }
     } catch (err) {
@@ -391,21 +372,13 @@ export const ensureTradingReady = async (
       authFailureContext.verificationError = maybeError?.message;
 
       // Add error attempt to auth story
-      const errorAttempt: AuthAttempt = {
-        attemptId: "A",
-        mode: selectedMode,
-        sigType: signatureType,
-        l1Auth: effectiveAddress,
-        maker: funderAddress ?? effectiveAddress,
-        funder: funderAddress ?? effectiveAddress,
-        verifyEndpoint: "/balance-allowance",
-        signedPath: "/balance-allowance",
-        usedAxiosParams: false,
-        errorCode: maybeError?.code,
-        errorTextShort: maybeError?.message?.slice(0, 100) ?? "Unknown error",
-        success: false,
-      };
-      authStory.addAttempt(errorAttempt);
+      authStory.addAttempt(
+        createAuthAttempt("A", {
+          errorCode: maybeError?.code,
+          errorTextShort: maybeError?.message?.slice(0, 100) ?? "Unknown error",
+          success: false,
+        }),
+      );
 
       if (maybeError?.code === "ECONNRESET") {
         params.logger.warn(
@@ -427,20 +400,14 @@ export const ensureTradingReady = async (
     }
   } else {
     // CLOB auth disabled - add attempt showing it was skipped
-    const skippedAttempt: AuthAttempt = {
-      attemptId: "SKIP",
-      mode: selectedMode,
-      sigType: signatureType,
-      l1Auth: effectiveAddress,
-      maker: funderAddress ?? effectiveAddress,
-      funder: funderAddress ?? effectiveAddress,
-      verifyEndpoint: "n/a",
-      signedPath: "n/a",
-      usedAxiosParams: false,
-      errorTextShort: "CLOB auth disabled",
-      success: false,
-    };
-    authStory.addAttempt(skippedAttempt);
+    authStory.addAttempt(
+      createAuthAttempt("SKIP", {
+        verifyEndpoint: "n/a",
+        signedPath: "n/a",
+        errorTextShort: "CLOB auth disabled",
+        success: false,
+      }),
+    );
     params.logger.info(
       "[Preflight] CLOB auth disabled; skipping authenticated endpoint check.",
     );
