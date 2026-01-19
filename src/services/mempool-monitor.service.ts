@@ -115,7 +115,7 @@ export class MempoolMonitorService {
         "[Monitor] Mempool monitoring via pending transaction subscription is disabled.",
       );
       logger.info(
-        "[Monitor] The bot will continue to operate using API-based monitoring for trade detection.",
+        "[Monitor] The bot will continue to operate using Polymarket API polling for trade detection.",
       );
       logger.debug(
         `[Monitor] RPC capability check details: ${sanitizeErrorMessage(err)}`,

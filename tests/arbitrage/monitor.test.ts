@@ -252,9 +252,9 @@ test("monitor gracefully handles RPC endpoint without eth_newPendingTransactionF
   );
   assert.ok(
     infoMessages.some((msg) =>
-      msg.includes("will continue to operate using API-based monitoring"),
+      msg.includes("will continue to operate using Polymarket API polling"),
     ),
-    "Should log info about fallback to API monitoring",
+    "Should log info about fallback to API polling",
   );
 
   // Verify no error messages were logged
