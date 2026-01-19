@@ -4,9 +4,6 @@
 # To make this agent available, merge this file into the default repository branch.
 # For format details, see: https://gh.io/customagents/config
 
-name:
-description:
----
 name: Polymarket Auth & Logging Sheriff
 description: Enforces structured, deduped logging and produces a single high-signal auth diagnostic summary (“Auth Story”) per run. Focused on eliminating redundant logs, preventing secret leakage, and accelerating diagnosis of CLOB 401/auth issues.
 ---
