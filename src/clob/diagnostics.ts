@@ -413,7 +413,8 @@ export const logClobDiagnostics = (params: {
       passphrasePresent: params.passphrasePresent,
     });
   } else {
-    params.logger.info(
+    // Gate verbose identity dumps behind LOG_LEVEL=debug
+    params.logger.debug(
       `[CLOB][Diag] derivedSignerAddress=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} chainId=${params.chainId ?? "n/a"} clobHost=${params.clobHost ?? POLYMARKET_API.BASE_URL} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} makerAddress=${params.makerAddress ?? "n/a"} ownerId=${params.ownerId ?? "n/a"} keyPresent=${params.apiKeyPresent} secretPresent=${params.secretPresent} passphrasePresent=${params.passphrasePresent}`,
     );
   }
@@ -445,7 +446,8 @@ export const logAuthFundsDiagnostics = (params: {
       credentialMode: params.credentialMode,
     });
   } else {
-    params.logger.info(
+    // Gate verbose identity dumps behind LOG_LEVEL=debug
+    params.logger.debug(
       `[CLOB][Diag][AuthFunds] signer=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} effectivePolyAddress=${params.effectivePolyAddress ?? "n/a"} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} credentialMode=${params.credentialMode}`,
     );
   }

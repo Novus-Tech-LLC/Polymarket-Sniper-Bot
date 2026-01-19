@@ -289,6 +289,21 @@ export class AuthStoryBuilder {
       category: "SUMMARY",
       runId: this.story.runId,
     });
+
+    // Also output a single JSON block for easy parsing
+    this.printJsonSummary();
+  }
+
+  /**
+   * Print the auth story as a single JSON block (Auth Story JSON)
+   */
+  printJsonSummary(): void {
+    const logger = getLogger();
+    logger.info("AUTH_STORY_JSON", {
+      category: "SUMMARY",
+      runId: this.story.runId,
+      authStory: this.story,
+    });
   }
 
   /**
