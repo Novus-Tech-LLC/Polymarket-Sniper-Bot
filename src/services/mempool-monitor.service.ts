@@ -108,17 +108,17 @@ export class MempoolMonitorService {
       );
       await this.provider.send("eth_uninstallFilter", [filterId]);
     } catch (err) {
-      logger.warn(
-        `[Monitor] RPC endpoint does not support eth_newPendingTransactionFilter method. ${sanitizeErrorMessage(err)}`,
+      logger.info(
+        "[Monitor] RPC endpoint does not support eth_newPendingTransactionFilter method. This is expected for some RPC providers.",
       );
       logger.info(
         "[Monitor] Mempool monitoring via pending transaction subscription is disabled.",
       );
       logger.info(
-        "[Monitor] To enable mempool monitoring, use an RPC provider that supports: eth_newPendingTransactionFilter, eth_subscribe (if websocket).",
+        "[Monitor] The bot will continue to operate using Polymarket API polling for trade detection.",
       );
-      logger.info(
-        "[Monitor] Fallback: Polling latest blocks will be used if enabled. Consider upgrading RPC provider for full mempool visibility.",
+      logger.debug(
+        `[Monitor] RPC capability check details: ${sanitizeErrorMessage(err)}`,
       );
       return;
     }

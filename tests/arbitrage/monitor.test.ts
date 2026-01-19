@@ -196,3 +196,72 @@ test("monitor tracks skip counters for unsupported actions, missing fields, and 
   assert.equal(stats.skippedOutsideRecentWindowTrades, 1);
   assert.equal(stats.skippedMissingFieldsTrades, 1);
 });
+
+test("monitor gracefully handles RPC endpoint without eth_newPendingTransactionFilter support", async () => {
+  const logMessages: string[] = [];
+  const testLogger = {
+    info: (msg: string) => logMessages.push(`INFO: ${msg}`),
+    warn: (msg: string) => logMessages.push(`WARN: ${msg}`),
+    error: (msg: string) => logMessages.push(`ERROR: ${msg}`),
+    debug: (msg: string) => logMessages.push(`DEBUG: ${msg}`),
+  };
+
+  const service = new MempoolMonitorService({
+    client: {} as never,
+    env: { ...baseEnv, requireConfirmed: false },
+    logger: testLogger,
+    onDetectedTrade: async () => undefined,
+  });
+
+  // Mock provider that doesn't support eth_newPendingTransactionFilter
+  const mockProvider = {
+    send: async (method: string) => {
+      if (method === "eth_newPendingTransactionFilter") {
+        const error: Error & { code?: string } = new Error(
+          "The method eth_newPendingTransactionFilter does not exist/is not available",
+        );
+        error.code = "UNSUPPORTED_OPERATION";
+        throw error;
+      }
+      return null;
+    },
+    on: () => undefined,
+    removeAllListeners: () => undefined,
+  };
+
+  (
+    service as {
+      provider?: typeof mockProvider;
+    }
+  ).provider = mockProvider;
+
+  // Call enablePendingSubscription
+  await (
+    service as {
+      enablePendingSubscription: () => Promise<void>;
+    }
+  ).enablePendingSubscription();
+
+  // Verify that appropriate info messages were logged (not warning/error)
+  const infoMessages = logMessages.filter((msg) => msg.startsWith("INFO:"));
+  assert.ok(
+    infoMessages.some((msg) =>
+      msg.includes("does not support eth_newPendingTransactionFilter"),
+    ),
+    "Should log info about unsupported method",
+  );
+  assert.ok(
+    infoMessages.some((msg) =>
+      msg.includes("will continue to operate using Polymarket API polling"),
+    ),
+    "Should log info about fallback to API polling",
+  );
+
+  // Verify no error messages were logged
+  const errorMessages = logMessages.filter((msg) => msg.startsWith("ERROR:"));
+  assert.equal(
+    errorMessages.length,
+    0,
+    "Should not log errors for unsupported RPC method",
+  );
+});
