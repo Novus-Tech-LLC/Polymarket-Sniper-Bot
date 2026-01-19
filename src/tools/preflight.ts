@@ -37,15 +37,42 @@ const getClobCreds = () => ({
   ]),
 });
 
+// Keys to check for explicit derivation enable/disable (order matters - first found wins)
+// Mirrors CLOB_DERIVE_KEYS from loadConfig.ts for consistency
+const CLOB_DERIVE_KEYS = [
+  "CLOB_DERIVE_CREDS",
+  "CLOB_DERIVE_API_KEY",
+  "POLYMARKET_DERIVE_API_KEY",
+  "POLY_DERIVE_API_KEY",
+];
+
+/**
+ * Check if credential derivation is explicitly configured.
+ * Mirrors readClobDeriveEnabled from loadConfig.ts for consistency.
+ * Following pmxt's approach: credentials are automatically derived by default.
+ * Returns true by default unless explicitly disabled.
+ */
+const readClobDeriveEnabled = (): boolean => {
+  for (const key of CLOB_DERIVE_KEYS) {
+    const raw = readEnv(key);
+    if (raw !== undefined) {
+      return String(raw).toLowerCase() === "true";
+    }
+  }
+  // Not explicitly set - default to true (pmxt-style)
+  return true;
+};
+
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
   const rpcUrl = required("RPC_URL");
   const privateKey = required("PRIVATE_KEY");
   const publicKey = readEnv("PUBLIC_KEY");
-  const clobDeriveEnabled =
-    readEnv("CLOB_DERIVE_CREDS") === "true" ||
-    readEnv("CLOB_DERIVE_API_KEY") === "true";
   const clobCreds = getClobCreds();
+
+  // Following pmxt methodology: auto-derive credentials when not explicitly provided
+  // readClobDeriveEnabled defaults to true (pmxt-style), matching loadConfig.ts behavior
+  const clobDeriveEnabled = readClobDeriveEnabled();
   const collateralTokenDecimals = Number(
     readEnv("COLLATERAL_TOKEN_DECIMALS") ?? 6,
   );
