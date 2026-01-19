@@ -45,6 +45,7 @@
     "auth:probe:simple": "ts-node scripts/auth_probe.ts",
     "auth:probe:legacy": "ts-node scripts/clob_auth_probe.ts",
     "auth:validate": "ts-node scripts/validate_minimal_auth.ts",
+    "auth:validate-logging": "ts-node scripts/validate_auth_logging.ts",
     "auth:diag": "ts-node scripts/auth_diagnostic.ts",
     "auth:diag:debug": "LOG_LEVEL=debug ts-node scripts/auth_diagnostic.ts"
   },
