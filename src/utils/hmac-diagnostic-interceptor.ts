@@ -5,7 +5,12 @@
  * This is the highest-leverage diagnostic for 401 auth failures when credentials are valid.
  */
 
-import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from "axios";
+import type {
+  AxiosInstance,
+  InternalAxiosRequestConfig,
+  AxiosResponse,
+  AxiosError,
+} from "axios";
 import * as crypto from "node:crypto";
 
 type HmacSigningInputs = {
@@ -60,7 +65,9 @@ function buildCanonicalQueryString(params: Record<string, unknown>): string {
   }
 
   const filtered = Object.fromEntries(
-    Object.entries(params).filter(([, value]) => value !== undefined && value !== null)
+    Object.entries(params).filter(
+      ([, value]) => value !== undefined && value !== null,
+    ),
   );
 
   const keys = Object.keys(filtered).sort();
@@ -69,7 +76,10 @@ function buildCanonicalQueryString(params: Record<string, unknown>): string {
   }
 
   return keys
-    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(String(filtered[key]))}`)
+    .map(
+      (key) =>
+        `${encodeURIComponent(key)}=${encodeURIComponent(String(filtered[key]))}`,
+    )
     .join("&");
 }
 
@@ -81,7 +91,7 @@ export function trackHmacSigningInputs(
   timestamp: number,
   method: string,
   requestPath: string,
-  body?: string
+  body?: string,
 ): void {
   if (!ENABLE_HMAC_DIAGNOSTICS) return;
 
@@ -106,12 +116,12 @@ export function trackHmacSigningInputs(
  */
 export function installHmacDiagnosticInterceptor(
   axiosInstance: AxiosInstance,
-  logger?: { debug: (msg: string) => void; warn: (msg: string) => void }
+  logger?: { debug: (msg: string) => void; warn: (msg: string) => void },
 ): void {
   if (!ENABLE_HMAC_DIAGNOSTICS) {
     if (logger) {
       logger.debug(
-        "[HmacDiag] Skipping interceptor install (ENABLE_HMAC_DIAGNOSTICS=false)"
+        "[HmacDiag] Skipping interceptor install (ENABLE_HMAC_DIAGNOSTICS=false)",
       );
     }
     return;
@@ -120,8 +130,12 @@ export function installHmacDiagnosticInterceptor(
   // Request interceptor: capture what's being sent
   axiosInstance.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-      const timestamp = config.headers?.["POLY_TIMESTAMP"] as string | undefined;
-      const signature = config.headers?.["POLY_SIGNATURE"] as string | undefined;
+      const timestamp = config.headers?.["POLY_TIMESTAMP"] as
+        | string
+        | undefined;
+      const signature = config.headers?.["POLY_SIGNATURE"] as
+        | string
+        | undefined;
 
       if (!timestamp || !signature) {
         return config; // Not a signed request
@@ -144,14 +158,17 @@ export function installHmacDiagnosticInterceptor(
             signedMethod: signingInputs.method,
             actualMethod: method,
             methodMatch,
-            bodyHash: config.data ? hashValue(JSON.stringify(config.data)) : null,
+            bodyHash: config.data
+              ? hashValue(JSON.stringify(config.data))
+              : null,
             secretHash: hashValue(signingInputs.secret),
             timestamp,
             signature: signature.slice(0, 8) + "...",
           };
 
           // Attach to config for response interceptor
-          (config as unknown as Record<string, unknown>).hmacDiagnostic = diagnostic;
+          (config as unknown as Record<string, unknown>).hmacDiagnostic =
+            diagnostic;
 
           if (!pathMatch || !methodMatch) {
             if (logger) {
@@ -169,14 +186,16 @@ export function installHmacDiagnosticInterceptor(
 
       return config;
     },
-    (error) => Promise.reject(error)
+    (error) => Promise.reject(error),
   );
 
   // Response interceptor: log on 401
   axiosInstance.interceptors.response.use(
     (response: AxiosResponse) => response,
     (error: AxiosError) => {
-      const config = error.config as InternalAxiosRequestConfig & { hmacDiagnostic?: HmacDiagnosticResult };
+      const config = error.config as InternalAxiosRequestConfig & {
+        hmacDiagnostic?: HmacDiagnosticResult;
+      };
       const diagnostic = config?.hmacDiagnostic;
 
       if (error.response?.status === 401 && diagnostic) {
@@ -184,12 +203,15 @@ export function installHmacDiagnosticInterceptor(
           logger.warn("[HmacDiag] 401 Unauthorized with diagnostic data:");
           logger.warn(JSON.stringify(diagnostic, null, 2));
         } else {
-          console.warn("[HmacDiag] 401 Unauthorized:", JSON.stringify(diagnostic, null, 2));
+          console.warn(
+            "[HmacDiag] 401 Unauthorized:",
+            JSON.stringify(diagnostic, null, 2),
+          );
         }
       }
 
       return Promise.reject(error);
-    }
+    },
   );
 
   if (logger) {
@@ -205,7 +227,7 @@ export function generateAuthStoryDiagnostic(
   method: string,
   requestPath: string,
   statusCode: number,
-  secretHash: string
+  secretHash: string,
 ): string {
   return JSON.stringify({
     run_id: process.env.RUN_ID || "unknown",

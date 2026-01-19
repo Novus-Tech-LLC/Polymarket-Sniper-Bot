@@ -47,7 +47,9 @@
     "auth:validate": "ts-node scripts/validate_minimal_auth.ts",
     "auth:validate-logging": "ts-node scripts/validate_auth_logging.ts",
     "auth:diag": "ts-node scripts/auth_diagnostic.ts",
-    "auth:diag:debug": "LOG_LEVEL=debug ts-node scripts/auth_diagnostic.ts"
+    "auth:diag:debug": "LOG_LEVEL=debug ts-node scripts/auth_diagnostic.ts",
+    "wallet:check": "ts-node scripts/check_wallet_status.ts",
+    "wallet:detect": "ts-node scripts/detect_wallet_type.ts"
   },
   "keywords": [
     "polymarket",

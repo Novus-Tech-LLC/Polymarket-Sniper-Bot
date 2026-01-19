@@ -272,6 +272,76 @@ export function generateFailureSummary(
     `[AuthFallback] All ${failedCount} credential derivation attempts failed. Last error: ${lastError}`,
   );
 
+  // Check if it's a 401 verification failure (credentials derived but rejected)
+  const has401Verification = results.some(
+    (r) => r.statusCode === 401 && r.error?.includes("verification"),
+  );
+
+  // Always show the most likely cause prominently
+  logger.warn(
+    "[AuthFallback] ========================================================",
+  );
+  logger.warn("[AuthFallback] 🔍 MOST LIKELY CAUSES (in order):");
+  logger.warn(
+    "[AuthFallback] ========================================================",
+  );
+
+  if (has401Verification) {
+    // 401 during verification is almost always a signature type mismatch
+    logger.warn(
+      "[AuthFallback]   1. ⚠️  WRONG SIGNATURE TYPE - If you logged in via browser",
+    );
+    logger.warn(
+      "[AuthFallback]      to Polymarket, you need POLYMARKET_SIGNATURE_TYPE=2",
+    );
+    logger.warn(
+      "[AuthFallback]      AND POLYMARKET_PROXY_ADDRESS=<your-polymarket-deposit-address>",
+    );
+    logger.warn("[AuthFallback]");
+    logger.warn(
+      "[AuthFallback]   2. Missing proxy/funder address for Safe wallet mode",
+    );
+    logger.warn("[AuthFallback]");
+    logger.warn(
+      "[AuthFallback]   3. Wallet never traded (if none of the above apply)",
+    );
+  } else {
+    logger.warn("[AuthFallback]   1. Wallet has never traded on Polymarket");
+    logger.warn(
+      "[AuthFallback]   2. Wrong signature type (need POLYMARKET_SIGNATURE_TYPE=2 for browser wallets)",
+    );
+    logger.warn(
+      "[AuthFallback]   3. Missing POLYMARKET_PROXY_ADDRESS for Safe/Proxy wallets",
+    );
+  }
+
+  logger.warn(
+    "[AuthFallback] ========================================================",
+  );
+  logger.warn("[AuthFallback] 🛠️  TO FIX:");
+  logger.warn(
+    "[AuthFallback] ========================================================",
+  );
+  logger.warn(
+    "[AuthFallback]   1. Run 'npm run wallet:detect' to identify your wallet type",
+  );
+  logger.warn(
+    "[AuthFallback]   2. If browser login: Set POLYMARKET_SIGNATURE_TYPE=2",
+  );
+  logger.warn(
+    "[AuthFallback]   3. Set POLYMARKET_PROXY_ADDRESS to your Polymarket deposit address",
+  );
+  logger.warn(
+    "[AuthFallback]      (found in Polymarket UI under Profile/Wallet)",
+  );
+  logger.warn(
+    "[AuthFallback]   4. Clear credential cache: rm -f /data/clob-creds.json",
+  );
+  logger.warn("[AuthFallback]   5. Restart the bot");
+  logger.warn(
+    "[AuthFallback] ========================================================",
+  );
+
   // Verbose details only at debug level to prevent spam
   if (!isDebugEnabled()) {
     return;
@@ -295,28 +365,6 @@ export function generateFailureSummary(
     );
   });
 
-  logger.debug(
-    "[AuthFallback] ========================================================",
-  );
-  logger.debug("[AuthFallback] POSSIBLE CAUSES:");
-  logger.debug("[AuthFallback]   1. Wallet has never traded on Polymarket");
-  logger.debug(
-    "[AuthFallback]   2. Incorrect funder/proxy address for Safe/Proxy mode",
-  );
-  logger.debug("[AuthFallback]   3. Private key doesn't match expected wallet");
-  logger.debug("[AuthFallback]   4. Network connectivity issues");
-  logger.debug(
-    "[AuthFallback] ========================================================",
-  );
-  logger.debug("[AuthFallback] TO FIX:");
-  logger.debug(
-    "[AuthFallback]   1. Visit https://polymarket.com and connect wallet",
-  );
-  logger.debug("[AuthFallback]   2. Make at least one small trade ($1+)");
-  logger.debug(
-    "[AuthFallback]   3. Wait for transaction confirmation (1-2 min)",
-  );
-  logger.debug("[AuthFallback]   4. Restart bot");
   logger.debug(
     "[AuthFallback] ========================================================",
   );

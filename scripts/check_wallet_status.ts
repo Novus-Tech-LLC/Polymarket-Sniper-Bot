@@ -140,7 +140,7 @@ async function main(): Promise<void> {
         : `0x${privateKey}`;
       const wallet = new Wallet(normalizedKey);
       walletAddress = wallet.address;
-    } catch (error) {
+    } catch {
       console.error("❌ ERROR: Invalid PRIVATE_KEY format");
       process.exit(1);
     }
@@ -187,8 +187,12 @@ async function main(): Promise<void> {
     if (balances.error) {
       console.log(`⚠️  ${balances.error}`);
     } else {
-      console.log(`   POL Balance:  ${Number(balances.maticBalance).toFixed(4)} POL`);
-      console.log(`   USDC Balance: ${Number(balances.usdcBalance).toFixed(2)} USDC`);
+      console.log(
+        `   POL Balance:  ${Number(balances.maticBalance).toFixed(4)} POL`,
+      );
+      console.log(
+        `   USDC Balance: ${Number(balances.usdcBalance).toFixed(2)} USDC`,
+      );
 
       if (Number(balances.usdcBalance) < 1) {
         console.log("");
@@ -202,9 +206,7 @@ async function main(): Promise<void> {
       }
     }
   } else {
-    console.log(
-      "ℹ️  Set RPC_URL to check on-chain balances (POL and USDC)",
-    );
+    console.log("ℹ️  Set RPC_URL to check on-chain balances (POL and USDC)");
   }
 
   console.log("\n========================================================");

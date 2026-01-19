@@ -15,7 +15,7 @@ type BuildPolyHmacSignatureFn = (
   timestamp: number,
   method: string,
   requestPath: string,
-  body?: string
+  body?: string,
 ) => Promise<string>;
 
 let originalBuildPolyHmacSignature: BuildPolyHmacSignatureFn | null = null;
@@ -24,9 +24,10 @@ let overrideInstalled = false;
 /**
  * Install diagnostic wrapper around buildPolyHmacSignature
  */
-export function installHmacSignatureOverride(
-  logger?: { debug: (msg: string) => void; warn: (msg: string) => void }
-): void {
+export function installHmacSignatureOverride(logger?: {
+  debug: (msg: string) => void;
+  warn: (msg: string) => void;
+}): void {
   if (overrideInstalled) {
     if (logger) {
       logger.debug("[HmacOverride] Already installed, skipping");
@@ -36,7 +37,9 @@ export function installHmacSignatureOverride(
 
   if (typeof clobSigning.buildPolyHmacSignature !== "function") {
     if (logger) {
-      logger.warn("[HmacOverride] buildPolyHmacSignature not found in clob-client");
+      logger.warn(
+        "[HmacOverride] buildPolyHmacSignature not found in clob-client",
+      );
     }
     return;
   }
@@ -44,46 +47,51 @@ export function installHmacSignatureOverride(
   originalBuildPolyHmacSignature = clobSigning.buildPolyHmacSignature;
 
   // Monkey-patch the function
-  (clobSigning as { buildPolyHmacSignature: BuildPolyHmacSignatureFn }).buildPolyHmacSignature =
-    async function wrappedBuildPolyHmacSignature(
-      secret: string,
-      timestamp: number,
-      method: string,
-      requestPath: string,
-      body?: string
-    ): Promise<string> {
-      // Track inputs for diagnostic correlation
-      trackHmacSigningInputs(secret, timestamp, method, requestPath, body);
+  (
+    clobSigning as { buildPolyHmacSignature: BuildPolyHmacSignatureFn }
+  ).buildPolyHmacSignature = async function wrappedBuildPolyHmacSignature(
+    secret: string,
+    timestamp: number,
+    method: string,
+    requestPath: string,
+    body?: string,
+  ): Promise<string> {
+    // Track inputs for diagnostic correlation
+    trackHmacSigningInputs(secret, timestamp, method, requestPath, body);
 
-      // Log if enabled
-      if (process.env.DEBUG_HMAC_SIGNING === "true" && logger) {
-        logger.debug("[HmacOverride] Signing inputs:");
-        logger.debug(`  timestamp: ${timestamp}`);
-        logger.debug(`  method: ${method}`);
-        logger.debug(`  requestPath: ${requestPath}`);
-        logger.debug(`  body: ${body ? `<${body.length} bytes>` : "undefined"}`);
-        logger.debug(`  secret: ${secret.slice(0, 8)}...${secret.slice(-4)} (len=${secret.length})`);
-      }
-
-      // Call original
-      if (!originalBuildPolyHmacSignature) {
-        throw new Error("Original buildPolyHmacSignature not found");
-      }
-
-      const signature = await originalBuildPolyHmacSignature(
-        secret,
-        timestamp,
-        method,
-        requestPath,
-        body
+    // Log if enabled
+    if (process.env.DEBUG_HMAC_SIGNING === "true" && logger) {
+      logger.debug("[HmacOverride] Signing inputs:");
+      logger.debug(`  timestamp: ${timestamp}`);
+      logger.debug(`  method: ${method}`);
+      logger.debug(`  requestPath: ${requestPath}`);
+      logger.debug(`  body: ${body ? `<${body.length} bytes>` : "undefined"}`);
+      logger.debug(
+        `  secret: ${secret.slice(0, 8)}...${secret.slice(-4)} (len=${secret.length})`,
       );
+    }
 
-      if (process.env.DEBUG_HMAC_SIGNING === "true" && logger) {
-        logger.debug(`  signature: ${signature.slice(0, 12)}...${signature.slice(-8)}`);
-      }
+    // Call original
+    if (!originalBuildPolyHmacSignature) {
+      throw new Error("Original buildPolyHmacSignature not found");
+    }
 
-      return signature;
-    };
+    const signature = await originalBuildPolyHmacSignature(
+      secret,
+      timestamp,
+      method,
+      requestPath,
+      body,
+    );
+
+    if (process.env.DEBUG_HMAC_SIGNING === "true" && logger) {
+      logger.debug(
+        `  signature: ${signature.slice(0, 12)}...${signature.slice(-8)}`,
+      );
+    }
+
+    return signature;
+  };
 
   overrideInstalled = true;
 
@@ -100,8 +108,9 @@ export function restoreHmacSignatureOriginal(): void {
     return;
   }
 
-  (clobSigning as { buildPolyHmacSignature: BuildPolyHmacSignatureFn }).buildPolyHmacSignature =
-    originalBuildPolyHmacSignature;
+  (
+    clobSigning as { buildPolyHmacSignature: BuildPolyHmacSignatureFn }
+  ).buildPolyHmacSignature = originalBuildPolyHmacSignature;
 
   overrideInstalled = false;
   originalBuildPolyHmacSignature = null;

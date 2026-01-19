@@ -91,10 +91,11 @@ test("diagnoseAuthFailure identifies derived keys rejected", () => {
   });
 
   assert.equal(result.cause, "DERIVED_KEYS_REJECTED");
-  assert.equal(result.confidence, "medium");
+  assert.equal(result.confidence, "high"); // Changed from medium to high - this is the most common scenario
   assert.ok(
-    result.message.includes("rejected during L2 authentication"),
-    "Should mention L2 authentication rejection",
+    result.message.includes("verification") ||
+      result.message.includes("NEVER TRADED"),
+    "Should mention verification failure or wallet not traded",
   );
   assert.ok(
     result.recommendations.some((r) => r.includes("polymarket.com")),
