@@ -226,8 +226,9 @@ export async function authenticateMinimal(
     );
 
     // Step 3: Set credentials on client (like Python: client.set_api_creds())
+    // Note: JS/TS ClobClient stores credentials in the 'creds' property directly
     log("debug", "Setting credentials on client...", config);
-    client.setApiCreds(creds);
+    (client as ClobClient & { creds?: ApiKeyCreds }).creds = creds;
 
     // Step 4: Verify with a simple API call
     log("info", "Verifying credentials with /balance-allowance...", config);
