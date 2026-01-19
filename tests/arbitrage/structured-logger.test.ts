@@ -70,7 +70,8 @@ describe("StructuredLogger", () => {
     };
 
     logger.debug("Test with private key", {
-      privateKey: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      privateKey:
+        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
     });
 
     console.log = originalLog;

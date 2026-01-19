@@ -13,7 +13,10 @@
  * deterministic param serialization, and ensure it matches what was signed.
  */
 
-import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
+import axios, {
+  type AxiosInstance,
+  type InternalAxiosRequestConfig,
+} from "axios";
 import { createHash } from "crypto";
 import type { Logger } from "../utils/logger.util";
 import { canonicalQuery } from "../utils/query-string.util";
@@ -48,7 +51,10 @@ function serializeParams(params?: Record<string, unknown>): string {
  * Computes a short digest of a string for logging (non-sensitive)
  */
 function computeDigest(input: string): string {
-  return createHash("sha256").update(input, "utf8").digest("hex").substring(0, 16);
+  return createHash("sha256")
+    .update(input, "utf8")
+    .digest("hex")
+    .substring(0, 16);
 }
 
 /**
@@ -67,8 +73,11 @@ function redactSecret(secret: string): string {
  * - Request interceptor for canonicalization verification
  * - Debug logging when CLOB_DEBUG_CANON=true
  */
-export function createClobHttpClient(config: ClobHttpClientConfig): AxiosInstance {
-  const debugCanon = config.debugCanon ?? process.env.CLOB_DEBUG_CANON === "true";
+export function createClobHttpClient(
+  config: ClobHttpClientConfig,
+): AxiosInstance {
+  const debugCanon =
+    config.debugCanon ?? process.env.CLOB_DEBUG_CANON === "true";
   const logger = config.logger;
 
   const instance = axios.create({
@@ -91,7 +100,9 @@ export function createClobHttpClient(config: ClobHttpClientConfig): AxiosInstanc
         const method = (requestConfig.method ?? "GET").toUpperCase();
         const baseURL = requestConfig.baseURL ?? config.baseURL;
         const url = requestConfig.url ?? "/";
-        const params = requestConfig.params as Record<string, unknown> | undefined;
+        const params = requestConfig.params as
+          | Record<string, unknown>
+          | undefined;
 
         // Compute the serialized query string
         const serializedQuery = serializeParams(params);
@@ -104,14 +115,18 @@ export function createClobHttpClient(config: ClobHttpClientConfig): AxiosInstanc
         const absoluteURL = `${baseURL}${pathWithQuery}`;
 
         // Log canonicalization details
-        logger.debug("[ClobHttpClient][Canon] ===== Request Canonicalization =====");
+        logger.debug(
+          "[ClobHttpClient][Canon] ===== Request Canonicalization =====",
+        );
         logger.debug(`[ClobHttpClient][Canon] METHOD: ${method}`);
         logger.debug(`[ClobHttpClient][Canon] baseURL: ${baseURL}`);
         logger.debug(`[ClobHttpClient][Canon] config.url: ${url}`);
         logger.debug(
           `[ClobHttpClient][Canon] config.params: ${params ? JSON.stringify(params) : "{}"}`,
         );
-        logger.debug(`[ClobHttpClient][Canon] serializedQuery: ${serializedQuery || "(empty)"}`);
+        logger.debug(
+          `[ClobHttpClient][Canon] serializedQuery: ${serializedQuery || "(empty)"}`,
+        );
         logger.debug(`[ClobHttpClient][Canon] pathWithQuery: ${pathWithQuery}`);
         logger.debug(`[ClobHttpClient][Canon] absoluteURL: ${absoluteURL}`);
         logger.debug(
@@ -157,7 +172,9 @@ export function createClobHttpClient(config: ClobHttpClientConfig): AxiosInstanc
           }
         }
 
-        logger.debug("[ClobHttpClient][Canon] ========================================");
+        logger.debug(
+          "[ClobHttpClient][Canon] ========================================",
+        );
       } catch (err) {
         // Don't fail the request if logging fails
         logger?.warn(

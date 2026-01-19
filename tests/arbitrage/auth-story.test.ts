@@ -11,7 +11,10 @@ import {
   getAuthStory,
   resetAuthStory,
 } from "../../src/clob/auth-story";
-import type { OrderIdentity, L1AuthIdentity } from "../../src/clob/identity-resolver";
+import type {
+  OrderIdentity,
+  L1AuthIdentity,
+} from "../../src/clob/identity-resolver";
 
 describe("Auth Story", () => {
   it("should create credential fingerprint", () => {
@@ -61,7 +64,10 @@ describe("Auth Story", () => {
 
     const story = builder.getStory();
     assert.equal(story.runId, "test_run_123");
-    assert.equal(story.signerAddress, "0x1234567890abcdef1234567890abcdef12345678");
+    assert.equal(
+      story.signerAddress,
+      "0x1234567890abcdef1234567890abcdef12345678",
+    );
     assert.equal(story.clobHost, "https://clob.polymarket.com");
     assert.equal(story.chainId, 137);
     assert.equal(story.attempts.length, 0);
@@ -93,7 +99,10 @@ describe("Auth Story", () => {
     const story = builder.getStory();
     assert.equal(story.selectedMode, "EOA");
     assert.equal(story.selectedSignatureType, 0);
-    assert.equal(story.makerAddress, "0x1234567890abcdef1234567890abcdef12345678");
+    assert.equal(
+      story.makerAddress,
+      "0x1234567890abcdef1234567890abcdef12345678",
+    );
   });
 
   it("should add attempts to auth story", () => {
@@ -157,7 +166,10 @@ describe("Auth Story", () => {
     const parsed = JSON.parse(json);
 
     assert.equal(parsed.runId, "test_run_123");
-    assert.equal(parsed.signerAddress, "0x1234567890abcdef1234567890abcdef12345678");
+    assert.equal(
+      parsed.signerAddress,
+      "0x1234567890abcdef1234567890abcdef12345678",
+    );
   });
 
   it("should initialize and get global auth story", () => {

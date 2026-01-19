@@ -8,7 +8,11 @@
  * - Warning on axios params usage for signed requests
  */
 
-import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from "axios";
+import axios, {
+  type AxiosInstance,
+  type AxiosRequestConfig,
+  type AxiosResponse,
+} from "axios";
 import crypto from "node:crypto";
 import { getLogger, generateReqId, type LogContext } from "./structured-logger";
 
@@ -42,7 +46,9 @@ function isSignedClobRequest(config: AxiosRequestConfig): boolean {
 /**
  * Extract headers presence (boolean only)
  */
-function getHeadersPresence(headers?: Record<string, unknown>): Record<string, boolean> {
+function getHeadersPresence(
+  headers?: Record<string, unknown>,
+): Record<string, boolean> {
   if (!headers) return {};
 
   const presence: Record<string, boolean> = {};
@@ -77,7 +83,11 @@ export function createTracedAxiosClient(baseURL?: string): AxiosInstance {
       const startTime = Date.now();
 
       // Attach metadata to config for response interceptor
-      (config as AxiosRequestConfig & { metadata?: { reqId: string; startTime: number } }).metadata = {
+      (
+        config as AxiosRequestConfig & {
+          metadata?: { reqId: string; startTime: number };
+        }
+      ).metadata = {
         reqId,
         startTime,
       };
@@ -116,21 +126,27 @@ export function createTracedAxiosClient(baseURL?: string): AxiosInstance {
         // Calculate body hash if present
         let bodyHash: string | null = null;
         if (config.data) {
-          const bodyStr = typeof config.data === "string" ? config.data : JSON.stringify(config.data);
+          const bodyStr =
+            typeof config.data === "string"
+              ? config.data
+              : JSON.stringify(config.data);
           bodyHash = hashSha256(bodyStr).slice(0, 12);
         }
 
         // Get timestamp from headers
-        const timestamp = headers?.POLY_TIMESTAMP ?? headers?.["poly-timestamp"] ?? "unknown";
+        const timestamp =
+          headers?.POLY_TIMESTAMP ?? headers?.["poly-timestamp"] ?? "unknown";
 
         // Get signature hash (don't log full signature!)
-        const signature = headers?.POLY_SIGNATURE ?? headers?.["poly-signature"];
+        const signature =
+          headers?.POLY_SIGNATURE ?? headers?.["poly-signature"];
         const signatureHash = signature
           ? hashSha256(String(signature)).slice(0, 8)
           : "missing";
 
         // Check if axios params are used (this is wrong for signed requests!)
-        const usedAxiosParams = config.params && Object.keys(config.params).length > 0;
+        const usedAxiosParams =
+          config.params && Object.keys(config.params).length > 0;
 
         context.timestamp = timestamp;
         context.signatureHash = signatureHash;
@@ -146,7 +162,8 @@ export function createTracedAxiosClient(baseURL?: string): AxiosInstance {
             {
               ...context,
               category: "HTTP",
-              guidance: "Move params from config.params to the URL path before signing",
+              guidance:
+                "Move params from config.params to the URL path before signing",
             },
           );
         }
@@ -171,7 +188,9 @@ export function createTracedAxiosClient(baseURL?: string): AxiosInstance {
   // Response interceptor - log responses
   client.interceptors.response.use(
     (response: AxiosResponse) => {
-      const config = response.config as AxiosRequestConfig & { metadata?: { reqId: string; startTime: number } };
+      const config = response.config as AxiosRequestConfig & {
+        metadata?: { reqId: string; startTime: number };
+      };
       const metadata = config.metadata;
 
       if (metadata) {
@@ -180,9 +199,10 @@ export function createTracedAxiosClient(baseURL?: string): AxiosInstance {
         const statusText = response.statusText;
 
         // Check for error in response body
-        const responseError = typeof response.data === "object" && response.data
-          ? (response.data as { error?: string }).error
-          : undefined;
+        const responseError =
+          typeof response.data === "object" && response.data
+            ? (response.data as { error?: string }).error
+            : undefined;
 
         const context: LogContext = {
           category: "HTTP",
@@ -206,7 +226,11 @@ export function createTracedAxiosClient(baseURL?: string): AxiosInstance {
       return response;
     },
     (error) => {
-      const config = error.config as AxiosRequestConfig & { metadata?: { reqId: string; startTime: number } } | undefined;
+      const config = error.config as
+        | (AxiosRequestConfig & {
+            metadata?: { reqId: string; startTime: number };
+          })
+        | undefined;
       const metadata = config?.metadata;
 
       if (metadata) {
@@ -220,8 +244,14 @@ export function createTracedAxiosClient(baseURL?: string): AxiosInstance {
           if (typeof error.response.data === "string") {
             errorText = error.response.data;
           } else if (typeof error.response.data === "object") {
-            const errorObj = error.response.data as { error?: string; message?: string };
-            errorText = errorObj.error ?? errorObj.message ?? JSON.stringify(error.response.data);
+            const errorObj = error.response.data as {
+              error?: string;
+              message?: string;
+            };
+            errorText =
+              errorObj.error ??
+              errorObj.message ??
+              JSON.stringify(error.response.data);
           }
         }
 

@@ -25,15 +25,15 @@ test("L2 signature message includes query string for GET requests", () => {
   // Verify query string is included
   assert.ok(
     signedPath.includes("?"),
-    "Signed path should include query string"
+    "Signed path should include query string",
   );
   assert.ok(
     signedPath.includes("asset_type="),
-    "Signed path should include asset_type parameter"
+    "Signed path should include asset_type parameter",
   );
   assert.ok(
     signedPath.includes("signature_type="),
-    "Signed path should include signature_type parameter"
+    "Signed path should include signature_type parameter",
   );
 
   // Verify message format: timestamp + method + path (with query)

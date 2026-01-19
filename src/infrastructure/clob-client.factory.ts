@@ -222,9 +222,8 @@ const logAuthHeaderPresence = async (
 ): Promise<void> => {
   if (!logger) return;
   try {
-    const signer = (
-      client as ClobClient & { signer?: Wallet | JsonRpcSigner }
-    ).signer;
+    const signer = (client as ClobClient & { signer?: Wallet | JsonRpcSigner })
+      .signer;
     if (!signer) return;
     const signatureType = (
       client as { orderBuilder?: { signatureType?: number } }

@@ -17,8 +17,7 @@ export type GasEstimate = {
 const readEnv = (key: string): string | undefined =>
   process.env[key] ?? process.env[key.toLowerCase()];
 
-const parseGwei = (gwei: number): bigint =>
-  parseUnits(String(gwei), "gwei");
+const parseGwei = (gwei: number): bigint => parseUnits(String(gwei), "gwei");
 
 const applyMultiplier = (value: bigint, multiplier: number): bigint => {
   const factor = BigInt(Math.floor(multiplier * 100));

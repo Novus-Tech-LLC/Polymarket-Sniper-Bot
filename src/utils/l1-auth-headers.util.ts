@@ -93,10 +93,7 @@ export async function buildL1Headers(
 
   // Sign the typed data - use proper type checking
   let signature: string;
-  if (
-    "signTypedData" in signer &&
-    typeof signer.signTypedData === "function"
-  ) {
+  if ("signTypedData" in signer && typeof signer.signTypedData === "function") {
     signature = await signer.signTypedData(domain, types, value);
   } else if (
     "_signTypedData" in signer &&

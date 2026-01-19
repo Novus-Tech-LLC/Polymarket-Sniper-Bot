@@ -92,9 +92,7 @@ function redactSecrets(context: LogContext): LogContext {
   if (typeof redacted.apiKey === "string") {
     const key = redacted.apiKey;
     redacted.apiKey =
-      key.length >= 6
-        ? `***${key.slice(-6)}`
-        : `[REDACTED len=${key.length}]`;
+      key.length >= 6 ? `***${key.slice(-6)}` : `[REDACTED len=${key.length}]`;
   }
 
   // Redact secrets - show length and first/last 4 chars
@@ -223,10 +221,7 @@ export class StructuredLogger {
     this.emitLog("info", `(suppressed ${entry.count - 1} repeats)`, context);
   }
 
-  private getDedupKey(
-    message: string,
-    category?: LogCategory,
-  ): string | null {
+  private getDedupKey(message: string, category?: LogCategory): string | null {
     // Only deduplicate messages with a category
     if (!category) return null;
     return `${category}:${message}`;
@@ -322,8 +317,7 @@ export class StructuredLogger {
         const contextStr = contextKeys
           .map((k) => {
             const v = redactedContext[k];
-            const value =
-              typeof v === "object" ? JSON.stringify(v) : String(v);
+            const value = typeof v === "object" ? JSON.stringify(v) : String(v);
             return `${k}=${value}`;
           })
           .join(" ");
@@ -337,11 +331,7 @@ export class StructuredLogger {
   /**
    * Log a message
    */
-  log(
-    level: LogLevel,
-    message: string,
-    context: LogContext = {},
-  ): void {
+  log(level: LogLevel, message: string, context: LogContext = {}): void {
     if (!this.shouldLog(level)) return;
 
     const fullContext = { ...this.baseContext, ...context };
