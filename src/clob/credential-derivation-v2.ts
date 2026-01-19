@@ -12,6 +12,11 @@ import { Wallet } from "ethers";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
 import type { Logger } from "../utils/logger.util";
 import {
+  type StructuredLogger,
+  generateAttemptId,
+} from "../utils/structured-logger";
+import type { AuthStoryBuilder } from "./auth-story";
+import {
   resolveOrderIdentity,
   resolveL1AuthIdentity,
   logAuthIdentity,
@@ -37,6 +42,37 @@ import {
   clearCachedCreds,
 } from "../utils/credential-storage.util";
 import { asClobSigner } from "../utils/clob-signer.util";
+
+/**
+ * Helper to log with either structured or legacy logger
+ */
+function log(
+  level: "debug" | "info" | "warn" | "error",
+  message: string,
+  params: {
+    logger?: Logger;
+    structuredLogger?: StructuredLogger;
+    context?: Record<string, unknown>;
+    legacyPrefix?: string;
+  },
+): void {
+  if (params.structuredLogger) {
+    params.structuredLogger[level](message, params.context ?? {});
+  } else if (params.logger) {
+    const prefix = params.legacyPrefix ?? "[CredDerive]";
+    params.logger[level](`${prefix} ${message}`);
+  }
+}
+
+/**
+ * Extended parameters with structured logger support
+ */
+export type ExtendedIdentityResolverParams = IdentityResolverParams & {
+  /** Structured logger (if available) */
+  structuredLogger?: StructuredLogger;
+  /** Auth story builder (if available) */
+  authStoryBuilder?: AuthStoryBuilder;
+};
 
 /**
  * Result of credential derivation
@@ -67,6 +103,8 @@ async function verifyCredentials(params: {
   signatureType: number;
   funderAddress?: string;
   logger?: Logger;
+  structuredLogger?: StructuredLogger;
+  attemptId?: string;
 }): Promise<boolean> {
   try {
     const client = new ClobClient(
@@ -85,38 +123,76 @@ async function verifyCredentials(params: {
     // Check for error response
     const errorResponse = response as { status?: number; error?: string };
     if (errorResponse.status === 401 || errorResponse.status === 403) {
-      params.logger?.debug(
-        `[CredDerive] Verification failed: ${errorResponse.status} ${errorResponse.error ?? "Unauthorized"}`,
+      log(
+        "debug",
+        `Verification failed: ${errorResponse.status} ${errorResponse.error ?? "Unauthorized"}`,
+        {
+          logger: params.logger,
+          structuredLogger: params.structuredLogger,
+          context: {
+            category: "CRED_DERIVE",
+            attemptId: params.attemptId,
+            status: errorResponse.status,
+            error: errorResponse.error ?? "Unauthorized",
+          },
+        },
       );
-      // Log auth diagnostic info on failure
       logAuthDiagnostics(params);
       return false;
     }
 
     if (errorResponse.error) {
-      params.logger?.debug(
-        `[CredDerive] Verification returned error: ${errorResponse.error}`,
-      );
+      log("debug", `Verification returned error: ${errorResponse.error}`, {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: {
+          category: "CRED_DERIVE",
+          attemptId: params.attemptId,
+          error: errorResponse.error,
+        },
+      });
       logAuthDiagnostics(params);
       return false;
     }
 
-    params.logger?.debug("[CredDerive] Verification successful");
+    log("debug", "Verification successful", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: {
+        category: "CRED_DERIVE",
+        attemptId: params.attemptId,
+      },
+    });
     return true;
   } catch (error) {
     const status = extractStatusCode(error);
     if (status === 401 || status === 403) {
-      params.logger?.debug(
-        `[CredDerive] Verification failed: ${status} Unauthorized`,
-      );
-      // Log auth diagnostic info on failure
+      log("debug", `Verification failed: ${status} Unauthorized`, {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: {
+          category: "CRED_DERIVE",
+          attemptId: params.attemptId,
+          status,
+        },
+      });
       logAuthDiagnostics(params);
       return false;
     }
 
     // Other errors might be transient (network issues, etc.)
-    params.logger?.warn(
-      `[CredDerive] Verification error (treating as invalid): ${extractErrorMessage(error)}`,
+    log(
+      "warn",
+      `Verification error (treating as invalid): ${extractErrorMessage(error)}`,
+      {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: {
+          category: "CRED_DERIVE",
+          attemptId: params.attemptId,
+          error: extractErrorMessage(error),
+        },
+      },
     );
     return false;
   }
@@ -130,22 +206,10 @@ function logAuthDiagnostics(params: {
   wallet: Wallet;
   signatureType: number;
   logger?: Logger;
+  structuredLogger?: StructuredLogger;
+  attemptId?: string;
 }): void {
-  if (!params.logger) return;
-
-  // Log header presence
-  params.logger.debug("[CredDerive] Auth Diagnostics:");
-  params.logger.debug(`  signatureType: ${params.signatureType}`);
-  params.logger.debug(`  walletAddress: ${params.wallet.address}`);
-  params.logger.debug(
-    `  apiKey: ${params.creds.key ? params.creds.key.slice(0, 8) + "..." + params.creds.key.slice(-4) : "missing"}`,
-  );
-  params.logger.debug(
-    `  secret: ${params.creds.secret ? params.creds.secret.slice(0, 8) + "..." + params.creds.secret.slice(-4) + ` (length=${params.creds.secret.length})` : "missing"}`,
-  );
-  params.logger.debug(
-    `  passphrase: ${params.creds.passphrase ? params.creds.passphrase.slice(0, 4) + "..." + params.creds.passphrase.slice(-4) : "missing"}`,
-  );
+  if (!params.logger && !params.structuredLogger) return;
 
   // Detect secret encoding
   const secret = params.creds.secret;
@@ -153,9 +217,54 @@ function logAuthDiagnostics(params: {
   const hasBase64UrlChars = secret.includes("-") || secret.includes("_");
   const hasPadding = secret.endsWith("=");
 
-  params.logger.debug(
-    `  secretEncoding: ${hasBase64Chars ? "likely base64" : hasBase64UrlChars ? "likely base64url" : "unknown"} (hasBase64Chars=${hasBase64Chars} hasBase64UrlChars=${hasBase64UrlChars} hasPadding=${hasPadding})`,
-  );
+  if (params.structuredLogger) {
+    params.structuredLogger.debug("Auth diagnostics", {
+      category: "CRED_DERIVE",
+      attemptId: params.attemptId,
+      signatureType: params.signatureType,
+      walletAddress: params.wallet.address,
+      apiKey: params.creds.key
+        ? params.creds.key.slice(0, 8) + "..." + params.creds.key.slice(-4)
+        : "missing",
+      secret: params.creds.secret
+        ? params.creds.secret.slice(0, 8) +
+          "..." +
+          params.creds.secret.slice(-4) +
+          ` (len=${params.creds.secret.length})`
+        : "missing",
+      passphrase: params.creds.passphrase
+        ? params.creds.passphrase.slice(0, 4) +
+          "..." +
+          params.creds.passphrase.slice(-4)
+        : "missing",
+      secretEncoding: hasBase64Chars
+        ? "likely base64"
+        : hasBase64UrlChars
+          ? "likely base64url"
+          : "unknown",
+      hasBase64Chars,
+      hasBase64UrlChars,
+      hasPadding,
+    });
+  } else if (params.logger) {
+    // Log header presence
+    params.logger.debug("[CredDerive] Auth Diagnostics:");
+    params.logger.debug(`  signatureType: ${params.signatureType}`);
+    params.logger.debug(`  walletAddress: ${params.wallet.address}`);
+    params.logger.debug(
+      `  apiKey: ${params.creds.key ? params.creds.key.slice(0, 8) + "..." + params.creds.key.slice(-4) : "missing"}`,
+    );
+    params.logger.debug(
+      `  secret: ${params.creds.secret ? params.creds.secret.slice(0, 8) + "..." + params.creds.secret.slice(-4) + ` (length=${params.creds.secret.length})` : "missing"}`,
+    );
+    params.logger.debug(
+      `  passphrase: ${params.creds.passphrase ? params.creds.passphrase.slice(0, 4) + "..." + params.creds.passphrase.slice(-4) : "missing"}`,
+    );
+
+    params.logger.debug(
+      `  secretEncoding: ${hasBase64Chars ? "likely base64" : hasBase64UrlChars ? "likely base64url" : "unknown"} (hasBase64Chars=${hasBase64Chars} hasBase64UrlChars=${hasBase64UrlChars} hasPadding=${hasPadding})`,
+    );
+  }
 }
 
 /**
@@ -168,6 +277,8 @@ async function attemptDerive(params: {
   l1AuthIdentity: L1AuthIdentity;
   funderAddress?: string;
   logger?: Logger;
+  structuredLogger?: StructuredLogger;
+  attemptId?: string;
 }): Promise<CredentialAttemptResult> {
   try {
     // Create a client with the specific signature type and funder address
@@ -191,13 +302,31 @@ async function attemptDerive(params: {
 
     if (deriveFn.deriveApiKey) {
       try {
-        params.logger?.debug("[CredDerive] Trying deriveApiKey...");
+        log("debug", "Trying deriveApiKey", {
+          logger: params.logger,
+          structuredLogger: params.structuredLogger,
+          context: {
+            category: "CRED_DERIVE",
+            attemptId: params.attemptId,
+          },
+        });
         method = "deriveApiKey";
         creds = await deriveFn.deriveApiKey();
       } catch (deriveError) {
         const status = extractStatusCode(deriveError);
-        params.logger?.debug(
-          `[CredDerive] deriveApiKey failed: ${status ?? "unknown"} - ${extractErrorMessage(deriveError)}`,
+        log(
+          "debug",
+          `deriveApiKey failed: ${status ?? "unknown"} - ${extractErrorMessage(deriveError)}`,
+          {
+            logger: params.logger,
+            structuredLogger: params.structuredLogger,
+            context: {
+              category: "CRED_DERIVE",
+              attemptId: params.attemptId,
+              status: status ?? "unknown",
+              error: extractErrorMessage(deriveError),
+            },
+          },
         );
 
         // If it's an "Invalid L1 Request headers" error, don't try createApiKey
@@ -217,7 +346,14 @@ async function attemptDerive(params: {
     // If deriveApiKey didn't work, try createApiKey
     if (!creds && deriveFn.createApiKey) {
       try {
-        params.logger?.debug("[CredDerive] Trying createApiKey...");
+        log("debug", "Trying createApiKey", {
+          logger: params.logger,
+          structuredLogger: params.structuredLogger,
+          context: {
+            category: "CRED_DERIVE",
+            attemptId: params.attemptId,
+          },
+        });
         method = "createApiKey";
         creds = await deriveFn.createApiKey();
       } catch (createError) {
@@ -259,15 +395,23 @@ async function attemptDerive(params: {
     }
 
     // Verify credentials work
-    params.logger?.debug(
-      `[CredDerive] Verifying credentials from ${method}...`,
-    );
+    log("debug", `Verifying credentials from ${method}`, {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: {
+        category: "CRED_DERIVE",
+        attemptId: params.attemptId,
+        method,
+      },
+    });
     const isValid = await verifyCredentials({
       creds,
       wallet: params.wallet,
       signatureType: params.attempt.signatureType,
       funderAddress: params.funderAddress,
       logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      attemptId: params.attemptId,
     });
 
     if (!isValid) {
@@ -304,35 +448,55 @@ async function attemptDerive(params: {
  * 5. Returns the working credentials or undefined if all attempts fail
  */
 export async function deriveCredentialsWithFallback(
-  params: IdentityResolverParams,
+  params: ExtendedIdentityResolverParams,
 ): Promise<DerivationResult> {
   const wallet = new Wallet(params.privateKey);
   const signerAddress = wallet.address;
+  const sLogger = params.structuredLogger;
 
-  params.logger?.info(
-    "[CredDerive] ========================================================",
-  );
-  params.logger?.info(
-    "[CredDerive] Starting credential derivation with fallback system",
-  );
-  params.logger?.info(
-    "[CredDerive] ========================================================",
-  );
+  // Start credential derivation logging
+  if (sLogger) {
+    sLogger.info("Starting credential derivation with fallback system", {
+      category: "CRED_DERIVE",
+    });
+  } else {
+    params.logger?.info(
+      "[CredDerive] ========================================================",
+    );
+    params.logger?.info(
+      "[CredDerive] Starting credential derivation with fallback system",
+    );
+    params.logger?.info(
+      "[CredDerive] ========================================================",
+    );
+  }
 
-  // Resolve identities
+  // Resolve identities (once at the beginning)
   const orderIdentity = resolveOrderIdentity(params);
   const l1AuthIdentity = resolveL1AuthIdentity(params, false);
 
-  // Log auth identity
+  // Log auth identity once (deduplication happens in logAuthIdentity)
   logAuthIdentity({
     orderIdentity,
     l1AuthIdentity,
     signerAddress,
     logger: params.logger,
+    structuredLogger: sLogger,
   });
 
+  // Update auth story builder if available
+  if (params.authStoryBuilder) {
+    params.authStoryBuilder.setIdentity({ orderIdentity, l1AuthIdentity });
+  }
+
   // Check for cached credentials first
-  params.logger?.info("[CredDerive] Checking for cached credentials...");
+  if (sLogger) {
+    sLogger.info("Checking for cached credentials", {
+      category: "CRED_DERIVE",
+    });
+  } else {
+    params.logger?.info("[CredDerive] Checking for cached credentials...");
+  }
   const cachedCreds = loadCachedCreds({
     signerAddress,
     signatureType: params.signatureType,
@@ -342,7 +506,13 @@ export async function deriveCredentialsWithFallback(
 
   if (cachedCreds) {
     // Verify cached credentials
-    params.logger?.info("[CredDerive] Verifying cached credentials...");
+    if (sLogger) {
+      sLogger.info("Verifying cached credentials", {
+        category: "CRED_DERIVE",
+      });
+    } else {
+      params.logger?.info("[CredDerive] Verifying cached credentials...");
+    }
     const isValid = await verifyCredentials({
       creds: cachedCreds,
       wallet,
@@ -350,12 +520,19 @@ export async function deriveCredentialsWithFallback(
         params.signatureType ?? orderIdentity.signatureTypeForOrders,
       funderAddress: params.funderAddress,
       logger: params.logger,
+      structuredLogger: sLogger,
     });
 
     if (isValid) {
-      params.logger?.info(
-        "[CredDerive] ✅ Cached credentials verified successfully",
-      );
+      if (sLogger) {
+        sLogger.info("✅ Cached credentials verified successfully", {
+          category: "CRED_DERIVE",
+        });
+      } else {
+        params.logger?.info(
+          "[CredDerive] ✅ Cached credentials verified successfully",
+        );
+      }
       return {
         success: true,
         creds: cachedCreds,
@@ -365,25 +542,45 @@ export async function deriveCredentialsWithFallback(
         l1AuthIdentity,
       };
     } else {
-      params.logger?.warn(
-        "[CredDerive] Cached credentials failed verification; will re-derive",
-      );
+      if (sLogger) {
+        sLogger.warn("Cached credentials failed verification; will re-derive", {
+          category: "CRED_DERIVE",
+        });
+      } else {
+        params.logger?.warn(
+          "[CredDerive] Cached credentials failed verification; will re-derive",
+        );
+      }
       // Clear invalid cache
       clearCachedCreds(params.logger);
     }
   } else {
-    params.logger?.info("[CredDerive] No cached credentials found");
+    if (sLogger) {
+      sLogger.info("No cached credentials found", {
+        category: "CRED_DERIVE",
+      });
+    } else {
+      params.logger?.info("[CredDerive] No cached credentials found");
+    }
   }
 
   // Try each fallback combination
-  params.logger?.info(
-    `[CredDerive] Attempting ${FALLBACK_LADDER.length} fallback combinations...`,
-  );
+  if (sLogger) {
+    sLogger.info("Attempting fallback combinations", {
+      category: "CRED_DERIVE",
+      totalAttempts: FALLBACK_LADDER.length,
+    });
+  } else {
+    params.logger?.info(
+      `[CredDerive] Attempting ${FALLBACK_LADDER.length} fallback combinations...`,
+    );
+  }
 
   const results: CredentialAttemptResult[] = [];
 
   for (let i = 0; i < FALLBACK_LADDER.length; i++) {
     const attempt = FALLBACK_LADDER[i]!;
+    const attemptId = generateAttemptId(i);
 
     // Resolve L1 auth identity for this attempt
     const attemptL1Identity = resolveL1AuthIdentity(
@@ -397,14 +594,28 @@ export async function deriveCredentialsWithFallback(
       signatureType: attempt.signatureType,
     });
 
-    logFallbackAttempt({
-      attempt,
-      attemptIndex: i,
-      totalAttempts: FALLBACK_LADDER.length,
-      orderIdentity: attemptOrderIdentity,
-      l1AuthIdentity: attemptL1Identity,
-      logger: params.logger,
-    });
+    if (sLogger) {
+      sLogger.info("Attempting credential derivation", {
+        category: "CRED_DERIVE",
+        attemptId,
+        attempt: i + 1,
+        total: FALLBACK_LADDER.length,
+        label: attempt.label,
+        signatureType: attempt.signatureType,
+        l1Auth: attempt.useEffectiveForL1
+          ? attemptOrderIdentity.effectiveAddress
+          : attemptL1Identity.signingAddress,
+      });
+    } else {
+      logFallbackAttempt({
+        attempt,
+        attemptIndex: i,
+        totalAttempts: FALLBACK_LADDER.length,
+        orderIdentity: attemptOrderIdentity,
+        l1AuthIdentity: attemptL1Identity,
+        logger: params.logger,
+      });
+    }
 
     const result = await attemptDerive({
       wallet,
@@ -413,14 +624,44 @@ export async function deriveCredentialsWithFallback(
       l1AuthIdentity: attemptL1Identity,
       funderAddress: params.funderAddress,
       logger: params.logger,
+      structuredLogger: sLogger,
+      attemptId,
     });
 
     results.push(result);
-    logFallbackResult({ result, attempt, logger: params.logger });
+
+    if (sLogger) {
+      if (result.success) {
+        sLogger.info("✅ Attempt succeeded", {
+          category: "CRED_DERIVE",
+          attemptId,
+          label: attempt.label,
+        });
+      } else {
+        sLogger.warn("❌ Attempt failed", {
+          category: "CRED_DERIVE",
+          attemptId,
+          label: attempt.label,
+          statusCode: result.statusCode,
+          error: result.error,
+        });
+      }
+    } else {
+      logFallbackResult({ result, attempt, logger: params.logger });
+    }
 
     if (result.success && result.creds) {
       // Success! Save to cache and return
-      params.logger?.info("[CredDerive] ✅ Credential derivation successful!");
+      if (sLogger) {
+        sLogger.info("✅ Credential derivation successful!", {
+          category: "CRED_DERIVE",
+          attemptId,
+        });
+      } else {
+        params.logger?.info(
+          "[CredDerive] ✅ Credential derivation successful!",
+        );
+      }
 
       saveCachedCreds({
         creds: result.creds,
@@ -447,9 +688,19 @@ export async function deriveCredentialsWithFallback(
       result.statusCode === 401 &&
       result.error?.includes("Invalid L1 Request headers")
     ) {
-      params.logger?.info(
-        "[CredDerive] Got 'Invalid L1 Request headers' - immediately retrying with swapped L1 auth address",
-      );
+      if (sLogger) {
+        sLogger.info(
+          "Got 'Invalid L1 Request headers' - retrying with swapped L1 auth",
+          {
+            category: "CRED_DERIVE",
+            attemptId,
+          },
+        );
+      } else {
+        params.logger?.info(
+          "[CredDerive] Got 'Invalid L1 Request headers' - immediately retrying with swapped L1 auth address",
+        );
+      }
 
       const swappedAttempt: FallbackAttempt = {
         ...attempt,
@@ -462,14 +713,25 @@ export async function deriveCredentialsWithFallback(
         swappedAttempt.useEffectiveForL1,
       );
 
-      logFallbackAttempt({
-        attempt: swappedAttempt,
-        attemptIndex: i,
-        totalAttempts: FALLBACK_LADDER.length,
-        orderIdentity: attemptOrderIdentity,
-        l1AuthIdentity: swappedL1Identity,
-        logger: params.logger,
-      });
+      if (sLogger) {
+        sLogger.info("Attempting swapped configuration", {
+          category: "CRED_DERIVE",
+          attemptId,
+          label: swappedAttempt.label,
+          l1Auth: swappedAttempt.useEffectiveForL1
+            ? attemptOrderIdentity.effectiveAddress
+            : swappedL1Identity.signingAddress,
+        });
+      } else {
+        logFallbackAttempt({
+          attempt: swappedAttempt,
+          attemptIndex: i,
+          totalAttempts: FALLBACK_LADDER.length,
+          orderIdentity: attemptOrderIdentity,
+          l1AuthIdentity: swappedL1Identity,
+          logger: params.logger,
+        });
+      }
 
       const swappedResult = await attemptDerive({
         wallet,
@@ -478,16 +740,41 @@ export async function deriveCredentialsWithFallback(
         l1AuthIdentity: swappedL1Identity,
         funderAddress: params.funderAddress,
         logger: params.logger,
+        structuredLogger: sLogger,
+        attemptId: `${attemptId}-swap`,
       });
 
-      logFallbackResult({
-        result: swappedResult,
-        attempt: swappedAttempt,
-        logger: params.logger,
-      });
+      if (sLogger) {
+        if (swappedResult.success) {
+          sLogger.info("✅ Swapped attempt succeeded", {
+            category: "CRED_DERIVE",
+            attemptId: `${attemptId}-swap`,
+          });
+        } else {
+          sLogger.warn("❌ Swapped attempt failed", {
+            category: "CRED_DERIVE",
+            attemptId: `${attemptId}-swap`,
+            statusCode: swappedResult.statusCode,
+            error: swappedResult.error,
+          });
+        }
+      } else {
+        logFallbackResult({
+          result: swappedResult,
+          attempt: swappedAttempt,
+          logger: params.logger,
+        });
+      }
 
       if (swappedResult.success && swappedResult.creds) {
-        params.logger?.info("[CredDerive] ✅ Swapped attempt successful!");
+        if (sLogger) {
+          sLogger.info("✅ Swapped attempt successful!", {
+            category: "CRED_DERIVE",
+            attemptId: `${attemptId}-swap`,
+          });
+        } else {
+          params.logger?.info("[CredDerive] ✅ Swapped attempt successful!");
+        }
 
         saveCachedCreds({
           creds: swappedResult.creds,
@@ -511,7 +798,14 @@ export async function deriveCredentialsWithFallback(
   }
 
   // All attempts failed
-  generateFailureSummary(results, params.logger);
+  if (sLogger) {
+    sLogger.error("All credential derivation attempts failed", {
+      category: "CRED_DERIVE",
+      totalAttempts: FALLBACK_LADDER.length,
+    });
+  } else {
+    generateFailureSummary(results, params.logger);
+  }
 
   return {
     success: false,

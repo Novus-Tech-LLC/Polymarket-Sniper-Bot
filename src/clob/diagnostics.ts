@@ -8,7 +8,20 @@ import { Wallet } from "ethers";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
 import { initializeApiCreds } from "../infrastructure/clob-auth";
 import type { Logger } from "../utils/logger.util";
+import type { StructuredLogger, LogContext } from "../utils/structured-logger";
+import { generateReqId } from "../utils/structured-logger";
 import { buildSignedPath } from "../utils/query-string.util";
+
+type AnyLogger = Logger | StructuredLogger;
+
+const isStructuredLogger = (logger: AnyLogger): logger is StructuredLogger => {
+  return (
+    "log" in logger &&
+    typeof (logger as StructuredLogger).log === "function" &&
+    typeof (logger as StructuredLogger).debug === "function" &&
+    typeof (logger as StructuredLogger).child === "function"
+  );
+};
 
 export type SecretDecodingMode = "raw" | "base64" | "base64url";
 export type SignatureEncodingMode = "base64" | "base64url";
@@ -295,7 +308,7 @@ export const buildAuthMessageComponents = (
 });
 
 export const logAuthSigningDiagnostics = (params: {
-  logger?: Logger;
+  logger?: AnyLogger;
   secret?: string;
   messageComponents: AuthMessageComponents;
   body?: string;
@@ -332,19 +345,40 @@ export const logAuthSigningDiagnostics = (params: {
     : "n/a";
 
   if (params.logger) {
-    params.logger.info(
-      `[CLOB][Diag][Sign] messageComponents timestamp=${params.messageComponents.timestamp} method=${params.messageComponents.method} methodUppercase=${methodUppercase} path=${params.messageComponents.path} bodyIncluded=${params.messageComponents.bodyIncluded} bodyLength=${params.messageComponents.bodyLength} messageStringLength=${messageStringLength}`,
-    );
-    params.logger.info(
-      `[CLOB][Diag][Sign] messageDigest=${messageDigest} secretDigest=${secretDigest} signatureEncoding=${signatureEncoding} secretDecoding=${secretDecodingUsed} secretLooksBase64Url=${secretLooksBase64UrlFlag}`,
-    );
+    if (isStructuredLogger(params.logger)) {
+      params.logger.debug("Auth message components", {
+        category: "SIGN",
+        timestamp: params.messageComponents.timestamp,
+        method: params.messageComponents.method,
+        methodUppercase,
+        path: params.messageComponents.path,
+        bodyIncluded: params.messageComponents.bodyIncluded,
+        bodyLength: params.messageComponents.bodyLength,
+        messageStringLength,
+      });
+      params.logger.debug("Auth signing details", {
+        category: "SIGN",
+        messageDigest,
+        secretDigest,
+        signatureEncoding,
+        secretDecoding: secretDecodingUsed,
+        secretLooksBase64Url: secretLooksBase64UrlFlag,
+      });
+    } else {
+      params.logger.debug(
+        `[CLOB][Diag][Sign] messageComponents timestamp=${params.messageComponents.timestamp} method=${params.messageComponents.method} methodUppercase=${methodUppercase} path=${params.messageComponents.path} bodyIncluded=${params.messageComponents.bodyIncluded} bodyLength=${params.messageComponents.bodyLength} messageStringLength=${messageStringLength}`,
+      );
+      params.logger.debug(
+        `[CLOB][Diag][Sign] messageDigest=${messageDigest} secretDigest=${secretDigest} signatureEncoding=${signatureEncoding} secretDecoding=${secretDecodingUsed} secretLooksBase64Url=${secretLooksBase64UrlFlag}`,
+      );
+    }
   }
 
   return { messageDigest, secretDigest, secretDecodingUsed, signatureEncoding };
 };
 
 export const logClobDiagnostics = (params: {
-  logger?: Logger;
+  logger?: AnyLogger;
   derivedSignerAddress?: string;
   configuredPublicKey?: string;
   chainId?: number;
@@ -358,13 +392,35 @@ export const logClobDiagnostics = (params: {
   passphrasePresent: boolean;
 }): void => {
   if (!params.logger) return;
-  params.logger.info(
-    `[CLOB][Diag] derivedSignerAddress=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} chainId=${params.chainId ?? "n/a"} clobHost=${params.clobHost ?? POLYMARKET_API.BASE_URL} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} makerAddress=${params.makerAddress ?? "n/a"} ownerId=${params.ownerId ?? "n/a"} keyPresent=${params.apiKeyPresent} secretPresent=${params.secretPresent} passphrasePresent=${params.passphrasePresent}`,
-  );
+  if (isStructuredLogger(params.logger)) {
+    params.logger.debug("CLOB client configuration", {
+      category: "PREFLIGHT",
+      derivedSignerAddress: params.derivedSignerAddress ?? "n/a",
+      configuredPublicKey: params.configuredPublicKey ?? "none",
+      publicKeyMatchesDerived: publicKeyMatchesDerived(
+        params.configuredPublicKey,
+        params.derivedSignerAddress,
+      ),
+      chainId: params.chainId ?? "n/a",
+      clobHost: params.clobHost ?? POLYMARKET_API.BASE_URL,
+      signatureType: params.signatureType ?? "n/a",
+      signatureTypeLabel: signatureTypeLabel(params.signatureType),
+      funderAddress: params.funderAddress ?? "none",
+      makerAddress: params.makerAddress ?? "n/a",
+      ownerId: params.ownerId ?? "n/a",
+      keyPresent: params.apiKeyPresent,
+      secretPresent: params.secretPresent,
+      passphrasePresent: params.passphrasePresent,
+    });
+  } else {
+    params.logger.info(
+      `[CLOB][Diag] derivedSignerAddress=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} chainId=${params.chainId ?? "n/a"} clobHost=${params.clobHost ?? POLYMARKET_API.BASE_URL} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} makerAddress=${params.makerAddress ?? "n/a"} ownerId=${params.ownerId ?? "n/a"} keyPresent=${params.apiKeyPresent} secretPresent=${params.secretPresent} passphrasePresent=${params.passphrasePresent}`,
+    );
+  }
 };
 
 export const logAuthFundsDiagnostics = (params: {
-  logger?: Logger;
+  logger?: AnyLogger;
   derivedSignerAddress?: string;
   configuredPublicKey?: string;
   effectivePolyAddress?: string;
@@ -373,9 +429,26 @@ export const logAuthFundsDiagnostics = (params: {
   credentialMode: "explicit" | "derived" | "none";
 }): void => {
   if (!params.logger) return;
-  params.logger.info(
-    `[CLOB][Diag][AuthFunds] signer=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} effectivePolyAddress=${params.effectivePolyAddress ?? "n/a"} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} credentialMode=${params.credentialMode}`,
-  );
+  if (isStructuredLogger(params.logger)) {
+    params.logger.debug("Auth funds configuration", {
+      category: "PREFLIGHT",
+      signer: params.derivedSignerAddress ?? "n/a",
+      configuredPublicKey: params.configuredPublicKey ?? "none",
+      publicKeyMatchesDerived: publicKeyMatchesDerived(
+        params.configuredPublicKey,
+        params.derivedSignerAddress,
+      ),
+      effectivePolyAddress: params.effectivePolyAddress ?? "n/a",
+      signatureType: params.signatureType ?? "n/a",
+      signatureTypeLabel: signatureTypeLabel(params.signatureType),
+      funderAddress: params.funderAddress ?? "none",
+      credentialMode: params.credentialMode,
+    });
+  } else {
+    params.logger.info(
+      `[CLOB][Diag][AuthFunds] signer=${params.derivedSignerAddress ?? "n/a"} configuredPublicKey=${params.configuredPublicKey ?? "none"} publicKeyMatchesDerived=${publicKeyMatchesDerived(params.configuredPublicKey, params.derivedSignerAddress)} effectivePolyAddress=${params.effectivePolyAddress ?? "n/a"} signatureType=${params.signatureType ?? "n/a"} (${signatureTypeLabel(params.signatureType)}) funderAddress=${params.funderAddress ?? "none"} credentialMode=${params.credentialMode}`,
+    );
+  }
 };
 
 export const classifyAuthFailure = (params: {
@@ -452,30 +525,26 @@ export const classifyPreflightIssue = (params: {
   return "UNKNOWN";
 };
 
-const logPreflightHint = (logger: Logger, issue: PreflightIssue): void => {
-  switch (issue) {
-    case "AUTH":
-      logger.warn(
-        "[CLOB][Preflight][Hint] Auth failed: verify API key/secret/passphrase, signature_type, and POLY_ADDRESS.",
-      );
-      break;
-    case "PARAM":
-      logger.warn(
-        "[CLOB][Preflight][Hint] Invalid params: use asset_type=COLLATERAL or asset_type=CONDITIONAL&token_id=...",
-      );
-      break;
-    case "FUNDS":
-      logger.warn(
-        "[CLOB][Preflight][Hint] Insufficient balance/allowance: top up collateral or approve spending.",
-      );
-      break;
-    case "NETWORK":
-      logger.warn(
-        "[CLOB][Preflight][Hint] Network issue: retry or check connectivity/Cloudflare.",
-      );
-      break;
-    default:
-      break;
+const logPreflightHint = (logger: AnyLogger, issue: PreflightIssue): void => {
+  const hints: Record<PreflightIssue, string> = {
+    AUTH: "Auth failed: verify API key/secret/passphrase, signature_type, and POLY_ADDRESS.",
+    PARAM: "Invalid params: use asset_type=COLLATERAL or asset_type=CONDITIONAL&token_id=...",
+    FUNDS: "Insufficient balance/allowance: top up collateral or approve spending.",
+    NETWORK: "Network issue: retry or check connectivity/Cloudflare.",
+    UNKNOWN: "",
+  };
+
+  const hint = hints[issue];
+  if (!hint) return;
+
+  if (isStructuredLogger(logger)) {
+    logger.warn("Preflight hint", {
+      category: "PREFLIGHT",
+      issue,
+      hint,
+    });
+  } else {
+    logger.warn(`[CLOB][Preflight][Hint] ${hint}`);
   }
 };
 
@@ -538,7 +607,7 @@ const extractPreflightErrorDetails = (
 };
 
 const logPreflightFailure = (params: {
-  logger: Logger;
+  logger: AnyLogger;
   stage: string;
   status?: number;
   code?: string | null;
@@ -547,13 +616,26 @@ const logPreflightFailure = (params: {
   url?: string;
 }): void => {
   const message = params.message?.trim() ? params.message : "unknown_error";
-  const urlPart = params.url ? ` url=${params.url}` : "";
-  params.logger.warn(
-    `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? "none"} code=${params.code ?? "none"} message=${message}${urlPart}`,
-  );
   const dataText = truncatePreflightData(params.data);
-  if (dataText) {
-    params.logger.warn(`[CLOB][Preflight] data=${dataText}`);
+
+  if (isStructuredLogger(params.logger)) {
+    params.logger.warn("Preflight failure", {
+      category: "PREFLIGHT",
+      stage: params.stage,
+      status: params.status ?? "none",
+      code: params.code ?? "none",
+      message,
+      url: params.url,
+      data: dataText,
+    });
+  } else {
+    const urlPart = params.url ? ` url=${params.url}` : "";
+    params.logger.warn(
+      `[CLOB][Preflight] FAIL stage=${params.stage} status=${params.status ?? "none"} code=${params.code ?? "none"} message=${message}${urlPart}`,
+    );
+    if (dataText) {
+      params.logger.warn(`[CLOB][Preflight] data=${dataText}`);
+    }
   }
 };
 
@@ -563,7 +645,7 @@ const delay = async (ms: number): Promise<void> =>
   });
 
 const runConnectivityCheck = async (
-  logger: Logger,
+  logger: AnyLogger,
 ): Promise<"ok" | "transient" | "fail"> => {
   for (
     let attempt = 1;
@@ -575,6 +657,13 @@ const runConnectivityCheck = async (
         timeout: 10000,
       });
       if (response?.status === 200) {
+        if (isStructuredLogger(logger)) {
+          logger.debug("Connectivity check passed", {
+            category: "HTTP",
+            url: `${POLYMARKET_API.BASE_URL}/markets`,
+            status: 200,
+          });
+        }
         return "ok";
       }
       logPreflightFailure({
@@ -612,7 +701,7 @@ const runConnectivityCheck = async (
   return "transient";
 };
 
-export const setupClobHeaderKeyLogging = (logger?: Logger): void => {
+export const setupClobHeaderKeyLogging = (logger?: AnyLogger): void => {
   if (!logger || headerKeysLogged) return;
   axios.interceptors.request.use((config) => {
     if (headerKeysLogged) return config;
@@ -625,7 +714,15 @@ export const setupClobHeaderKeyLogging = (logger?: Logger): void => {
       .map((key) => key.toUpperCase())
       .sort();
     if (headerKeys.length > 0) {
-      logger.info(`[CLOB][Diag] headerKeysSorted=${headerKeys.join(",")}`);
+      if (isStructuredLogger(logger)) {
+        logger.debug("HTTP headers detected", {
+          category: "HTTP",
+          headerKeys: headerKeys.join(","),
+          count: headerKeys.length,
+        });
+      } else {
+        logger.info(`[CLOB][Diag] headerKeysSorted=${headerKeys.join(",")}`);
+      }
       headerKeysLogged = true;
     }
     return config;
@@ -634,7 +731,7 @@ export const setupClobHeaderKeyLogging = (logger?: Logger): void => {
 
 export const runClobAuthPreflight = async (params: {
   client: ClobClient;
-  logger?: Logger;
+  logger?: AnyLogger;
   creds?: ApiKeyCreds;
   derivedSignerAddress?: string;
   configuredPublicKey?: string;
@@ -662,6 +759,12 @@ export const runClobAuthPreflight = async (params: {
   const signatureType = orderBuilder?.signatureType ?? SignatureType.EOA;
   const funderAddress = orderBuilder?.funderAddress;
 
+  const reqId = generateReqId();
+  const logContext: LogContext = {
+    category: "PREFLIGHT",
+    reqId,
+  };
+
   const connectivity = await runConnectivityCheck(params.logger);
   if (connectivity === "transient") {
     preflightBackoffMs = Math.min(
@@ -680,16 +783,37 @@ export const runClobAuthPreflight = async (params: {
 
   const timestamp = Math.floor(Date.now() / 1000);
   const endpoint = "/balance-allowance";
-  params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
+  
+  if (isStructuredLogger(params.logger)) {
+    params.logger.debug("Starting auth preflight", {
+      ...logContext,
+      endpoint,
+    });
+  } else {
+    params.logger.info(`[CLOB][Preflight] endpoint=${endpoint}`);
+  }
+
   const requestParams = { asset_type: AssetType.COLLATERAL };
   const signedParams =
     signatureType !== undefined
       ? { ...requestParams, signature_type: signatureType }
       : requestParams;
   const { signedPath, paramsKeys } = buildSignedPath(endpoint, signedParams);
-  params.logger.info(
-    `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(",") : "none"} signatureIncludesQuery=${signedPath.includes("?")}`,
-  );
+  
+  if (isStructuredLogger(params.logger)) {
+    params.logger.debug("Signed path details", {
+      category: "SIGN",
+      reqId,
+      pathSigned: signedPath,
+      paramsKeys: paramsKeys.length ? paramsKeys.join(",") : "none",
+      signatureIncludesQuery: signedPath.includes("?"),
+    });
+  } else {
+    params.logger.info(
+      `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(",") : "none"} signatureIncludesQuery=${signedPath.includes("?")}`,
+    );
+  }
+
   const messageComponents = buildAuthMessageComponents(
     timestamp,
     "GET",
@@ -708,7 +832,14 @@ export const runClobAuthPreflight = async (params: {
     const status = (response as { status?: number })?.status;
     const responseErrorMessage = extractPreflightResponseErrorMessage(response);
     if (status === 200) {
-      params.logger.info("[CLOB][Preflight] OK");
+      if (isStructuredLogger(params.logger)) {
+        params.logger.info("Auth preflight successful", {
+          ...logContext,
+          status,
+        });
+      } else {
+        params.logger.info("[CLOB][Preflight] OK");
+      }
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return { ok: true, status, forced: Boolean(params.force) };
     }
@@ -742,11 +873,26 @@ export const runClobAuthPreflight = async (params: {
         pathIncludesQuery: messageComponents.path.includes("?"),
       });
 
-      params.logger.warn(`[CLOB][Preflight] FAIL ${status}`);
-      params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
-      params.logger.warn(
-        `[CLOB][401] address=${params.derivedSignerAddress ?? "n/a"} sigType=${signatureType} funder=${funderAddress ?? "none"} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
-      );
+      if (isStructuredLogger(params.logger)) {
+        params.logger.warn("Auth preflight failed", {
+          ...logContext,
+          status,
+          reason,
+          address: params.derivedSignerAddress ?? "n/a",
+          sigType: signatureType,
+          funder: funderAddress ?? "none",
+          secretDecode: secretDecodingUsed,
+          sigEnc: signatureEncoding,
+          msgHash: messageDigest,
+          keyIdSuffix: formatApiKeyId(params.creds.key),
+        });
+      } else {
+        params.logger.warn(`[CLOB][Preflight] FAIL ${status}`);
+        params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
+        params.logger.warn(
+          `[CLOB][401] address=${params.derivedSignerAddress ?? "n/a"} sigType=${signatureType} funder=${funderAddress ?? "none"} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
+        );
+      }
 
       preflightBackoffMs = Math.min(
         preflightBackoffMs * 2,
@@ -784,9 +930,16 @@ export const runClobAuthPreflight = async (params: {
           data: (response as { data?: unknown })?.data,
         }),
       );
-      params.logger.warn(
-        `[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`,
-      );
+      if (isStructuredLogger(params.logger)) {
+        params.logger.warn("Auth OK but bad params", {
+          ...logContext,
+          endpoint,
+        });
+      } else {
+        params.logger.warn(
+          `[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`,
+        );
+      }
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return { ok: true, status, forced: Boolean(params.force) };
     }
@@ -812,7 +965,18 @@ export const runClobAuthPreflight = async (params: {
     return { ok: false, status, forced: Boolean(params.force) };
   } catch (error) {
     const details = extractPreflightErrorDetails(error);
-    params.logger.warn(`[CLOB][Preflight] request GET ${endpoint}`);
+    
+    if (isStructuredLogger(params.logger)) {
+      params.logger.warn("Preflight request failed", {
+        category: "HTTP",
+        reqId,
+        method: "GET",
+        endpoint,
+      });
+    } else {
+      params.logger.warn(`[CLOB][Preflight] request GET ${endpoint}`);
+    }
+
     logPreflightFailure({
       logger: params.logger,
       stage: "auth",
@@ -853,11 +1017,26 @@ export const runClobAuthPreflight = async (params: {
         pathIncludesQuery: messageComponents.path.includes("?"),
       });
 
-      params.logger.warn(`[CLOB][Preflight] FAIL ${details.status}`);
-      params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
-      params.logger.warn(
-        `[CLOB][401] address=${params.derivedSignerAddress ?? "n/a"} sigType=${signatureType} funder=${funderAddress ?? "none"} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
-      );
+      if (isStructuredLogger(params.logger)) {
+        params.logger.warn("Auth preflight failed", {
+          ...logContext,
+          status: details.status,
+          reason,
+          address: params.derivedSignerAddress ?? "n/a",
+          sigType: signatureType,
+          funder: funderAddress ?? "none",
+          secretDecode: secretDecodingUsed,
+          sigEnc: signatureEncoding,
+          msgHash: messageDigest,
+          keyIdSuffix: formatApiKeyId(params.creds.key),
+        });
+      } else {
+        params.logger.warn(`[CLOB][Preflight] FAIL ${details.status}`);
+        params.logger.warn(`[CLOB][Preflight] reason=${reason}`);
+        params.logger.warn(
+          `[CLOB][401] address=${params.derivedSignerAddress ?? "n/a"} sigType=${signatureType} funder=${funderAddress ?? "none"} secretDecode=${secretDecodingUsed} sigEnc=${signatureEncoding} msgHash=${messageDigest} keyIdSuffix=${formatApiKeyId(params.creds.key)}`,
+        );
+      }
 
       preflightBackoffMs = Math.min(
         preflightBackoffMs * 2,
@@ -878,9 +1057,16 @@ export const runClobAuthPreflight = async (params: {
       return null;
     }
     if (details.status && details.status >= 400 && details.status < 500) {
-      params.logger.warn(
-        `[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`,
-      );
+      if (isStructuredLogger(params.logger)) {
+        params.logger.warn("Auth OK but bad params", {
+          ...logContext,
+          endpoint,
+        });
+      } else {
+        params.logger.warn(
+          `[CLOB][Preflight] AUTH_OK_BUT_BAD_PARAMS endpoint=${endpoint}`,
+        );
+      }
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return {
         ok: true,
@@ -979,7 +1165,7 @@ const applyAuthMode = async (
 
 export const runClobAuthMatrixPreflight = async (params: {
   client: ClobClient;
-  logger?: Logger;
+  logger?: AnyLogger;
   creds?: ApiKeyCreds;
   derivedCreds?: ApiKeyCreds;
 }): Promise<{ ok: boolean } | null> => {
@@ -1020,6 +1206,16 @@ export const runClobAuthMatrixPreflight = async (params: {
   const rows: string[][] = [];
   let successMode: { mode: AuthModeConfig; creds: ApiKeyCreds } | null = null;
   let attemptId = 0;
+
+  if (isStructuredLogger(params.logger)) {
+    params.logger.info("Starting auth matrix preflight", {
+      category: "PREFLIGHT",
+      endpoint,
+      signatureTypes: signatureTypeValues.length,
+      secretDecodings: secretDecodingValues.length,
+      signatureEncodings: signatureEncodingValues.length,
+    });
+  }
 
   for (const signatureTypeRaw of signatureTypeValues) {
     const signatureType = Number(signatureTypeRaw);
@@ -1128,16 +1324,44 @@ export const runClobAuthMatrixPreflight = async (params: {
     if (successMode) break;
   }
 
-  params.logger.info(formatMatrixTable(rows));
+  if (isStructuredLogger(params.logger)) {
+    params.logger.info("Auth matrix preflight complete", {
+      category: "PREFLIGHT",
+      totalAttempts: attemptId,
+      success: Boolean(successMode),
+    });
+    params.logger.debug("Matrix results", {
+      category: "PREFLIGHT",
+      table: formatMatrixTable(rows),
+    });
+  } else {
+    params.logger.info(formatMatrixTable(rows));
+  }
+
   matrixCompleted = true;
 
   if (successMode) {
+    if (isStructuredLogger(params.logger)) {
+      params.logger.info("Valid auth mode found", {
+        category: "PREFLIGHT",
+        signatureType: successMode.mode.signatureType,
+        secretDecoding: successMode.mode.secretDecoding,
+        signatureEncoding: successMode.mode.signatureEncoding,
+        useDerivedCreds: successMode.mode.useDerivedCreds,
+      });
+    }
     await applyAuthMode(params.client, successMode.creds, successMode.mode);
     matrixBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
     return { ok: true };
   }
 
-  params.logger.warn("NO_VALID_AUTH_MODE");
+  if (isStructuredLogger(params.logger)) {
+    params.logger.warn("No valid auth mode found", {
+      category: "PREFLIGHT",
+    });
+  } else {
+    params.logger.warn("NO_VALID_AUTH_MODE");
+  }
   matrixBackoffMs = Math.min(matrixBackoffMs * 2, PREFLIGHT_BACKOFF_MAX_MS);
   return { ok: false };
 };

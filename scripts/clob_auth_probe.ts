@@ -8,7 +8,8 @@
  * 2. Forces EOA identity (signatureType=0, no Safe/proxy contamination)
  * 3. Makes a single GET /balance-allowance call
  * 4. Prints redacted debug bundle
- * 5. Exits with success/failure code
+ * 5. Generates Auth Story summary
+ * 6. Exits with success/failure code
  *
  * Usage:
  *   ts-node scripts/clob_auth_probe.ts
@@ -25,6 +26,8 @@
  *   DEBUG_PREFLIGHT_MATRIX   - Optional: Run identity matrix test (default: false)
  *   SAFE_ADDRESS             - Optional: Safe address for matrix mode
  *   PROXY_ADDRESS            - Optional: Proxy address for matrix mode
+ *   LOG_FORMAT               - Optional: Log format "json" or "pretty" (default: "json")
+ *   LOG_LEVEL                - Optional: Log level "error", "warn", "info", or "debug" (default: "info")
  */
 
 import {
@@ -37,6 +40,12 @@ import type { ApiKeyCreds } from "@polymarket/clob-client";
 import { Wallet } from "ethers";
 import axios from "axios";
 import * as crypto from "crypto";
+import { getLogger, generateRunId } from "../src/utils/structured-logger";
+import {
+  initAuthStory,
+  createCredentialFingerprint,
+  type AuthAttempt,
+} from "../src/clob/auth-story";
 
 // Helper to convert ethers v6 Wallet to CLOB client compatible signer
 function asClobSigner(wallet: Wallet): any {
@@ -68,9 +77,12 @@ interface ProbeConfig {
 }
 
 function loadConfig(): ProbeConfig {
+  const logger = getLogger();
   const privateKey = process.env.PRIVATE_KEY;
   if (!privateKey) {
-    console.error("❌ ERROR: PRIVATE_KEY environment variable is required");
+    logger.error("PRIVATE_KEY environment variable is required", {
+      category: "STARTUP",
+    });
     process.exit(1);
   }
 
@@ -125,8 +137,14 @@ async function deriveCredentials(
   clobHost: string,
   identity: EOAIdentity,
 ): Promise<{ success: boolean; creds?: ApiKeyCreds; error?: string }> {
+  const logger = getLogger();
   try {
-    console.log("[Probe] Attempting credential derivation...");
+    logger.info("Attempting credential derivation", {
+      category: "CRED_DERIVE",
+      clobHost,
+      signatureType: identity.signatureType,
+      funderAddress: identity.funderAddress,
+    });
 
     const client = new ClobClient(
       clobHost,
@@ -143,22 +161,35 @@ async function deriveCredentials(
     };
 
     if (!deriveFn.deriveApiKey) {
+      logger.error("deriveApiKey method not available", {
+        category: "CRED_DERIVE",
+      });
       return { success: false, error: "deriveApiKey method not available" };
     }
 
     const creds = await deriveFn.deriveApiKey();
 
     if (!creds || !creds.key || !creds.secret || !creds.passphrase) {
+      logger.error("Incomplete credentials returned", {
+        category: "CRED_DERIVE",
+      });
       return { success: false, error: "Incomplete credentials returned" };
     }
 
-    console.log("[Probe] ✅ Credentials derived successfully");
+    logger.info("Credentials derived successfully", {
+      category: "CRED_DERIVE",
+      apiKeySuffix: creds.key.slice(-6),
+    });
     return { success: true, creds };
   } catch (error: any) {
     const status = error?.response?.status;
     const message = error?.message || String(error);
 
     if (status === 401 && message.includes("Invalid L1 Request headers")) {
+      logger.error("Invalid L1 Request headers", {
+        category: "CRED_DERIVE",
+        status: 401,
+      });
       return { success: false, error: "Invalid L1 Request headers (401)" };
     }
 
@@ -166,12 +197,21 @@ async function deriveCredentials(
       status === 400 &&
       message.toLowerCase().includes("could not create api key")
     ) {
+      logger.error("Wallet has not traded on Polymarket yet", {
+        category: "CRED_DERIVE",
+        status: 400,
+      });
       return {
         success: false,
         error: "Wallet has not traded on Polymarket yet (400)",
       };
     }
 
+    logger.error("Credential derivation failed", {
+      category: "CRED_DERIVE",
+      status,
+      error: message,
+    });
     return { success: false, error: `${status || "unknown"} - ${message}` };
   }
 }
@@ -233,13 +273,24 @@ async function buildAuthRequest(
 async function executeAuthRequest(
   request: AuthRequest,
 ): Promise<{ success: boolean; status?: number; data?: any; error?: string }> {
+  const logger = getLogger();
   try {
-    console.log(`[Probe] Making ${request.method} request to ${request.url}`);
+    logger.info("Making authentication request", {
+      category: "HTTP",
+      method: request.method,
+      url: request.url,
+      signedPath: request.signedPath,
+    });
 
     const response = await axios({
       method: request.method,
       url: request.url,
       headers: request.headers,
+    });
+
+    logger.info("Authentication request successful", {
+      category: "HTTP",
+      status: response.status,
     });
 
     return {
@@ -250,6 +301,12 @@ async function executeAuthRequest(
   } catch (error: any) {
     const status = error?.response?.status || 0;
     const errorData = error?.response?.data || error?.message || String(error);
+
+    logger.error("Authentication request failed", {
+      category: "HTTP",
+      status,
+      error: JSON.stringify(errorData).slice(0, 200),
+    });
 
     return {
       success: false,
@@ -461,9 +518,8 @@ async function runPreflightMatrix(
   config: ProbeConfig,
   wallet: Wallet,
 ): Promise<void> {
-  console.log("\n" + "=".repeat(70));
-  console.log("PREFLIGHT MATRIX MODE");
-  console.log("=".repeat(70));
+  const logger = getLogger();
+  logger.info("PREFLIGHT MATRIX MODE", { category: "STARTUP" });
 
   const signerAddress = wallet.address;
   const cases: MatrixCase[] = [];
@@ -499,12 +555,18 @@ async function runPreflightMatrix(
     });
   }
 
-  console.log(`\nTesting ${cases.length} identity configurations...\n`);
+  logger.info(`Testing ${cases.length} identity configurations`, {
+    category: "STARTUP",
+  });
 
   for (const testCase of cases) {
-    console.log(
-      `[${testCase.label}] sigType=${testCase.signatureType} wallet=${testCase.walletAddress} maker=${testCase.makerAddress} funder=${testCase.funderAddress || "null"}`,
-    );
+    logger.info(`Testing ${testCase.label}`, {
+      category: "STARTUP",
+      signatureType: testCase.signatureType,
+      walletAddress: testCase.walletAddress,
+      makerAddress: testCase.makerAddress,
+      funderAddress: testCase.funderAddress || "null",
+    });
 
     try {
       const client = new ClobClient(
@@ -521,14 +583,20 @@ async function runPreflightMatrix(
       };
 
       if (!deriveFn.deriveApiKey) {
-        console.log(`  ❌ deriveApiKey not available`);
+        logger.error("deriveApiKey not available", {
+          category: "CRED_DERIVE",
+          label: testCase.label,
+        });
         continue;
       }
 
       const creds = await deriveFn.deriveApiKey();
 
       if (!creds || !creds.key) {
-        console.log(`  ❌ Invalid credentials`);
+        logger.error("Invalid credentials", {
+          category: "CRED_DERIVE",
+          label: testCase.label,
+        });
         continue;
       }
 
@@ -539,24 +607,37 @@ async function runPreflightMatrix(
 
       const errorResponse = response as { status?: number; error?: string };
       if (errorResponse.status === 401 || errorResponse.status === 403) {
-        console.log(
-          `  ❌ AUTH FAIL: ${errorResponse.status} ${errorResponse.error || "Unauthorized"}`,
-        );
+        logger.error("AUTH FAIL", {
+          category: "HTTP",
+          label: testCase.label,
+          status: errorResponse.status,
+          error: errorResponse.error || "Unauthorized",
+        });
       } else if (errorResponse.error) {
-        console.log(`  ❌ ERROR: ${errorResponse.error}`);
+        logger.error("ERROR", {
+          category: "HTTP",
+          label: testCase.label,
+          error: errorResponse.error,
+        });
       } else {
-        console.log(`  ✅ AUTH OK`);
+        logger.info("AUTH OK", {
+          category: "HTTP",
+          label: testCase.label,
+        });
       }
     } catch (error: any) {
       const status = error?.response?.status || 0;
       const message = error?.message || String(error);
-      console.log(`  ❌ EXCEPTION: ${status} ${message.slice(0, 80)}`);
+      logger.error("EXCEPTION", {
+        category: "HTTP",
+        label: testCase.label,
+        status,
+        error: message.slice(0, 80),
+      });
     }
-
-    console.log("");
   }
 
-  console.log("=".repeat(70));
+  logger.info("Matrix test complete", { category: "SUMMARY" });
 }
 
 // ============================================================================
@@ -564,26 +645,44 @@ async function runPreflightMatrix(
 // ============================================================================
 
 async function runProbe(config: ProbeConfig): Promise<number> {
-  console.log("\n" + "=".repeat(70));
-  console.log("CLOB Authentication Probe");
-  console.log("=".repeat(70));
+  const logger = getLogger();
+
+  logger.info("CLOB Authentication Probe", { category: "STARTUP" });
+  logger.info("Starting probe execution", {
+    category: "STARTUP",
+    clobHost: config.clobHost,
+    chainId: config.chainId,
+    signatureTypeForce: config.signatureTypeForce,
+  });
 
   // Step 1: Derive EOA identity
-  console.log("\n[Step 1] Deriving EOA identity...");
+  logger.info("Step 1: Deriving EOA identity", { category: "STARTUP" });
   const identity = deriveEOAIdentity(
     config.privateKey,
     config.polyAddressForce,
   );
-  console.log(`  signerAddress:  ${identity.signerAddress}`);
-  console.log(`  walletAddress:  ${identity.walletAddress}`);
-  console.log(`  makerAddress:   ${identity.makerAddress}`);
-  console.log(`  funderAddress:  ${identity.funderAddress} (null for EOA)`);
-  console.log(`  signatureType:  ${identity.signatureType} (EOA)`);
+  logger.info("EOA identity derived", {
+    category: "STARTUP",
+    signerAddress: identity.signerAddress,
+    walletAddress: identity.walletAddress,
+    makerAddress: identity.makerAddress,
+    funderAddress: identity.funderAddress,
+    signatureType: identity.signatureType,
+  });
 
   const wallet = new Wallet(config.privateKey);
 
+  // Initialize auth story - get runId from logger's base context
+  const runId = generateRunId();
+  const authStory = initAuthStory({
+    runId,
+    signerAddress: identity.signerAddress,
+    clobHost: config.clobHost,
+    chainId: config.chainId,
+  });
+
   // Step 2: Derive credentials
-  console.log("\n[Step 2] Deriving CLOB credentials...");
+  logger.info("Step 2: Deriving CLOB credentials", { category: "CRED_DERIVE" });
   const derivationResult = await deriveCredentials(
     wallet,
     config.clobHost,
@@ -591,17 +690,29 @@ async function runProbe(config: ProbeConfig): Promise<number> {
   );
 
   if (!derivationResult.success || !derivationResult.creds) {
-    console.error(
-      `\n❌ Credential derivation failed: ${derivationResult.error}`,
-    );
-    console.error("\n[Result] AUTH_PROBE_FAIL - Derivation failed");
+    logger.error("Credential derivation failed", {
+      category: "CRED_DERIVE",
+      error: derivationResult.error,
+    });
+
+    authStory.setFinalResult({
+      authOk: false,
+      readyToTrade: false,
+      reason: `Credential derivation failed: ${derivationResult.error}`,
+    });
+    authStory.printSummary();
+
     return 1;
   }
 
   const creds = derivationResult.creds;
 
+  // Set credential fingerprint in auth story
+  const credFingerprint = createCredentialFingerprint(creds);
+  authStory.setCredentialFingerprint(credFingerprint);
+
   // Step 3: Build auth request
-  console.log("\n[Step 3] Building authentication request...");
+  logger.info("Step 3: Building authentication request", { category: "HTTP" });
   const request = await buildAuthRequest(
     config.clobHost,
     wallet,
@@ -610,79 +721,139 @@ async function runProbe(config: ProbeConfig): Promise<number> {
   );
 
   // Step 4: Run self-check
-  console.log("\n[Step 4] Running self-check validation...");
+  logger.info("Step 4: Running self-check validation", { category: "STARTUP" });
   const selfCheck = runSelfCheck(identity, request);
 
   if (!selfCheck.passed) {
-    console.error(`\n❌ Self-check failed!`);
-    console.error(
-      `  queryInPath:    ${selfCheck.checks.queryStringInPath ? "✅" : "❌"}`,
-    );
-    console.error(
-      `  funderIsNull:   ${selfCheck.checks.funderIsNull ? "✅" : "❌"}`,
-    );
-    console.error(
-      `  sigTypeIsZero:  ${selfCheck.checks.signatureTypeIsZero ? "✅" : "❌"}`,
-    );
-    console.error("\n[Result] AUTH_PROBE_FAIL - Self-check failed");
+    logger.error("Self-check failed", {
+      category: "STARTUP",
+      queryInPath: selfCheck.checks.queryStringInPath,
+      funderIsNull: selfCheck.checks.funderIsNull,
+      sigTypeIsZero: selfCheck.checks.signatureTypeIsZero,
+    });
+
+    authStory.setFinalResult({
+      authOk: false,
+      readyToTrade: false,
+      reason: "Self-check validation failed",
+    });
+    authStory.printSummary();
+
     return 1;
   }
 
-  console.log("  ✅ All self-checks passed");
+  logger.info("All self-checks passed", { category: "STARTUP" });
 
   // Step 5: Execute request
-  console.log("\n[Step 5] Executing authentication request...");
+  logger.info("Step 5: Executing authentication request", { category: "HTTP" });
   const result = await executeAuthRequest(request);
+
+  // Add attempt to auth story
+  const attempt: AuthAttempt = {
+    attemptId: "A",
+    mode: "EOA",
+    sigType: identity.signatureType,
+    l1Auth: identity.signerAddress,
+    maker: identity.makerAddress,
+    funder: identity.funderAddress || "null",
+    verifyEndpoint: "/balance-allowance",
+    signedPath: request.signedPath,
+    usedAxiosParams: false,
+    httpStatus: result.status,
+    errorTextShort: result.error?.slice(0, 100),
+    success: result.success,
+  };
+  authStory.addAttempt(attempt);
 
   // Step 6: Build and print debug bundle
   const debugBundle = buildDebugBundle(identity, creds, request, selfCheck);
   printDebugBundle(debugBundle, config.debugAuthProbe);
 
-  // Step 7: Print result
-  console.log("\n" + "=".repeat(70));
-  console.log("RESULT");
-  console.log("=".repeat(70));
-
+  // Step 7: Set final result and print auth story
   if (result.success) {
-    console.log(`\n✅ AUTH_PROBE_OK`);
-    console.log(`  Status: ${result.status}`);
+    logger.info("AUTH_PROBE_OK", {
+      category: "SUMMARY",
+      status: result.status,
+    });
+
     if (result.data) {
       const dataStr = JSON.stringify(result.data);
-      console.log(
-        `  Response: ${dataStr.slice(0, 200)}${dataStr.length > 200 ? "..." : ""}`,
-      );
+      logger.info("Response data", {
+        category: "SUMMARY",
+        response: dataStr.slice(0, 200) + (dataStr.length > 200 ? "..." : ""),
+      });
     }
-    console.log(
-      "\n[Interpretation] Authentication successful - credentials and identity are correct",
+
+    logger.info(
+      "Authentication successful - credentials and identity are correct",
+      {
+        category: "SUMMARY",
+      },
     );
+
+    authStory.setFinalResult({
+      authOk: true,
+      readyToTrade: true,
+      reason: "Authentication successful",
+    });
+    authStory.printSummary();
+
     return 0;
   } else {
-    console.error(`\n❌ AUTH_PROBE_FAIL`);
-    console.error(`  Status: ${result.status || "unknown"}`);
-    console.error(`  Error: ${result.error || "Unknown error"}`);
-    console.error("\n[Interpretation]");
+    logger.error("AUTH_PROBE_FAIL", {
+      category: "SUMMARY",
+      status: result.status || "unknown",
+      error: result.error || "Unknown error",
+    });
 
+    let reason = `Authentication failed: ${result.status || "unknown"}`;
     if (result.status === 401) {
-      console.error("  401 Unauthorized - Most likely causes:");
-      console.error(
-        "    1. HMAC signature mismatch (check secret encoding, message format)",
+      logger.error("401 Unauthorized - Most likely causes:", {
+        category: "SUMMARY",
+      });
+      logger.error(
+        "1. HMAC signature mismatch (check secret encoding, message format)",
+        {
+          category: "SUMMARY",
+        },
       );
-      console.error(
-        "    2. Invalid API credentials (regenerate with deriveApiKey)",
+      logger.error(
+        "2. Invalid API credentials (regenerate with deriveApiKey)",
+        {
+          category: "SUMMARY",
+        },
       );
-      console.error(
-        "    3. Wallet address mismatch (POLY_ADDRESS header != actual wallet)",
+      logger.error(
+        "3. Wallet address mismatch (POLY_ADDRESS header != actual wallet)",
+        {
+          category: "SUMMARY",
+        },
       );
-      console.error("    4. Timestamp skew (check system clock)");
+      logger.error("4. Timestamp skew (check system clock)", {
+        category: "SUMMARY",
+      });
+      reason =
+        "401 Unauthorized - HMAC signature mismatch or invalid credentials";
     } else if (result.status === 403) {
-      console.error("  403 Forbidden - Possible causes:");
-      console.error("    1. Account restricted or banned");
-      console.error("    2. Geographic restrictions (geoblock)");
+      logger.error("403 Forbidden - Possible causes:", { category: "SUMMARY" });
+      logger.error("1. Account restricted or banned", { category: "SUMMARY" });
+      logger.error("2. Geographic restrictions (geoblock)", {
+        category: "SUMMARY",
+      });
+      reason = "403 Forbidden - Account restricted or geoblocked";
     } else {
-      console.error(
-        `  ${result.status || "Network error"} - Check network connectivity and CLOB_HOST`,
-      );
+      logger.error("Check network connectivity and CLOB_HOST", {
+        category: "SUMMARY",
+      });
+      reason = `${result.status || "Network error"} - Check connectivity`;
     }
+
+    authStory.setFinalResult({
+      authOk: false,
+      readyToTrade: false,
+      reason,
+    });
+    authStory.printSummary();
 
     return 1;
   }
@@ -693,6 +864,9 @@ async function runProbe(config: ProbeConfig): Promise<number> {
 // ============================================================================
 
 async function main(): Promise<void> {
+  // Initialize logger first
+  getLogger();
+
   const config = loadConfig();
 
   if (config.debugPreflightMatrix) {
@@ -707,7 +881,11 @@ async function main(): Promise<void> {
 
 // Run the probe
 main().catch((error) => {
-  console.error("\n❌ FATAL ERROR:");
-  console.error(error);
+  const logger = getLogger();
+  logger.error("FATAL ERROR", {
+    category: "STARTUP",
+    error: error?.message || String(error),
+    stack: error?.stack,
+  });
   process.exit(1);
 });

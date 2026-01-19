@@ -21,6 +21,11 @@ import {
   diagnoseAuthFailure,
   logAuthDiagnostic,
 } from "../utils/auth-diagnostic.util";
+import { initAuthStory } from "../clob/auth-story";
+import {
+  type StructuredLogger,
+  generateRunId,
+} from "../utils/structured-logger";
 
 export { readApprovalsConfig };
 
@@ -60,6 +65,22 @@ const isLiveTradingEnabled = (): boolean =>
 const formatUnitsValue = (value: BigNumberish, decimals: number): string =>
   Number(formatUnits(value, decimals)).toFixed(2);
 
+const log = (
+  logger: Logger | StructuredLogger,
+  level: "info" | "warn" | "error",
+  message: string,
+  category?: "PREFLIGHT",
+) => {
+  if (
+    "log" in logger &&
+    typeof (logger as StructuredLogger).log === "function"
+  ) {
+    (logger as StructuredLogger).log(level, message, { category });
+  } else {
+    (logger as Logger)[level](message);
+  }
+};
+
 export const ensureTradingReady = async (
   params: TradingReadyParams,
 ): Promise<{
@@ -69,6 +90,30 @@ export const ensureTradingReady = async (
   geoblockPassed: boolean;
 }> => {
   const derivedSignerAddress = deriveSignerAddress(params.privateKey);
+
+  // Initialize auth story
+  const runId = generateRunId();
+  const clobHost =
+    process.env.CLOB_HOST ||
+    process.env.clob_host ||
+    "https://clob.polymarket.com";
+  const chainId = parseInt(
+    process.env.CHAIN_ID || process.env.chain_id || "137",
+    10,
+  );
+  const authStory = initAuthStory({
+    runId,
+    signerAddress: derivedSignerAddress,
+    clobHost,
+    chainId,
+  });
+
+  log(
+    params.logger,
+    "info",
+    `[Preflight] Initialized auth story runId=${runId}`,
+    "PREFLIGHT",
+  );
   if (
     params.configuredPublicKey &&
     !publicKeyMatchesDerived(params.configuredPublicKey, derivedSignerAddress)
@@ -269,6 +314,15 @@ export const ensureTradingReady = async (
       authOk,
       readyToTrade: false,
     });
+
+    // Set final result and print auth story summary
+    authStory.setFinalResult({
+      authOk,
+      readyToTrade: false,
+      reason: "LIVE_TRADING_DISABLED",
+    });
+    authStory.printSummary();
+
     (
       params.client as ClobClient & {
         relayerContext?: ReturnType<typeof createRelayerContext>;
@@ -329,24 +383,16 @@ export const ensureTradingReady = async (
   // Run comprehensive auth diagnostics if auth failed
   if (!authOk && authFailureContext.verificationFailed) {
     // Log diagnostic parameters for debugging
-    params.logger.error(
-      `[AuthDiag] Diagnostic parameters:`,
-    );
+    params.logger.error(`[AuthDiag] Diagnostic parameters:`);
     params.logger.error(
       `  userProvidedKeys=${authFailureContext.userProvidedKeys}`,
     );
-    params.logger.error(
-      `  deriveEnabled=${authFailureContext.deriveEnabled}`,
-    );
-    params.logger.error(
-      `  deriveFailed=${authFailureContext.deriveFailed}`,
-    );
+    params.logger.error(`  deriveEnabled=${authFailureContext.deriveEnabled}`);
+    params.logger.error(`  deriveFailed=${authFailureContext.deriveFailed}`);
     params.logger.error(
       `  verificationFailed=${authFailureContext.verificationFailed}`,
     );
-    params.logger.error(
-      `  status=${authFailureContext.status}`,
-    );
+    params.logger.error(`  status=${authFailureContext.status}`);
     params.logger.error(
       `  deriveError=${authFailureContext.deriveError ?? "none"}`,
     );
@@ -377,6 +423,14 @@ export const ensureTradingReady = async (
     authOk,
     readyToTrade,
   });
+
+  // Set final result and print auth story summary
+  authStory.setFinalResult({
+    authOk,
+    readyToTrade,
+    reason: detectOnly ? "CHECKS_FAILED" : "OK",
+  });
+  authStory.printSummary();
 
   (
     params.client as ClobClient & {

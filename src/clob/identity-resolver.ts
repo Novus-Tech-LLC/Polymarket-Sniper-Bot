@@ -8,6 +8,29 @@
 import { SignatureType } from "@polymarket/order-utils";
 import { Wallet } from "ethers";
 import type { Logger } from "../utils/logger.util";
+import type { StructuredLogger } from "../utils/structured-logger";
+
+/**
+ * Helper to log with either structured or legacy logger
+ */
+function log(
+  level: "debug" | "info" | "warn" | "error",
+  message: string,
+  params: {
+    logger?: Logger;
+    structuredLogger?: StructuredLogger;
+    context?: Record<string, unknown>;
+  },
+): void {
+  if (params.structuredLogger) {
+    params.structuredLogger[level](message, {
+      category: "IDENTITY",
+      ...params.context,
+    });
+  } else if (params.logger) {
+    params.logger[level](`[Identity] ${message}`);
+  }
+}
 
 /**
  * Wallet mode detected or forced
@@ -54,8 +77,10 @@ export type IdentityResolverParams = {
   forceWalletMode?: "auto" | "eoa" | "safe" | "proxy";
   /** Force specific L1 auth address (optional override) */
   forceL1Auth?: "auto" | "signer" | "effective";
-  /** Logger for diagnostics */
+  /** Logger for diagnostics (legacy) */
   logger?: Logger;
+  /** Structured logger (preferred) */
+  structuredLogger?: StructuredLogger;
 };
 
 /**
@@ -66,11 +91,18 @@ export function detectWalletMode(params: {
   funderAddress?: string;
   forceWalletMode?: "auto" | "eoa" | "safe" | "proxy";
   logger?: Logger;
+  structuredLogger?: StructuredLogger;
 }): WalletMode {
   // Check for forced override
   if (params.forceWalletMode && params.forceWalletMode !== "auto") {
-    params.logger?.info(
-      `[Identity] Wallet mode forced to: ${params.forceWalletMode.toUpperCase()}`,
+    log(
+      "info",
+      `Wallet mode forced to: ${params.forceWalletMode.toUpperCase()}`,
+      {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: { walletMode: params.forceWalletMode },
+      },
     );
     return params.forceWalletMode;
   }
@@ -78,34 +110,52 @@ export function detectWalletMode(params: {
   // Auto-detect based on signature type
   if (params.signatureType === SignatureType.POLY_GNOSIS_SAFE) {
     if (!params.funderAddress) {
-      params.logger?.warn(
-        "[Identity] signatureType=2 (SAFE) but no funderAddress configured; defaulting to EOA",
+      log(
+        "warn",
+        "signatureType=2 (SAFE) but no funderAddress configured; defaulting to EOA",
+        {
+          logger: params.logger,
+          structuredLogger: params.structuredLogger,
+          context: { signatureType: params.signatureType },
+        },
       );
       return "eoa";
     }
-    params.logger?.info(
-      "[Identity] Auto-detected wallet mode: SAFE (signatureType=2)",
-    );
+    log("info", "Auto-detected wallet mode: SAFE", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: { walletMode: "safe", signatureType: 2 },
+    });
     return "safe";
   }
 
   if (params.signatureType === SignatureType.POLY_PROXY) {
     if (!params.funderAddress) {
-      params.logger?.warn(
-        "[Identity] signatureType=1 (PROXY) but no funderAddress configured; defaulting to EOA",
+      log(
+        "warn",
+        "signatureType=1 (PROXY) but no funderAddress configured; defaulting to EOA",
+        {
+          logger: params.logger,
+          structuredLogger: params.structuredLogger,
+          context: { signatureType: params.signatureType },
+        },
       );
       return "eoa";
     }
-    params.logger?.info(
-      "[Identity] Auto-detected wallet mode: PROXY (signatureType=1)",
-    );
+    log("info", "Auto-detected wallet mode: PROXY", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: { walletMode: "proxy", signatureType: 1 },
+    });
     return "proxy";
   }
 
   // Default to EOA
-  params.logger?.info(
-    "[Identity] Auto-detected wallet mode: EOA (signatureType=0 or not specified)",
-  );
+  log("info", "Auto-detected wallet mode: EOA", {
+    logger: params.logger,
+    structuredLogger: params.structuredLogger,
+    context: { walletMode: "eoa", signatureType: params.signatureType ?? 0 },
+  });
   return "eoa";
 }
 
@@ -129,6 +179,7 @@ export function resolveOrderIdentity(
     funderAddress: params.funderAddress,
     forceWalletMode: params.forceWalletMode,
     logger: params.logger,
+    structuredLogger: params.structuredLogger,
   });
 
   let signatureTypeForOrders: number;
@@ -160,9 +211,17 @@ export function resolveOrderIdentity(
       break;
   }
 
-  params.logger?.debug(
-    `[Identity] Order identity: mode=${walletMode} sigType=${signatureTypeForOrders} maker=${makerAddress} funder=${funderAddress} effective=${effectiveAddress}`,
-  );
+  log("debug", "Order identity resolved", {
+    logger: params.logger,
+    structuredLogger: params.structuredLogger,
+    context: {
+      walletMode,
+      signatureType: signatureTypeForOrders,
+      makerAddress,
+      funderAddress,
+      effectiveAddress,
+    },
+  });
 
   return {
     signatureTypeForOrders,
@@ -196,10 +255,18 @@ export function resolveL1AuthIdentity(
   let useEffective = preferEffective;
   if (params.forceL1Auth === "signer") {
     useEffective = false;
-    params.logger?.debug("[Identity] L1 auth forced to use signer address");
+    log("debug", "L1 auth forced to use signer address", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: { forceL1Auth: "signer" },
+    });
   } else if (params.forceL1Auth === "effective") {
     useEffective = true;
-    params.logger?.debug("[Identity] L1 auth forced to use effective address");
+    log("debug", "L1 auth forced to use effective address", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: { forceL1Auth: "effective" },
+    });
   }
 
   // For L1 auth, we can try either signer or effective address
@@ -210,9 +277,15 @@ export function resolveL1AuthIdentity(
   // Signature type follows the wallet mode
   const signatureTypeForAuth = orderIdentity.signatureTypeForOrders;
 
-  params.logger?.debug(
-    `[Identity] L1 auth identity: sigType=${signatureTypeForAuth} l1Auth=${l1AuthAddress} signing=${signerAddress}`,
-  );
+  log("debug", "L1 auth identity resolved", {
+    logger: params.logger,
+    structuredLogger: params.structuredLogger,
+    context: {
+      signatureType: signatureTypeForAuth,
+      l1AuthAddress,
+      signingAddress: signerAddress,
+    },
+  });
 
   return {
     signatureTypeForAuth,
@@ -222,24 +295,38 @@ export function resolveL1AuthIdentity(
 }
 
 /**
- * Log comprehensive auth identity summary
+ * Log comprehensive auth identity summary (ONCE via deduplication)
  */
 export function logAuthIdentity(params: {
   orderIdentity: OrderIdentity;
   l1AuthIdentity: L1AuthIdentity;
   signerAddress: string;
   logger?: Logger;
+  structuredLogger?: StructuredLogger;
 }): void {
-  if (!params.logger) return;
-
-  params.logger.info(
-    `[Auth Identity] ` +
-      `signerAddress=${params.signerAddress} ` +
-      `effectiveAddress=${params.orderIdentity.effectiveAddress} ` +
-      `makerAddress=${params.orderIdentity.makerAddress} ` +
-      `funderAddress=${params.orderIdentity.funderAddress} ` +
-      `sigTypeForOrders=${params.orderIdentity.signatureTypeForOrders} ` +
-      `l1AuthAddress=${params.l1AuthIdentity.l1AuthAddress} ` +
-      `sigTypeForAuth=${params.l1AuthIdentity.signatureTypeForAuth}`,
-  );
+  // Use structured logger with deduplication if available
+  if (params.structuredLogger) {
+    params.structuredLogger.info("Auth identity configuration", {
+      category: "IDENTITY",
+      signerAddress: params.signerAddress,
+      effectiveAddress: params.orderIdentity.effectiveAddress,
+      makerAddress: params.orderIdentity.makerAddress,
+      funderAddress: params.orderIdentity.funderAddress,
+      signatureTypeForOrders: params.orderIdentity.signatureTypeForOrders,
+      l1AuthAddress: params.l1AuthIdentity.l1AuthAddress,
+      signatureTypeForAuth: params.l1AuthIdentity.signatureTypeForAuth,
+    });
+  } else if (params.logger) {
+    // Legacy logger - log without deduplication
+    params.logger.info(
+      `[Auth Identity] ` +
+        `signerAddress=${params.signerAddress} ` +
+        `effectiveAddress=${params.orderIdentity.effectiveAddress} ` +
+        `makerAddress=${params.orderIdentity.makerAddress} ` +
+        `funderAddress=${params.orderIdentity.funderAddress} ` +
+        `sigTypeForOrders=${params.orderIdentity.signatureTypeForOrders} ` +
+        `l1AuthAddress=${params.l1AuthIdentity.l1AuthAddress} ` +
+        `sigTypeForAuth=${params.l1AuthIdentity.signatureTypeForAuth}`,
+    );
+  }
 }
