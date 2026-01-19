@@ -40,8 +40,11 @@
     "test-auth": "node test-auth-harness.js",
     "clob:probe": "ts-node scripts/clob_auth_probe.ts",
     "clob:matrix": "DEBUG_PREFLIGHT_MATRIX=true ts-node scripts/clob_auth_probe.ts",
-    "auth:probe": "ts-node scripts/auth_probe.ts",
+    "auth:probe": "ts-node scripts/minimal_auth_probe.ts",
+    "auth:probe:minimal": "ts-node scripts/minimal_auth_probe.ts",
+    "auth:probe:simple": "ts-node scripts/auth_probe.ts",
     "auth:probe:legacy": "ts-node scripts/clob_auth_probe.ts",
+    "auth:validate": "ts-node scripts/validate_minimal_auth.ts",
     "auth:diag": "ts-node scripts/auth_diagnostic.ts",
     "auth:diag:debug": "LOG_LEVEL=debug ts-node scripts/auth_diagnostic.ts"
   },
