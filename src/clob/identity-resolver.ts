@@ -121,7 +121,7 @@ export function detectWalletMode(params: {
       );
       return "eoa";
     }
-    log("info", "Auto-detected wallet mode: SAFE", {
+    log("debug", "Auto-detected wallet mode: SAFE", {
       logger: params.logger,
       structuredLogger: params.structuredLogger,
       context: { walletMode: "safe", signatureType: 2 },
@@ -142,7 +142,7 @@ export function detectWalletMode(params: {
       );
       return "eoa";
     }
-    log("info", "Auto-detected wallet mode: PROXY", {
+    log("debug", "Auto-detected wallet mode: PROXY", {
       logger: params.logger,
       structuredLogger: params.structuredLogger,
       context: { walletMode: "proxy", signatureType: 1 },
@@ -151,7 +151,7 @@ export function detectWalletMode(params: {
   }
 
   // Default to EOA
-  log("info", "Auto-detected wallet mode: EOA", {
+  log("debug", "Auto-detected wallet mode: EOA", {
     logger: params.logger,
     structuredLogger: params.structuredLogger,
     context: { walletMode: "eoa", signatureType: params.signatureType ?? 0 },

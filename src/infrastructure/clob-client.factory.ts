@@ -250,10 +250,10 @@ const logAuthHeaderPresence = async (
     const presence = getAuthHeaderPresence(headers, {
       secretConfigured: Boolean(creds?.secret),
     });
-    logger.info(
+    logger.debug(
       `[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`,
     );
-    logger.info(
+    logger.debug(
       `[CLOB][Diag][Sign] pathSigned=${signedPath} paramsKeys=${paramsKeys.length ? paramsKeys.join(",") : "none"} signatureIncludesQuery=${signedPath.includes("?")}`,
     );
     logAuthSigningDiagnostics({

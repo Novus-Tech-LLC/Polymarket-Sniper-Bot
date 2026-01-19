@@ -126,11 +126,23 @@ export const suppressClobOrderbookErrors = (logger?: Logger): void => {
                 payload.config?.method?.toLowerCase() === "post";
 
               if (!isCredentialCreationRequest) {
-                logger.warn(
-                  `[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`,
-                );
-                if (payload.status === 401 && !presence.secretHeaderPresent) {
-                  logger.warn("[CLOB] secret missing from request");
+                // Only warn if any auth header is missing; otherwise it's just debug info
+                const hasMissingHeader =
+                  !presence.apiKeyHeaderPresent ||
+                  !presence.passphraseHeaderPresent ||
+                  !presence.secretHeaderPresent ||
+                  !presence.signatureHeaderPresent;
+                if (hasMissingHeader) {
+                  logger.warn(
+                    `[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`,
+                  );
+                  if (payload.status === 401 && !presence.secretHeaderPresent) {
+                    logger.warn("[CLOB] secret missing from request");
+                  }
+                } else {
+                  logger.debug(
+                    `[CLOB] Auth header presence: ${formatAuthHeaderPresence(presence)}`,
+                  );
                 }
               }
             }

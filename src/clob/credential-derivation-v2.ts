@@ -8,6 +8,7 @@
 
 import { ClobClient, Chain, AssetType } from "@polymarket/clob-client";
 import type { ApiKeyCreds } from "@polymarket/clob-client";
+import crypto from "node:crypto";
 import { Wallet } from "ethers";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
 import type { Logger } from "../utils/logger.util";
@@ -198,8 +199,35 @@ async function verifyCredentials(params: {
   }
 }
 
+// Track which credential fingerprints have already been logged to prevent duplicate diagnostics
+// Uses a hash-based fingerprint to avoid exposing partial credential data
+const loggedCredentialFingerprints = new Set<string>();
+const MAX_FINGERPRINT_CACHE_SIZE = 100; // Prevent unbounded memory growth
+
+/**
+ * Create a hash-based fingerprint for credentials (safe to store, doesn't expose key data)
+ * Uses SHA-256 truncated to 16 hex chars (64 bits) - acceptable collision probability
+ * for deduplication within a single run (~1 in 2^64 for random inputs)
+ */
+function createCredentialFingerprint(
+  key: string | undefined,
+  secretLen: number,
+  signatureType: number,
+): string {
+  const input = `${key ?? "no-key"}-${secretLen}-${signatureType}`;
+  return crypto.createHash("sha256").update(input).digest("hex").slice(0, 16);
+}
+
+/**
+ * Reset the logged credential fingerprints (for testing)
+ */
+export function resetLoggedCredentialFingerprints(): void {
+  loggedCredentialFingerprints.clear();
+}
+
 /**
  * Log authentication diagnostics when verification fails
+ * Only logs once per unique credential set to prevent spam
  */
 function logAuthDiagnostics(params: {
   creds: ApiKeyCreds;
@@ -211,8 +239,25 @@ function logAuthDiagnostics(params: {
 }): void {
   if (!params.logger && !params.structuredLogger) return;
 
-  // Detect secret encoding
-  const secret = params.creds.secret;
+  // Create a hash-based fingerprint to deduplicate repeated diagnostics for same credentials
+  const fingerprint = createCredentialFingerprint(
+    params.creds.key,
+    params.creds.secret?.length ?? 0,
+    params.signatureType,
+  );
+  if (loggedCredentialFingerprints.has(fingerprint)) {
+    // Already logged diagnostics for these credentials, skip
+    return;
+  }
+
+  // Enforce size limit to prevent memory leaks in long-running processes
+  if (loggedCredentialFingerprints.size >= MAX_FINGERPRINT_CACHE_SIZE) {
+    loggedCredentialFingerprints.clear();
+  }
+  loggedCredentialFingerprints.add(fingerprint);
+
+  // Detect secret encoding (with null safety)
+  const secret = params.creds.secret ?? "";
   const hasBase64Chars = secret.includes("+") || secret.includes("/");
   const hasBase64UrlChars = secret.includes("-") || secret.includes("_");
   const hasPadding = secret.endsWith("=");
