@@ -38,6 +38,8 @@ function log(
 export type WalletMode = "eoa" | "safe" | "proxy";
 
 // Deduplication flags for log suppression
+// Note: These are module-level flags for single-threaded Node.js logging deduplication.
+// In concurrent scenarios, the worst case is a duplicate log (harmless for diagnostics).
 let walletModeLogged = false;
 let orderIdentityLogged = false;
 let l1AuthIdentityLogged = false;

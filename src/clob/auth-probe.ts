@@ -108,6 +108,8 @@ async function main(): Promise<void> {
   process.exit(result.success ? 0 : 1);
 }
 
+// Fatal error handler - console.error is intentional here as the structured logger
+// may not be available in all error scenarios (e.g., initialization failures)
 main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);

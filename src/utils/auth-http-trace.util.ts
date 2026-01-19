@@ -115,6 +115,8 @@ export function printAuthTrace(
   }
 
   // Print signing message components
+  // Note: The concatenation format (timestamp + method + path + body) matches the
+  // Polymarket HMAC signing specification - no delimiters are used by design.
   const message = `${trace.signatureInput.timestamp}${trace.signatureInput.method}${trace.signatureInput.path}${trace.signatureInput.body ?? ""}`;
   const messageHash = crypto
     .createHash("sha256")
