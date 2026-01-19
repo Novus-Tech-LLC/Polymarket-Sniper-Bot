@@ -37,6 +37,22 @@ function log(
  */
 export type WalletMode = "eoa" | "safe" | "proxy";
 
+// Deduplication flags for log suppression
+// Note: These are module-level flags for single-threaded Node.js logging deduplication.
+// In concurrent scenarios, the worst case is a duplicate log (harmless for diagnostics).
+let walletModeLogged = false;
+let orderIdentityLogged = false;
+let l1AuthIdentityLogged = false;
+
+/**
+ * Reset logging deduplication flags (for testing)
+ */
+export function resetIdentityLogging(): void {
+  walletModeLogged = false;
+  orderIdentityLogged = false;
+  l1AuthIdentityLogged = false;
+}
+
 /**
  * Identity configuration for order signing and submission
  */
@@ -121,11 +137,14 @@ export function detectWalletMode(params: {
       );
       return "eoa";
     }
-    log("debug", "Auto-detected wallet mode: SAFE", {
-      logger: params.logger,
-      structuredLogger: params.structuredLogger,
-      context: { walletMode: "safe", signatureType: 2 },
-    });
+    if (!walletModeLogged) {
+      log("debug", "Auto-detected wallet mode: SAFE", {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: { walletMode: "safe", signatureType: 2 },
+      });
+      walletModeLogged = true;
+    }
     return "safe";
   }
 
@@ -142,20 +161,26 @@ export function detectWalletMode(params: {
       );
       return "eoa";
     }
-    log("debug", "Auto-detected wallet mode: PROXY", {
-      logger: params.logger,
-      structuredLogger: params.structuredLogger,
-      context: { walletMode: "proxy", signatureType: 1 },
-    });
+    if (!walletModeLogged) {
+      log("debug", "Auto-detected wallet mode: PROXY", {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: { walletMode: "proxy", signatureType: 1 },
+      });
+      walletModeLogged = true;
+    }
     return "proxy";
   }
 
   // Default to EOA
-  log("debug", "Auto-detected wallet mode: EOA", {
-    logger: params.logger,
-    structuredLogger: params.structuredLogger,
-    context: { walletMode: "eoa", signatureType: params.signatureType ?? 0 },
-  });
+  if (!walletModeLogged) {
+    log("debug", "Auto-detected wallet mode: EOA", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: { walletMode: "eoa", signatureType: params.signatureType ?? 0 },
+    });
+    walletModeLogged = true;
+  }
   return "eoa";
 }
 
@@ -211,17 +236,20 @@ export function resolveOrderIdentity(
       break;
   }
 
-  log("debug", "Order identity resolved", {
-    logger: params.logger,
-    structuredLogger: params.structuredLogger,
-    context: {
-      walletMode,
-      signatureType: signatureTypeForOrders,
-      makerAddress,
-      funderAddress,
-      effectiveAddress,
-    },
-  });
+  if (!orderIdentityLogged) {
+    log("debug", "Order identity resolved", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: {
+        walletMode,
+        signatureType: signatureTypeForOrders,
+        makerAddress,
+        funderAddress,
+        effectiveAddress,
+      },
+    });
+    orderIdentityLogged = true;
+  }
 
   return {
     signatureTypeForOrders,
@@ -277,15 +305,18 @@ export function resolveL1AuthIdentity(
   // Signature type follows the wallet mode
   const signatureTypeForAuth = orderIdentity.signatureTypeForOrders;
 
-  log("debug", "L1 auth identity resolved", {
-    logger: params.logger,
-    structuredLogger: params.structuredLogger,
-    context: {
-      signatureType: signatureTypeForAuth,
-      l1AuthAddress,
-      signingAddress: signerAddress,
-    },
-  });
+  if (!l1AuthIdentityLogged) {
+    log("debug", "L1 auth identity resolved", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: {
+        signatureType: signatureTypeForAuth,
+        l1AuthAddress,
+        signingAddress: signerAddress,
+      },
+    });
+    l1AuthIdentityLogged = true;
+  }
 
   return {
     signatureTypeForAuth,

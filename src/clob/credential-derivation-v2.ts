@@ -59,6 +59,7 @@ import {
   type AuthFailureKey,
 } from "../utils/auth-failure-rate-limiter";
 import { getSingleFlightDerivation } from "../utils/single-flight-derivation";
+import { buildSignedPath } from "../utils/query-string.util";
 
 /**
  * Helper to log with either structured or legacy logger
@@ -212,6 +213,28 @@ async function verifyCredentials(params: {
   };
 
   try {
+    // Build query parameters
+    const queryParams = {
+      asset_type: AssetType.COLLATERAL,
+      signature_type: params.signatureType,
+    };
+
+    // Build signed path with canonical query string
+    const { signedPath } = buildSignedPath("/balance-allowance", queryParams);
+
+    // Log what we're about to verify
+    if (params.structuredLogger) {
+      params.structuredLogger.debug("Verifying credentials", {
+        category: "CRED_DERIVE",
+        attemptId: params.attemptId,
+        endpoint: "/balance-allowance",
+        signedPath,
+        queryParams,
+        signatureType: params.signatureType,
+        funderAddress: params.funderAddress,
+      });
+    }
+
     const client = new ClobClient(
       POLYMARKET_API.BASE_URL,
       Chain.POLYGON,
