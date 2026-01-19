@@ -1,4 +1,22 @@
 version: "3.9"
+
+# ============================================================================
+# MINIMAL DOCKER COMPOSE CONFIGURATION
+# ============================================================================
+# Following pmxt methodology: https://github.com/pmxt-dev/pmxt/blob/main/core/docs/SETUP_POLYMARKET.md
+# The most you need is a private key - everything else has sensible defaults!
+#
+# Required environment variables (set in your shell or .env file):
+#   - PRIVATE_KEY: Your Polygon wallet private key
+#   - RPC_URL: Polygon RPC endpoint
+#   - TARGET_ADDRESSES: Comma-separated addresses to monitor
+#
+# Everything else is optional and has smart defaults:
+#   - CLOB credentials are auto-derived from PRIVATE_KEY
+#   - Signature type defaults to 0 (EOA)
+#   - USDC address defaults to official Polygon USDC.e
+# ============================================================================
+
 services:
   polymarket-copy-bot:
     build: .
@@ -8,88 +26,33 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    depends_on:
-      - signer
     environment:
+      # ======== REQUIRED ========
+      - PRIVATE_KEY=${PRIVATE_KEY}
+      - RPC_URL=${RPC_URL}
+      - TARGET_ADDRESSES=${TARGET_ADDRESSES}
+
+      # ======== OPTIONAL - All have sensible defaults ========
+      # Mode: arb, mempool, or both
       - MODE=arb
-      - TARGET_ADDRESSES=0xabc0000000000000000000000000000000000001,0xabc0000000000000000000000000000000000002
-      - PRIVATE_KEY=your_private_key
-      - RPC_URL=https://polygon-mainnet.infura.io/v3/your_project_id
-      - COLLATERAL_TOKEN_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
-      - COLLATERAL_TOKEN_DECIMALS=6
-      - CLOB_DERIVE_CREDS=true
-      - POLYMARKET_API_KEY=your_clob_api_key
-      - POLYMARKET_API_SECRET=your_clob_api_secret
-      - POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
-      - POLY_USDCE_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
-      - POLY_CTF_ADDRESS=0x4d97dcd97ec945f40cf65f87097ace5ea0476045
-      - POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
-      - POLY_NEG_RISK_CTF_EXCHANGE_ADDRESS=0xC5d563A36AE78145C45a50134d48A1215220f80a
-      - POLY_NEG_RISK_ADAPTER_ADDRESS=0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296
-      - APPROVAL_MIN_USDC=1000
-      - APPROVAL_MAX_UINT=true
-      - APPROVALS_AUTO=true
-      - RELAYER_URL=https://relayer-v2.polymarket.com/
-      - SIGNER_URL=http://signer:8080/sign
-      - SIGNER_AUTH_TOKEN=
-      - FETCH_INTERVAL=1
-      - TRADE_MULTIPLIER=1.0
-      - RETRY_LIMIT=3
-      - TRADE_AGGREGATION_ENABLED=false
-      - TRADE_AGGREGATION_WINDOW_SECONDS=300
+
+      # Trading control (uncomment to enable live trading)
+      # - ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
       - ARB_DRY_RUN=true
-      - ARB_LIVE_TRADING=
-      - ARB_SCAN_INTERVAL_MS=3000
-      - ARB_MIN_EDGE_BPS=300
-      - ARB_MIN_PROFIT_USD=1
-      - ARB_MIN_LIQUIDITY_USD=10000
-      - ARB_MAX_SPREAD_BPS=100
-      - ARB_MAX_HOLD_MINUTES=120
-      - ARB_TRADE_BASE_USD=3
-      - ARB_MAX_POSITION_USD=15
-      - ARB_MAX_WALLET_EXPOSURE_USD=50
-      - ARB_SIZE_SCALING=sqrt
-      - ARB_SLIPPAGE_BPS=30
-      - ARB_FEE_BPS=10
-      - ARB_STARTUP_COOLDOWN_SECONDS=120
-      - ARB_MARKET_COOLDOWN_SECONDS=900
-      - ARB_MAX_TRADES_PER_HOUR=4
-      - ARB_MAX_CONSECUTIVE_FAILURES=2
-      - ARB_MAX_CONCURRENT_TRADES=1
-      - ARB_MIN_POL_GAS=3
-      - ARB_APPROVE_UNLIMITED=false
-      - ARB_STATE_DIR=/data
-      - ARB_DECISIONS_LOG=/data/arb_decisions.jsonl
-      - ARB_KILL_SWITCH_FILE=/data/KILL
-      - ARB_SNAPSHOT_STATE=true
-      - OPENVPN_ENABLED=false
-      - OPENVPN_CONFIG=
-      - OPENVPN_CONFIG_PATH=/etc/openvpn/openvpn.conf
-      - OPENVPN_AUTH_PATH=/etc/openvpn/auth.txt
-      - OPENVPN_USERNAME=
-      - OPENVPN_PASSWORD=
-      - OPENVPN_EXTRA_ARGS=
-      - WIREGUARD_ENABLED=false
-      - WIREGUARD_INTERFACE_NAME=wg0
-      - WIREGUARD_ADDRESS=10.151.22.111/32,fd7d:76ee:e68f:a993:c4ca:f41:f871:35b4/128
-      - WIREGUARD_PRIVATE_KEY=your_private_key
-      - WIREGUARD_MTU=1320
-      - WIREGUARD_DNS=10.128.0.1,fd7d:76ee:e68f:a993::1
-      - WIREGUARD_PEER_PUBLIC_KEY=your_peer_public_key
-      - WIREGUARD_PEER_PRESHARED_KEY=your_preshared_key
-      - WIREGUARD_PEER_ENDPOINT=europe3.vpn.airdns.org:1637
-      - WIREGUARD_ALLOWED_IPS=0.0.0.0/0,::/0
-      - WIREGUARD_PERSISTENT_KEEPALIVE=15
-      - WIREGUARD_FORCE_RESTART=false
+
+      # Optional: Builder credentials for gasless approvals
+      # - POLY_BUILDER_API_KEY=${POLY_BUILDER_API_KEY}
+      # - POLY_BUILDER_API_SECRET=${POLY_BUILDER_API_SECRET}
+      # - POLY_BUILDER_API_PASSPHRASE=${POLY_BUILDER_API_PASSPHRASE}
     tmpfs:
       - /data:size=32m,mode=0700
 
-  signer:
-    build: ./signer
-    restart: unless-stopped
-    environment:
-      - PORT=8080
-      - POLY_BUILDER_API_KEY=your_builder_api_key
-      - POLY_BUILDER_API_SECRET=your_builder_api_secret
-      - POLY_BUILDER_API_PASSPHRASE=your_builder_api_passphrase
-      - SIGNER_AUTH_TOKEN=
+  # Optional: Remote signer for builder credentials (gasless approvals)
+  # signer:
+  #   build: ./signer
+  #   restart: unless-stopped
+  #   environment:
+  #     - PORT=8080
+  #     - POLY_BUILDER_API_KEY=${POLY_BUILDER_API_KEY}
+  #     - POLY_BUILDER_API_SECRET=${POLY_BUILDER_API_SECRET}
+  #     - POLY_BUILDER_API_PASSPHRASE=${POLY_BUILDER_API_PASSPHRASE}

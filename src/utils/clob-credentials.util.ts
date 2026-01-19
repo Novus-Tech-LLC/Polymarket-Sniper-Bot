@@ -18,9 +18,9 @@ export const formatClobCredsChecklist = (
     checklist.secret.present &&
     checklist.passphrase.present;
 
-  // When derive is enabled and no explicit credentials, show a clearer message
+  // When derive is enabled (default) and no explicit credentials, show a clearer message
   if (checklist.deriveEnabled && !hasExplicitCreds) {
-    return `[CLOB] Credentials will be auto-derived from PRIVATE_KEY (CLOB_DERIVE_CREDS=true)`;
+    return `[CLOB] Credentials will be auto-derived from PRIVATE_KEY (default behavior)`;
   }
 
   // When explicit credentials are provided (with or without derive enabled)
@@ -32,10 +32,11 @@ export const formatClobCredsChecklist = (
   }
 
   // When no credentials and derive is disabled - this is an error state
+  // Note: Since derive defaults to true, this only happens with explicit CLOB_DERIVE_CREDS=false
   const key = formatChecklistItem(checklist.key);
   const secret = formatChecklistItem(checklist.secret);
   const passphrase = formatChecklistItem(checklist.passphrase);
-  return `[CLOB] Missing credentials: key=${key} secret=${secret} passphrase=${passphrase} derive=disabled (set CLOB_DERIVE_CREDS=true or provide explicit credentials)`;
+  return `[CLOB] Missing credentials: key=${key} secret=${secret} passphrase=${passphrase} derive=disabled (remove CLOB_DERIVE_CREDS=false to enable auto-derivation)`;
 };
 
 export const isApiKeyCreds = (creds?: {
@@ -44,3 +45,4 @@ export const isApiKeyCreds = (creds?: {
   passphrase?: string;
 }): creds is ApiKeyCreds =>
   Boolean(creds?.key && creds?.secret && creds?.passphrase);
+

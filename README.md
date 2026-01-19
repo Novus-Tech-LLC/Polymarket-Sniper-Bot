@@ -168,23 +168,28 @@ npm run build
 
 ### Configuration
 
-Create a `.env` file in the project root (preset-first quick start):
+Following [pmxt's methodology](https://github.com/pmxt-dev/pmxt/blob/main/core/docs/SETUP_POLYMARKET.md), the most you need is a **private key**. Everything else has sensible defaults!
+
+Create a `.env` file with just the essentials:
 
 ```env
-RPC_URL=https://polygon-mainnet...
+# Required: Your Polygon wallet private key
 PRIVATE_KEY=your_bot_wallet_privatekey
-COLLATERAL_TOKEN_ADDRESS=0x2791...
-MODE=both
-ARB_PRESET=safe_small
-MONITOR_PRESET=balanced
-CLOB_DERIVE_CREDS=true
-# Note: Do NOT set POLYMARKET_API_KEY/SECRET/PASSPHRASE when using CLOB_DERIVE_CREDS=true
-# Builder credentials (POLY_BUILDER_*) are optional and different from CLOB credentials
+
+# Required: Polygon RPC endpoint
+RPC_URL=https://polygon-mainnet...
+
+# Required: Addresses to monitor (for copy trading)
+TARGET_ADDRESSES=0xabc...,0xdef...
 ```
 
-> ✅ **Note:** To actually run the monitor loop you still need `TARGET_ADDRESSES`. `PUBLIC_KEY` is optional and will be derived from `PRIVATE_KEY` when omitted.
-> ✅ **Recommended:** Use `CLOB_DERIVE_CREDS=true` to automatically derive CLOB API credentials from your `PRIVATE_KEY`. This is the official Polymarket recommendation.
-> ⚠️ **Important:** Builder API keys (`POLY_BUILDER_*`) are NOT the same as CLOB API keys (`POLYMARKET_API_*`). See [Understanding API Credentials](#%EF%B8%8F-understanding-api-credentials-important) for details.
+That's it! The bot automatically:
+- ✅ Derives CLOB API credentials from your private key (enabled by default)
+- ✅ Uses EOA signature type (0) by default
+- ✅ Uses the official Polygon USDC.e address and decimals
+- ✅ Auto-detects your wallet type and auth method
+
+> 📖 **Full configuration options:** See [.env.example](./.env.example) for all available settings.
 
 ### ⚠️ Understanding API Credentials (IMPORTANT)
 
@@ -257,15 +262,13 @@ These credentials are for the Polymarket Builder program and are **ONLY** needed
 
 #### Credential Setup Guide
 
-**Option A: Derived Credentials (Recommended)**
+**Option A: Just Private Key (Simplest - like pmxt)**
 ```env
-# Let the bot derive CLOB credentials from your wallet
-CLOB_DERIVE_CREDS=true
+# That's it! CLOB credentials are auto-derived by default
 PRIVATE_KEY=your_64_hex_char_private_key
-# Remove any POLYMARKET_API_* variables
 ```
 
-**Option B: Explicit CLOB Credentials**
+**Option B: Explicit CLOB Credentials (Advanced)**
 ```env
 # Use explicit CLOB credentials (NOT builder credentials!)
 POLYMARKET_API_KEY=your_clob_api_key
@@ -274,10 +277,9 @@ POLYMARKET_API_PASSPHRASE=your_clob_api_passphrase
 PRIVATE_KEY=your_64_hex_char_private_key
 ```
 
-**Option C: Both Systems (Full Feature Set)**
+**Option C: With Builder Credentials (Full Feature Set)**
 ```env
-# CLOB credentials for trading (derived automatically)
-CLOB_DERIVE_CREDS=true
+# Just private key for CLOB credentials (auto-derived)
 PRIVATE_KEY=your_64_hex_char_private_key
 
 # Builder credentials for gasless approvals (optional)
