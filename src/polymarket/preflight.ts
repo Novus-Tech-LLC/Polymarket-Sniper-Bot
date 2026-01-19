@@ -30,7 +30,11 @@ import {
 export { readApprovalsConfig };
 
 export type TradingReadyParams = {
-  client: ClobClient & { wallet: Wallet; derivedCreds?: ApiKeyCreds };
+  client: ClobClient & {
+    wallet: Wallet;
+    derivedCreds?: ApiKeyCreds;
+    effectivePolyAddress?: string;
+  };
   logger: Logger;
   privateKey: string;
   configuredPublicKey?: string;
@@ -293,7 +297,14 @@ export const ensureTradingReady = async (
     }
   }
 
-  const tradingAddress = relayer.tradingAddress ?? derivedSignerAddress;
+  // Determine effective trading address:
+  // 1. If relayer is enabled, use relayer's trading address
+  // 2. Otherwise, use CLOB client's effectivePolyAddress (which accounts for Safe/Proxy modes)
+  // 3. Fall back to signer address if neither is available
+  const tradingAddress =
+    relayer.tradingAddress ??
+    params.client.effectivePolyAddress ??
+    derivedSignerAddress;
   params.logger.info(
     `[Preflight] signer=${derivedSignerAddress} effective_trading_address=${tradingAddress} public_key=${params.configuredPublicKey ?? "none"}`,
   );
