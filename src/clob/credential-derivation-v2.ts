@@ -5,6 +5,11 @@
  * It tries different combinations of signature types and L1 auth addresses until
  * one works, then caches the successful configuration.
  *
+ * Key Fix (2025-01-19):
+ * - Now uses createOrDeriveApiKey() method (official/recommended approach)
+ * - Previous approach: separate deriveApiKey() → createApiKey() calls (caused 401s)
+ * - Matches working implementation from Polymarket's official agents repo
+ *
  * Features:
  * - Single-flight derivation (prevents concurrent derivation attempts)
  * - Exponential backoff on failures (30s, 60s, 2m, 5m, 10m max)
@@ -53,10 +58,7 @@ import {
   getAuthFailureRateLimiter,
   type AuthFailureKey,
 } from "../utils/auth-failure-rate-limiter";
-import {
-  getSingleFlightDerivation,
-  type DerivationResult as SingleFlightResult,
-} from "../utils/single-flight-derivation";
+import { getSingleFlightDerivation } from "../utils/single-flight-derivation";
 
 /**
  * Helper to log with either structured or legacy logger
@@ -171,24 +173,24 @@ async function verifyCredentials(params: {
       signatureType: params.signatureType,
     };
 
-    const { shouldLogFull, shouldLogSummary, suppressedCount, nextFullLogMinutes } =
-      rateLimiter.shouldLog(failureKey);
+    const {
+      shouldLogFull,
+      shouldLogSummary,
+      suppressedCount,
+      nextFullLogMinutes,
+    } = rateLimiter.shouldLog(failureKey);
 
     if (shouldLogFull) {
-      log(
-        "debug",
-        `Verification failed: ${status} ${errorMsg}`,
-        {
-          logger: params.logger,
-          structuredLogger: params.structuredLogger,
-          context: {
-            category: "CRED_DERIVE",
-            attemptId: params.attemptId,
-            status,
-            error: errorMsg,
-          },
+      log("debug", `Verification failed: ${status} ${errorMsg}`, {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: {
+          category: "CRED_DERIVE",
+          attemptId: params.attemptId,
+          status,
+          error: errorMsg,
         },
-      );
+      });
       logAuthDiagnostics(params);
     } else if (shouldLogSummary) {
       // Emit a single-line summary instead of full details
@@ -226,7 +228,10 @@ async function verifyCredentials(params: {
     // Check for error response
     const errorResponse = response as { status?: number; error?: string };
     if (errorResponse.status === 401 || errorResponse.status === 403) {
-      logAuthFailure(errorResponse.status, errorResponse.error ?? "Unauthorized");
+      logAuthFailure(
+        errorResponse.status,
+        errorResponse.error ?? "Unauthorized",
+      );
       return false;
     }
 
@@ -415,99 +420,65 @@ async function attemptDerive(params: {
       params.funderAddress,
     );
 
-    const deriveFn = client as ClobClient & {
-      deriveApiKey?: () => Promise<ApiKeyCreds>;
-      createApiKey?: () => Promise<ApiKeyCreds>;
-    };
-
-    // Try deriveApiKey first (for existing wallets)
+    // Use createOrDeriveApiKey - the official recommended method
+    // This handles both derive (if credentials exist) and create (if they don't) automatically
+    // Matches the working implementation in Polymarket's official agents repo
     let creds: ApiKeyCreds | undefined;
-    let method = "";
+    const method = "createOrDeriveApiKey";
 
-    if (deriveFn.deriveApiKey) {
-      try {
-        log("debug", "Trying deriveApiKey", {
+    try {
+      log("debug", "Using createOrDeriveApiKey (official method)", {
+        logger: params.logger,
+        structuredLogger: params.structuredLogger,
+        context: {
+          category: "CRED_DERIVE",
+          attemptId: params.attemptId,
+        },
+      });
+
+      creds = await client.createOrDeriveApiKey();
+    } catch (error) {
+      const status = extractStatusCode(error);
+      const message = extractErrorMessage(error);
+
+      log(
+        "debug",
+        `createOrDeriveApiKey failed: ${status ?? "unknown"} - ${message}`,
+        {
           logger: params.logger,
           structuredLogger: params.structuredLogger,
           context: {
             category: "CRED_DERIVE",
             attemptId: params.attemptId,
+            status: status ?? "unknown",
+            error: message,
           },
-        });
-        method = "deriveApiKey";
-        creds = await deriveFn.deriveApiKey();
-      } catch (deriveError) {
-        const status = extractStatusCode(deriveError);
-        log(
-          "debug",
-          `deriveApiKey failed: ${status ?? "unknown"} - ${extractErrorMessage(deriveError)}`,
-          {
-            logger: params.logger,
-            structuredLogger: params.structuredLogger,
-            context: {
-              category: "CRED_DERIVE",
-              attemptId: params.attemptId,
-              status: status ?? "unknown",
-              error: extractErrorMessage(deriveError),
-            },
-          },
-        );
+        },
+      );
 
-        // If it's an "Invalid L1 Request headers" error, don't try createApiKey
-        // because the issue is with the auth configuration, not whether the key exists
-        if (isInvalidL1HeadersError(deriveError)) {
-          return {
-            success: false,
-            error: "Invalid L1 Request headers",
-            statusCode: 401,
-          };
-        }
-
-        // Otherwise, continue to try createApiKey
-      }
-    }
-
-    // If deriveApiKey didn't work, try createApiKey
-    if (!creds && deriveFn.createApiKey) {
-      try {
-        log("debug", "Trying createApiKey", {
-          logger: params.logger,
-          structuredLogger: params.structuredLogger,
-          context: {
-            category: "CRED_DERIVE",
-            attemptId: params.attemptId,
-          },
-        });
-        method = "createApiKey";
-        creds = await deriveFn.createApiKey();
-      } catch (createError) {
-        const status = extractStatusCode(createError);
-        const message = extractErrorMessage(createError);
-
-        // If it's "Could not create api key", this wallet hasn't traded yet
-        if (isCouldNotCreateKeyError(createError)) {
-          return {
-            success: false,
-            error: "Could not create api key (wallet needs to trade first)",
-            statusCode: 400,
-          };
-        }
-
-        // If it's "Invalid L1 Request headers", this auth config doesn't work
-        if (isInvalidL1HeadersError(createError)) {
-          return {
-            success: false,
-            error: "Invalid L1 Request headers",
-            statusCode: 401,
-          };
-        }
-
+      // If it's "Could not create api key", this wallet hasn't traded yet
+      if (isCouldNotCreateKeyError(error)) {
         return {
           success: false,
-          error: message,
-          statusCode: status,
+          error: "Could not create api key (wallet needs to trade first)",
+          statusCode: 400,
         };
       }
+
+      // If it's "Invalid L1 Request headers", this auth config doesn't work
+      if (isInvalidL1HeadersError(error)) {
+        return {
+          success: false,
+          error: "Invalid L1 Request headers",
+          statusCode: 401,
+        };
+      }
+
+      return {
+        success: false,
+        error: message,
+        statusCode: status,
+      };
     }
 
     // Check if we got credentials
@@ -610,7 +581,9 @@ export async function deriveCredentialsWithFallback(
   }
 
   // Use single-flight to coordinate derivation
-  return singleFlight.derive(() => deriveCredentialsWithFallbackInternal(params));
+  return singleFlight.derive(() =>
+    deriveCredentialsWithFallbackInternal(params),
+  );
 }
 
 /**
