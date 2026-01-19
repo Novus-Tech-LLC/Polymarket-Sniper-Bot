@@ -2,14 +2,14 @@
 
 /**
  * Polymarket CLOB Authentication Smoke Test
- * 
+ *
  * This standalone script tests the complete authentication flow:
  * 1. L1 authentication (derive/create API key using EIP-712)
  * 2. L2 authentication (balance-allowance using HMAC)
- * 
+ *
  * Usage:
  *   ts-node scripts/clob_auth_smoke_test.ts
- *   
+ *
  * Environment Variables:
  *   PRIVATE_KEY           - Required: Private key of the signer EOA
  *   CLOB_HOST             - Optional: CLOB API host (default: https://clob.polymarket.com)
@@ -28,8 +28,14 @@ const config = {
   privateKey: process.env.PRIVATE_KEY,
   clobHost: process.env.CLOB_HOST || "https://clob.polymarket.com",
   rpcUrl: process.env.RPC_URL || "https://polygon-rpc.com",
-  funderAddress: process.env.CLOB_FUNDER || process.env.POLYMARKET_PROXY_ADDRESS,
-  signatureType: parseInt(process.env.CLOB_SIGNATURE_TYPE || process.env.POLYMARKET_SIGNATURE_TYPE || "0", 10),
+  funderAddress:
+    process.env.CLOB_FUNDER || process.env.POLYMARKET_PROXY_ADDRESS,
+  signatureType: parseInt(
+    process.env.CLOB_SIGNATURE_TYPE ||
+      process.env.POLYMARKET_SIGNATURE_TYPE ||
+      "0",
+    10,
+  ),
 };
 
 // Colors for console output
@@ -81,22 +87,32 @@ async function validateEnvironment(): Promise<boolean> {
   }
 
   if (config.privateKey.length !== 66) {
-    error(`Invalid private key length: ${config.privateKey.length} (expected 66 with 0x prefix)`);
+    error(
+      `Invalid private key length: ${config.privateKey.length} (expected 66 with 0x prefix)`,
+    );
     return false;
   }
 
-  success(`Private Key: ${config.privateKey.slice(0, 6)}...${config.privateKey.slice(-4)}`);
+  success(
+    `Private Key: ${config.privateKey.slice(0, 6)}...${config.privateKey.slice(-4)}`,
+  );
   success(`CLOB Host: ${config.clobHost}`);
   success(`RPC URL: ${config.rpcUrl}`);
-  success(`Signature Type: ${config.signatureType} (${getSignatureTypeName(config.signatureType)})`);
+  success(
+    `Signature Type: ${config.signatureType} (${getSignatureTypeName(config.signatureType)})`,
+  );
 
   if (config.funderAddress) {
     success(`Funder Address: ${config.funderAddress}`);
     if (config.signatureType === 0) {
-      warn("Funder address provided but signature type is EOA (0). This is unusual.");
+      warn(
+        "Funder address provided but signature type is EOA (0). This is unusual.",
+      );
     }
   } else if (config.signatureType === 1 || config.signatureType === 2) {
-    error(`Signature type ${config.signatureType} requires CLOB_FUNDER or POLYMARKET_PROXY_ADDRESS`);
+    error(
+      `Signature type ${config.signatureType} requires CLOB_FUNDER or POLYMARKET_PROXY_ADDRESS`,
+    );
     return false;
   }
 
@@ -133,12 +149,16 @@ async function testWalletConnection(): Promise<Wallet | null> {
     if (balanceMatic > 0.01) {
       success(`POL Balance: ${balanceMatic.toFixed(4)} POL`);
     } else {
-      warn(`POL Balance: ${balanceMatic.toFixed(4)} POL (LOW - may not have gas for transactions)`);
+      warn(
+        `POL Balance: ${balanceMatic.toFixed(4)} POL (LOW - may not have gas for transactions)`,
+      );
     }
 
     return wallet;
   } catch (err) {
-    error(`Wallet connection failed: ${err instanceof Error ? err.message : String(err)}`);
+    error(
+      `Wallet connection failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
 }
@@ -181,25 +201,37 @@ async function testL1Auth(wallet: Wallet): Promise<ApiKeyCreds | null> {
     success("API Key derived successfully");
     info(`  API Key: ${creds.key.slice(0, 8)}...${creds.key.slice(-4)}`);
     info(`  Secret: ${creds.secret.slice(0, 8)}...${creds.secret.slice(-4)}`);
-    info(`  Passphrase: ${creds.passphrase.slice(0, 4)}...${creds.passphrase.slice(-4)}`);
+    info(
+      `  Passphrase: ${creds.passphrase.slice(0, 4)}...${creds.passphrase.slice(-4)}`,
+    );
 
     return creds;
   } catch (deriveErr) {
-    const deriveError = deriveErr as { response?: { status?: number; data?: unknown }; message?: string };
+    const deriveError = deriveErr as {
+      response?: { status?: number; data?: unknown };
+      message?: string;
+    };
     const status = deriveError?.response?.status;
     const message = deriveError?.message || String(deriveErr);
 
     if (status === 401 && message.includes("Invalid L1 Request headers")) {
       error("L1 authentication failed with 'Invalid L1 Request headers'");
       error("This indicates that L1 headers are not correctly formatted");
-      info("Expected L1 headers: POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_NONCE");
+      info(
+        "Expected L1 headers: POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_NONCE",
+      );
       info("Should NOT include: POLY_API_KEY, POLY_PASSPHRASE");
       return null;
     }
 
-    if (status === 400 && message.toLowerCase().includes("could not create api key")) {
+    if (
+      status === 400 &&
+      message.toLowerCase().includes("could not create api key")
+    ) {
       warn("Wallet has not traded on Polymarket yet");
-      info("To fix: Visit polymarket.com, connect this wallet, and make at least one trade");
+      info(
+        "To fix: Visit polymarket.com, connect this wallet, and make at least one trade",
+      );
       return null;
     }
 
@@ -227,18 +259,28 @@ async function testL1Auth(wallet: Wallet): Promise<ApiKeyCreds | null> {
       success("API Key created successfully");
       info(`  API Key: ${creds.key.slice(0, 8)}...${creds.key.slice(-4)}`);
       info(`  Secret: ${creds.secret.slice(0, 8)}...${creds.secret.slice(-4)}`);
-      info(`  Passphrase: ${creds.passphrase.slice(0, 4)}...${creds.passphrase.slice(-4)}`);
+      info(
+        `  Passphrase: ${creds.passphrase.slice(0, 4)}...${creds.passphrase.slice(-4)}`,
+      );
 
       return creds;
     } catch (createErr) {
-      const createError = createErr as { response?: { status?: number }; message?: string };
-      error(`createApiKey failed: ${createError?.response?.status || "unknown"} - ${createError?.message || String(createErr)}`);
+      const createError = createErr as {
+        response?: { status?: number };
+        message?: string;
+      };
+      error(
+        `createApiKey failed: ${createError?.response?.status || "unknown"} - ${createError?.message || String(createErr)}`,
+      );
       return null;
     }
   }
 }
 
-async function testL2Auth(wallet: Wallet, creds: ApiKeyCreds): Promise<boolean> {
+async function testL2Auth(
+  wallet: Wallet,
+  creds: ApiKeyCreds,
+): Promise<boolean> {
   header("4. Testing L2 Authentication (Balance Allowance)");
 
   info("Creating CLOB client with credentials...");
@@ -260,10 +302,16 @@ async function testL2Auth(wallet: Wallet, creds: ApiKeyCreds): Promise<boolean> 
     // Check for error response
     const errorResponse = response as { status?: number; error?: string };
     if (errorResponse.status === 401 || errorResponse.status === 403) {
-      error(`Balance allowance failed: ${errorResponse.status} ${errorResponse.error ?? "Unauthorized"}`);
+      error(
+        `Balance allowance failed: ${errorResponse.status} ${errorResponse.error ?? "Unauthorized"}`,
+      );
       info("This indicates L2 HMAC signature is incorrect");
-      info("Expected L2 headers: POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_API_KEY, POLY_PASSPHRASE");
-      info("HMAC message format: timestamp + method + path (with query params) + body");
+      info(
+        "Expected L2 headers: POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_API_KEY, POLY_PASSPHRASE",
+      );
+      info(
+        "HMAC message format: timestamp + method + path (with query params) + body",
+      );
       return false;
     }
 
@@ -274,7 +322,10 @@ async function testL2Auth(wallet: Wallet, creds: ApiKeyCreds): Promise<boolean> 
 
     // Check if response has balance data
     const balanceData = response as { balance?: string; allowance?: string };
-    if (balanceData.balance !== undefined || balanceData.allowance !== undefined) {
+    if (
+      balanceData.balance !== undefined ||
+      balanceData.allowance !== undefined
+    ) {
       success("Balance allowance fetched successfully");
       info(`  Balance: ${balanceData.balance || "N/A"}`);
       info(`  Allowance: ${balanceData.allowance || "N/A"}`);
@@ -307,9 +358,18 @@ async function testL2Auth(wallet: Wallet, creds: ApiKeyCreds): Promise<boolean> 
 
 async function main(): Promise<void> {
   console.log("\n");
-  log("╔═══════════════════════════════════════════════════════════════════╗", "cyan");
-  log("║         Polymarket CLOB Authentication Smoke Test                ║", "cyan");
-  log("╚═══════════════════════════════════════════════════════════════════╝", "cyan");
+  log(
+    "╔═══════════════════════════════════════════════════════════════════╗",
+    "cyan",
+  );
+  log(
+    "║         Polymarket CLOB Authentication Smoke Test                ║",
+    "cyan",
+  );
+  log(
+    "╚═══════════════════════════════════════════════════════════════════╝",
+    "cyan",
+  );
 
   // Step 1: Validate environment
   const envValid = await validateEnvironment();
@@ -350,7 +410,9 @@ async function main(): Promise<void> {
 // Run the test
 main().catch((err) => {
   console.error("\n");
-  error(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+  error(
+    `Unexpected error: ${err instanceof Error ? err.message : String(err)}`,
+  );
   if (err instanceof Error && err.stack) {
     console.error(err.stack);
   }

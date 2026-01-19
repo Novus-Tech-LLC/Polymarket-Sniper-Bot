@@ -21,7 +21,9 @@ type TypedDataSigner = AppSigner & {
   ) => Promise<string>;
 };
 
-const ensureTypedDataCompatibility = (signer?: AppSigner): AppSigner | undefined => {
+const ensureTypedDataCompatibility = (
+  signer?: AppSigner,
+): AppSigner | undefined => {
   if (!signer) {
     return signer;
   }

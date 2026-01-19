@@ -7,7 +7,10 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalQuery, buildSignedPath } from "../../src/utils/query-string.util";
+import {
+  canonicalQuery,
+  buildSignedPath,
+} from "../../src/utils/query-string.util";
 
 describe("CLOB Request Canonicalization", () => {
   describe("canonicalQuery", () => {
@@ -156,8 +159,14 @@ describe("CLOB Request Canonicalization", () => {
         signature_type: 0,
       };
 
-      const { signedPath: path1 } = buildSignedPath("/balance-allowance", params);
-      const { signedPath: path2 } = buildSignedPath("/balance-allowance", params);
+      const { signedPath: path1 } = buildSignedPath(
+        "/balance-allowance",
+        params,
+      );
+      const { signedPath: path2 } = buildSignedPath(
+        "/balance-allowance",
+        params,
+      );
 
       assert.equal(path1, path2);
       assert.equal(

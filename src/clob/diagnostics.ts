@@ -530,8 +530,10 @@ export const classifyPreflightIssue = (params: {
 const logPreflightHint = (logger: AnyLogger, issue: PreflightIssue): void => {
   const hints: Record<PreflightIssue, string> = {
     AUTH: "Auth failed: verify API key/secret/passphrase, signature_type, and POLY_ADDRESS.",
-    PARAM: "Invalid params: use asset_type=COLLATERAL or asset_type=CONDITIONAL&token_id=...",
-    FUNDS: "Insufficient balance/allowance: top up collateral or approve spending.",
+    PARAM:
+      "Invalid params: use asset_type=COLLATERAL or asset_type=CONDITIONAL&token_id=...",
+    FUNDS:
+      "Insufficient balance/allowance: top up collateral or approve spending.",
     NETWORK: "Network issue: retry or check connectivity/Cloudflare.",
     UNKNOWN: "",
   };
@@ -785,7 +787,7 @@ export const runClobAuthPreflight = async (params: {
 
   const timestamp = Math.floor(Date.now() / 1000);
   const endpoint = "/balance-allowance";
-  
+
   if (isStructuredLogger(params.logger)) {
     params.logger.debug("Starting auth preflight", {
       ...logContext,
@@ -801,7 +803,7 @@ export const runClobAuthPreflight = async (params: {
       ? { ...requestParams, signature_type: signatureType }
       : requestParams;
   const { signedPath, paramsKeys } = buildSignedPath(endpoint, signedParams);
-  
+
   if (isStructuredLogger(params.logger)) {
     params.logger.debug("Signed path details", {
       category: "SIGN",
@@ -967,7 +969,7 @@ export const runClobAuthPreflight = async (params: {
     return { ok: false, status, forced: Boolean(params.force) };
   } catch (error) {
     const details = extractPreflightErrorDetails(error);
-    
+
     if (isStructuredLogger(params.logger)) {
       params.logger.warn("Preflight request failed", {
         category: "HTTP",

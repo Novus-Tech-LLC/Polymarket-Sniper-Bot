@@ -1,4 +1,10 @@
-import { Contract, Interface, MaxUint256, formatUnits, parseUnits } from "ethers";
+import {
+  Contract,
+  Interface,
+  MaxUint256,
+  formatUnits,
+  parseUnits,
+} from "ethers";
 import type { Wallet } from "ethers";
 import type { Logger } from "../utils/logger.util";
 import { estimateGasFees, retryTxWithBackoff } from "../utils/gas";
@@ -359,9 +365,8 @@ export const ensureApprovals = async (params: {
   });
 
   const approvalsOk =
-    refreshed.allowances.every(({ allowance }) =>
-      allowance >= minAllowance,
-    ) && refreshed.erc1155Approvals.every(({ approved }) => approved);
+    refreshed.allowances.every(({ allowance }) => allowance >= minAllowance) &&
+    refreshed.erc1155Approvals.every(({ approved }) => approved);
 
   if (!approvalsOk) {
     params.logger.error(

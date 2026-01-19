@@ -40,7 +40,8 @@
     "test-auth": "node test-auth-harness.js",
     "clob:probe": "ts-node scripts/clob_auth_probe.ts",
     "clob:matrix": "DEBUG_PREFLIGHT_MATRIX=true ts-node scripts/clob_auth_probe.ts",
-    "auth:probe": "ts-node scripts/clob_auth_probe.ts"
+    "auth:probe": "ts-node scripts/auth_probe.ts",
+    "auth:probe:legacy": "ts-node scripts/clob_auth_probe.ts"
   },
   "keywords": [
     "polymarket",

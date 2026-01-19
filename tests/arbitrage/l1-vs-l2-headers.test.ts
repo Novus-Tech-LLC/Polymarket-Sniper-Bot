@@ -34,21 +34,17 @@ test("L1 headers include only L1-specific headers", async () => {
   assert.equal(
     headersAny.POLY_API_KEY,
     undefined,
-    "POLY_API_KEY must NOT be present in L1 headers"
+    "POLY_API_KEY must NOT be present in L1 headers",
   );
   assert.equal(
     headersAny.POLY_PASSPHRASE,
     undefined,
-    "POLY_PASSPHRASE must NOT be present in L1 headers"
+    "POLY_PASSPHRASE must NOT be present in L1 headers",
   );
 
   // Verify header count (should be exactly 4)
   const headerKeys = Object.keys(headers);
-  assert.equal(
-    headerKeys.length,
-    4,
-    "L1 headers should have exactly 4 keys"
-  );
+  assert.equal(headerKeys.length, 4, "L1 headers should have exactly 4 keys");
 });
 
 test("L2 headers include both L1 and L2-specific headers", async () => {
@@ -81,7 +77,7 @@ test("L2 headers include both L1 and L2-specific headers", async () => {
   assert.equal(
     headersAny.POLY_NONCE,
     undefined,
-    "POLY_NONCE must NOT be present in L2 headers"
+    "POLY_NONCE must NOT be present in L2 headers",
   );
 
   // Verify specific values
@@ -91,11 +87,7 @@ test("L2 headers include both L1 and L2-specific headers", async () => {
 
   // Verify header count (should be exactly 5)
   const headerKeys = Object.keys(headers);
-  assert.equal(
-    headerKeys.length,
-    5,
-    "L2 headers should have exactly 5 keys"
-  );
+  assert.equal(headerKeys.length, 5, "L2 headers should have exactly 5 keys");
 });
 
 test("L1 signature is EIP-712 format (starts with 0x)", async () => {
@@ -115,15 +107,15 @@ test("L1 signature is EIP-712 format (starts with 0x)", async () => {
   // EIP-712 signatures should start with 0x and be hex
   assert.ok(
     headers.POLY_SIGNATURE.startsWith("0x"),
-    "L1 signature should start with 0x"
+    "L1 signature should start with 0x",
   );
   assert.ok(
     /^0x[0-9a-fA-F]+$/.test(headers.POLY_SIGNATURE),
-    "L1 signature should be hex format"
+    "L1 signature should be hex format",
   );
   assert.ok(
     headers.POLY_SIGNATURE.length > 130,
-    "L1 signature should be ~132 chars (EIP-712)"
+    "L1 signature should be ~132 chars (EIP-712)",
   );
 });
 
@@ -148,20 +140,19 @@ test("L2 signature is HMAC format (base64url)", async () => {
   // HMAC signatures should be base64url (NOT start with 0x)
   assert.ok(
     !headers.POLY_SIGNATURE.startsWith("0x"),
-    "L2 signature should NOT start with 0x"
+    "L2 signature should NOT start with 0x",
   );
 
   // base64url uses [-_A-Za-z0-9=] characters
   assert.ok(
     /^[A-Za-z0-9_\-=]+$/.test(headers.POLY_SIGNATURE),
-    "L2 signature should be base64url format"
+    "L2 signature should be base64url format",
   );
 
   // HMAC-SHA256 base64url signature is typically 43-44 chars
   assert.ok(
-    headers.POLY_SIGNATURE.length >= 40 &&
-      headers.POLY_SIGNATURE.length <= 50,
-    "L2 signature should be typical HMAC length"
+    headers.POLY_SIGNATURE.length >= 40 && headers.POLY_SIGNATURE.length <= 50,
+    "L2 signature should be typical HMAC length",
   );
 });
 
@@ -181,11 +172,7 @@ test("L1 POLY_NONCE is always 0", async () => {
       {},
     );
 
-    assert.equal(
-      headers.POLY_NONCE,
-      "0",
-      "L1 POLY_NONCE should always be 0"
-    );
+    assert.equal(headers.POLY_NONCE, "0", "L1 POLY_NONCE should always be 0");
   }
 });
 
@@ -222,12 +209,12 @@ test("L1 and L2 use same POLY_ADDRESS for EOA mode", async () => {
   assert.equal(
     l1Headers.POLY_ADDRESS,
     l2Headers.POLY_ADDRESS,
-    "L1 and L2 should use same address in EOA mode"
+    "L1 and L2 should use same address in EOA mode",
   );
   assert.equal(
     l1Headers.POLY_ADDRESS,
     wallet.address,
-    "Address should match wallet address"
+    "Address should match wallet address",
   );
 });
 
@@ -254,10 +241,6 @@ test("L2 headers do not include undefined or null values", async () => {
   for (const [key, value] of Object.entries(headersAny)) {
     assert.notEqual(value, undefined, `Header ${key} should not be undefined`);
     assert.notEqual(value, null, `Header ${key} should not be null`);
-    assert.notEqual(
-      value,
-      "",
-      `Header ${key} should not be empty string`
-    );
+    assert.notEqual(value, "", `Header ${key} should not be empty string`);
   }
 });
