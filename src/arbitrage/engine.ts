@@ -14,6 +14,7 @@ import type {
   ArbDiagnostics,
   CandidateSnapshot,
 } from "./strategy/intra-market.strategy";
+import { getAdaptiveLearner, type AdaptiveTradeLearner } from "./learning/adaptive-learner";
 
 export class ArbitrageEngine {
   private readonly provider: MarketDataProvider;
@@ -24,8 +25,11 @@ export class ArbitrageEngine {
   private readonly logger: Logger;
   private readonly decisionLogger?: DecisionLogger;
   private readonly orderbookLimiter: Semaphore;
+  private readonly learner: AdaptiveTradeLearner;
   private running = false;
   private activeTrades = 0;
+  /** Track pending trades for outcome recording */
+  private pendingTrades: Map<string, { tradeId: string; opportunity: Opportunity; startTime: number }> = new Map();
 
   constructor(params: {
     provider: MarketDataProvider;
@@ -44,12 +48,14 @@ export class ArbitrageEngine {
     this.logger = params.logger;
     this.decisionLogger = params.decisionLogger;
     this.orderbookLimiter = new Semaphore(6);
+    this.learner = getAdaptiveLearner(params.logger);
   }
 
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    this.logger.info("[ARB] Arbitrage engine started");
+    this.logger.info("[ARB] ✅ Arbitrage engine started");
+    this.logger.info("[ARB] 📊 Adaptive learning enabled - will learn from trade outcomes");
     while (this.running) {
       const startedAt = Date.now();
       await this.scanOnce(startedAt);
@@ -57,6 +63,8 @@ export class ArbitrageEngine {
       const waitMs = Math.max(0, this.config.scanIntervalMs - elapsed);
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
+    // Print learning summary on stop
+    this.learner.printSummary();
   }
 
   stop(): void {
@@ -144,10 +152,36 @@ export class ArbitrageEngine {
     opportunity: Opportunity,
     now: number,
   ): Promise<void> {
+    // First, check with the adaptive learner
+    const spreadBps = opportunity.spreadBps ?? 100; // Default spread if not available
+    const learnerEval = this.learner.evaluateTrade({
+      marketId: opportunity.marketId,
+      edgeBps: opportunity.edgeBps,
+      spreadBps,
+      sizeUsd: opportunity.sizeUsd,
+      liquidityUsd: opportunity.liquidityUsd,
+    });
+
+    if (!learnerEval.shouldTrade) {
+      this.logger.info(
+        `[ARB] ⛔ Skip (learner) market=${opportunity.marketId.slice(0, 12)}... confidence=${learnerEval.confidence}% reasons: ${learnerEval.reasons.join(", ")}`,
+      );
+      await this.logDecision(
+        opportunity,
+        "skip",
+        `learner:${learnerEval.reasons[0] || "low_confidence"}`,
+        now,
+      );
+      return;
+    }
+
+    // Apply learner's size adjustment
+    const adjustedSize = opportunity.sizeUsd * learnerEval.adjustments.sizeMultiplier;
+
     const decision = this.riskManager.canExecute(opportunity, now);
     if (!decision.allowed) {
       this.logger.info(
-        `[ARB] Skip market=${opportunity.marketId} reason=${decision.reason || "filtered"} edge=${opportunity.edgeBps.toFixed(1)}bps est=$${opportunity.estProfitUsd.toFixed(2)} size=$${opportunity.sizeUsd.toFixed(2)}`,
+        `[ARB] ⛔ Skip market=${opportunity.marketId.slice(0, 12)}... reason=${decision.reason || "filtered"} edge=${opportunity.edgeBps.toFixed(1)}bps`,
       );
       await this.logDecision(
         opportunity,
@@ -161,11 +195,23 @@ export class ArbitrageEngine {
     const gasCheck = await this.riskManager.ensureGasBalance(now);
     if (!gasCheck.ok) {
       this.logger.warn(
-        `[ARB] Skip market=${opportunity.marketId} reason=low_gas edge=${opportunity.edgeBps.toFixed(1)}bps est=$${opportunity.estProfitUsd.toFixed(2)} size=$${opportunity.sizeUsd.toFixed(2)}`,
+        `[ARB] ⚠️  Skip market=${opportunity.marketId.slice(0, 12)}... reason=low_gas`,
       );
       await this.logDecision(opportunity, "skip", "low_gas", now);
       return;
     }
+
+    // Record trade for learning
+    const tradeId = this.learner.recordTrade({
+      marketId: opportunity.marketId,
+      timestamp: now,
+      entryPrice: opportunity.yesAsk,
+      sizeUsd: adjustedSize,
+      edgeBps: opportunity.edgeBps,
+      spreadBps,
+      liquidityUsd: opportunity.liquidityUsd,
+      outcome: "pending",
+    });
 
     this.activeTrades += 1;
     await this.riskManager.onTradeSubmitted(opportunity, now);
@@ -176,16 +222,32 @@ export class ArbitrageEngine {
       noTokenId: opportunity.noTokenId,
       yesAsk: opportunity.yesAsk,
       noAsk: opportunity.noAsk,
-      sizeUsd: opportunity.sizeUsd,
+      sizeUsd: adjustedSize,
       edgeBps: opportunity.edgeBps,
-      estProfitUsd: opportunity.estProfitUsd,
+      estProfitUsd: opportunity.estProfitUsd * learnerEval.adjustments.sizeMultiplier,
     };
+
+    this.logger.info(
+      `[ARB] 🚀 Execute market=${opportunity.marketId.slice(0, 12)}... edge=${opportunity.edgeBps.toFixed(1)}bps size=$${adjustedSize.toFixed(2)} confidence=${learnerEval.confidence}%`,
+    );
 
     const result = await this.executor.execute(plan, now);
     this.activeTrades -= 1;
+    const holdTimeMs = Date.now() - now;
 
     if (result.status === "submitted" || result.status === "dry_run") {
       await this.riskManager.onTradeSuccess(opportunity, now);
+      // Record as win for now (in real scenario, would need to track settlement)
+      this.learner.updateTradeOutcome(
+        tradeId,
+        "win",
+        opportunity.yesAsk,
+        plan.estProfitUsd,
+        holdTimeMs,
+      );
+      this.logger.info(
+        `[ARB] ✅ Trade submitted market=${opportunity.marketId.slice(0, 12)}... tx=${result.txHashes?.[0]?.slice(0, 10) || "dry_run"}...`,
+      );
       await this.logDecision(
         opportunity,
         "trade",
@@ -199,6 +261,17 @@ export class ArbitrageEngine {
         opportunity,
         now,
         result.reason || result.status,
+      );
+      // Record as loss for learning
+      this.learner.updateTradeOutcome(
+        tradeId,
+        "loss",
+        opportunity.yesAsk,
+        -plan.sizeUsd * 0.01, // Assume small loss for failed trades
+        holdTimeMs,
+      );
+      this.logger.warn(
+        `[ARB] ❌ Trade failed market=${opportunity.marketId.slice(0, 12)}... reason=${result.reason || result.status}`,
       );
       await this.logDecision(
         opportunity,

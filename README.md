@@ -6,13 +6,21 @@
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=for-the-badge)
 
-**Automated trading bot for Polymarket with mempool monitoring and priority execution**
+**Automated trading bot for Polymarket with adaptive learning and smart execution**
 
 [Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [Documentation](#-documentation) • [Contributing](#-contributing)
 
 </div>
 
 ---
+
+## ✨ What's New
+
+- 🧠 **Adaptive Learning System** - Learns from trade outcomes to prevent bad trades
+- 🔐 **Simplified Authentication** - Uses `createOrDeriveApiKey()` for clean credential management
+- 📊 **Clean Logging** - ✅ for success, ❌ for failures - easy to troubleshoot
+- 🛡️ **Rate-Limited Error Logs** - No more log spam on repeated auth failures
+- ⚡ **Single-Flight Derivation** - Prevents concurrent credential derivation attempts
 
 ## Contact 
 
@@ -37,6 +45,7 @@ Feel free to reach out for implementation assistance or integration support.
 
 - [Overview](#-overview)
 - [Features](#-features)
+- [Adaptive Learning](#-adaptive-learning)
 - [Architecture](#-architecture)
 - [Quick Start](#-quick-start)
 - [Configuration](#-configuration)
@@ -50,29 +59,81 @@ Feel free to reach out for implementation assistance or integration support.
 
 ## 🎯 Overview
 
-Polymarket Sniper Bot is a sophisticated automated trading system designed for the Polymarket prediction market platform. It monitors the Polygon mempool and Polymarket API for pending trades from target addresses, then executes orders with higher priority gas pricing to frontrun target transactions.
+Polymarket Sniper Bot is a sophisticated automated trading system designed for the Polymarket prediction market platform. It uses **adaptive learning** to improve trade decisions over time, tracking outcomes and adjusting parameters based on historical performance.
 
 ### Key Capabilities
 
-- **Real-time Mempool Monitoring**: Subscribes to pending transactions on Polygon network
-- **Hybrid Detection**: Combines mempool monitoring with API polling for comprehensive trade detection
-- **Priority Execution**: Configurable gas price multipliers for competitive frontrunning
-- **Intelligent Sizing**: Proportional frontrun sizing based on target trade size
-- **Error Handling**: Robust retry mechanisms and error recovery
-- **Balance Management**: Automatic balance validation before trade execution
+- **Adaptive Learning**: Learns from trade outcomes to avoid repeated mistakes
+- **Smart Trade Evaluation**: Confidence-based trade decisions with size adjustments
+- **Market Avoidance**: Automatically avoids markets with consecutive losses
+- **Clean Authentication**: Simple `createOrDeriveApiKey()` approach
+- **Rate-Limited Logging**: No log spam on auth failures
+- **Real-time Arbitrage**: Intra-market arbitrage detection (YES + NO < $1.00)
 
 ## ✨ Features
 
-- 🔍 **Mempool Monitoring**: Real-time detection of pending transactions to Polymarket contracts
-- 📊 **API Integration**: Hybrid approach combining mempool and API monitoring for faster detection
+- 🧠 **Adaptive Learning**: Learns optimal parameters from winning trades
+- 🔍 **Mempool Monitoring**: Real-time detection of pending transactions
+- 📊 **API Integration**: Hybrid approach combining mempool and API monitoring
 - ⚡ **Priority Execution**: Configurable gas price multipliers for frontrunning
-- 💰 **Smart Sizing**: Proportional frontrun sizing (configurable multiplier)
-- 🛡️ **Error Handling**: Comprehensive error handling with retry logic
-- 📈 **Trade Filtering**: Minimum trade size thresholds to focus on profitable opportunities
+- 💰 **Smart Sizing**: Confidence-based size adjustments (0.25x - 2.0x)
+- 🛡️ **Risk Management**: Market avoidance after consecutive losses
+- 📈 **Trade Filtering**: Minimum edge/spread thresholds based on historical success
 - 🔄 **Balance Validation**: Automatic checks for sufficient USDC and POL balances
-- 📝 **Structured Logging**: Color-coded console logging with debug support
+- 📝 **Clean Logging**: ✅/❌ indicators for easy troubleshooting
 - 🐳 **Docker Support**: Containerized deployment with Docker and Docker Compose
-- 🔧 **CLI Tools**: Utility commands for allowance management and manual operations
+
+## 🧠 Adaptive Learning
+
+The bot includes an **Adaptive Trade Learning System** that:
+
+### How It Works
+
+1. **Records all trades** with entry price, size, edge, spread, and timing
+2. **Tracks outcomes** (win/loss/breakeven) and updates statistics
+3. **Calculates confidence scores** for each market based on historical performance
+4. **Adjusts trade parameters** based on what has worked:
+   - Increases size on high-confidence trades
+   - Decreases size on low-confidence trades
+   - Avoids markets with repeated losses
+
+### Trade Evaluation
+
+Before each trade, the system evaluates:
+
+```
+✅ Market win rate (historical)
+✅ Edge vs effective threshold (learned from winners)
+✅ Spread vs effective threshold (learned from winners)
+✅ Time of day (best/worst hours)
+✅ Liquidity levels
+```
+
+### Market Avoidance
+
+After **3 consecutive losses** on a market, it's automatically avoided for 30 minutes:
+
+```
+[Learn] ⛔ Market 0x1234abcd... added to avoid list (3 losses)
+[ARB] ⛔ Skip (learner) market=0x1234abcd... confidence=0% reasons: ❌ Market avoided (3 losses, 28m remaining)
+```
+
+### Learning Summary
+
+The bot prints a summary showing learned parameters:
+
+```
+═══════════════════════════════════════════════════
+📊 ADAPTIVE LEARNING SUMMARY
+═══════════════════════════════════════════════════
+   Total Trades: 47
+   ✅ Win Rate: 68.1% (32W/15L/0BE)
+   💰 Total P/L: $+127.45
+   📈 Avg/Trade: $+2.71
+   ⏰ Best Hour: 14:00 UTC
+   📊 Min Edge: 45bps | Max Spread: 180bps
+═══════════════════════════════════════════════════
+```
 
 ## 🏗️ Architecture
 
@@ -82,12 +143,16 @@ Polymarket Sniper Bot is a sophisticated automated trading system designed for t
 polymarket-sniper-bot/
 ├── src/
 │   ├── app/              # Application entry point
+│   ├── arbitrage/        # Arbitrage engine and strategies
+│   │   ├── learning/     # Adaptive learning system
+│   │   ├── strategy/     # Trading strategies
+│   │   ├── risk/         # Risk management
+│   │   └── executor/     # Trade execution
 │   ├── cli/              # CLI commands and utilities
+│   ├── clob/             # CLOB authentication
+│   │   └── simple-auth.ts # Simplified auth module
 │   ├── config/           # Configuration management
-│   ├── constants/        # Application constants
-│   ├── domain/           # Domain models and types
-│   ├── errors/           # Custom error classes
-│   ├── infrastructure/  # External service integrations
+│   ├── infrastructure/   # External service integrations
 │   ├── services/         # Core business logic
 │   └── utils/            # Utility functions
 ├── docs/                 # Documentation
