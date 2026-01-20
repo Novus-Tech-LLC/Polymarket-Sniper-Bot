@@ -28,7 +28,7 @@ const applyMultiplier = (value: bigint, multiplier: number): bigint => {
  * Checks if gas price exceeds configured maximum to prevent excessive fees
  * @throws Error if gas price exceeds cap
  */
-const validateGasCap = (
+export const validateGasCap = (
   maxFeePerGas: bigint,
   logger?: Logger,
 ): void => {
