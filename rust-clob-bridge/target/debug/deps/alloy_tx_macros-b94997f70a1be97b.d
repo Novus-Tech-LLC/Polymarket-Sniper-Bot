@@ -1,9 +1,0 @@
-/home/runner/work/Polymarket-Sniper-Bot/Polymarket-Sniper-Bot/rust-clob-bridge/target/debug/deps/alloy_tx_macros-b94997f70a1be97b.d: /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/lib.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/expand.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/parse.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/serde.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/../README.md
-
-/home/runner/work/Polymarket-Sniper-Bot/Polymarket-Sniper-Bot/rust-clob-bridge/target/debug/deps/liballoy_tx_macros-b94997f70a1be97b.so: /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/lib.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/expand.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/parse.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/serde.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/../README.md
-
-/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/lib.rs:
-/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/expand.rs:
-/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/parse.rs:
-/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/serde.rs:
-/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloy-tx-macros-1.4.3/src/../README.md:
