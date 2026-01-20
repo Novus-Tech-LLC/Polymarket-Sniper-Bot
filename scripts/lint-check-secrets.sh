@@ -78,7 +78,19 @@ echo ""
 echo "RULE 2: Checking for console.error/console.warn in src/"
 echo "        (Use structured logger instead)"
 
-CONSOLE_ERROR_FILES=$(grep -rn --include="*.ts" -E "console\.(error|warn)" src/ 2>/dev/null | grep -v "eslint-disable" | grep -v "src/utils/structured-logger.ts" | grep -v "src/utils/logger.util.ts" | grep -v "src/utils/console-filter.util.ts" | grep -v "src/clob/minimal-auth.ts" | grep -v "src/clob/auth-probe.ts" || true)
+# Exclude files that legitimately need console.error/warn
+EXCLUDED_FROM_CONSOLE_CHECK=(
+  "src/utils/structured-logger.ts"
+  "src/utils/logger.util.ts"
+  "src/utils/console-filter.util.ts"
+  "src/clob/minimal-auth.ts"
+  "src/clob/auth-probe.ts"
+)
+
+CONSOLE_ERROR_FILES=$(grep -rn --include="*.ts" -E "console\.(error|warn)" src/ 2>/dev/null | grep -v "eslint-disable" || true)
+for excluded in "${EXCLUDED_FROM_CONSOLE_CHECK[@]}"; do
+  CONSOLE_ERROR_FILES=$(echo "$CONSOLE_ERROR_FILES" | grep -v "$excluded" || true)
+done
 
 if [ -z "$CONSOLE_ERROR_FILES" ]; then
   echo -e "${GREEN}✅ No unauthorized console.error/warn found${NC}"
@@ -111,9 +123,19 @@ fi
 echo ""
 echo "RULE 4: Checking for secret string interpolation"
 
+# Exclude files that use these variable names for non-secret purposes
+EXCLUDED_FROM_INTERPOLATION_CHECK=(
+  "src/utils/structured-logger.ts"
+  "src/utils/auth-logger.ts"
+  "src/utils/clob-credentials.util.ts"
+)
+
 SECRET_INTERPOLATION=$(grep -rn --include="*.ts" --include="*.js" \
   -iE '`.*\$\{(private.*key|secret|passphrase|api.*key)\}.*`' \
-  src/ 2>/dev/null | grep -v "src/utils/structured-logger.ts" | grep -v "src/utils/auth-logger.ts" | grep -v "src/utils/clob-credentials.util.ts" || true)
+  src/ 2>/dev/null || true)
+for excluded in "${EXCLUDED_FROM_INTERPOLATION_CHECK[@]}"; do
+  SECRET_INTERPOLATION=$(echo "$SECRET_INTERPOLATION" | grep -v "$excluded" || true)
+done
 
 if [ -z "$SECRET_INTERPOLATION" ]; then
   echo -e "${GREEN}✅ No secret string interpolation found${NC}"

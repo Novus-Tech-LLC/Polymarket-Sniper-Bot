@@ -183,7 +183,7 @@ The auth probe automatically provides diagnostic analysis for common failure mod
 # Enable HMAC diagnostics to trace signing vs HTTP request
 ENABLE_HMAC_DIAGNOSTICS=true npm run auth:probe
 
-# Detect correct wallet configuration
+# Detect correct wallet configuration (existing command)
 npm run wallet:detect
 
 # Delete credential cache and re-derive

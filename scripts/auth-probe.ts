@@ -111,7 +111,7 @@ function extractErrorMessage(error: unknown): string {
   return String(error).slice(0, 200);
 }
 
-async function main() {
+async function main(): Promise<number> {
   const runId = generateRunId();
   const startTime = Date.now();
 
@@ -134,7 +134,7 @@ async function main() {
       category: "STARTUP",
       runId,
     });
-    process.exit(1);
+    throw new Error("PRIVATE_KEY environment variable is required");
   }
 
   // Create wallet
@@ -305,13 +305,17 @@ async function main() {
     durationMs,
   });
 
-  // Exit with appropriate code
-  process.exit(success ? 0 : 1);
+  // Return exit code for top-level handler
+  return success ? 0 : 1;
 }
 
 // Fatal error handler
-main().catch((err) => {
-  // eslint-disable-next-line no-console -- Fatal error handler needs direct console.error
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+main()
+  .then((exitCode) => {
+    process.exit(exitCode);
+  })
+  .catch((err) => {
+    // eslint-disable-next-line no-console -- Fatal error handler needs direct console.error
+    console.error("Fatal error:", err);
+    process.exit(1);
+  });
