@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { ConsoleLogger } from "../utils/logger.util";
-import { createPolymarketClient } from "../infrastructure/clob-client.factory";
+import { PolymarketAuth, createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { isApiKeyCreds } from "../utils/clob-credentials.util";
 
@@ -77,24 +77,27 @@ async function main(): Promise<void> {
     readEnv("COLLATERAL_TOKEN_DECIMALS") ?? 6,
   );
 
-  const client = await createPolymarketClient({
-    rpcUrl,
-    privateKey,
-    apiKey: clobCreds.key,
-    apiSecret: clobCreds.secret,
-    apiPassphrase: clobCreds.passphrase,
-    deriveApiKey: clobDeriveEnabled,
-    publicKey,
-    logger,
-  });
-
-  const clientCredsRaw = (
-    client as { creds?: { key?: string; secret?: string; passphrase?: string } }
-  ).creds;
-  const clientCreds = isApiKeyCreds(clientCredsRaw)
-    ? clientCredsRaw
-    : undefined;
-  const credsComplete = Boolean(clientCreds);
+  // Simple authentication with ONLY private key (like pmxt and other Polymarket bots)
+  logger.info("🔐 Authenticating with Polymarket...");
+  const auth = createPolymarketAuthFromEnv(logger);
+  
+  const authResult = await auth.authenticate();
+  if (!authResult.success) {
+    logger.error(`❌ Authentication failed: ${authResult.error}`);
+    logger.error("[Preflight] SUMMARY ready=false");
+    process.exitCode = 1;
+    return;
+  }
+  
+  logger.info(`✅ Authentication successful`);
+  
+  // Get authenticated CLOB client
+  const clobClient = await auth.getClobClient();
+  
+  // Create a client object with wallet attached (for compatibility with existing code)
+  const { Wallet } = await import("ethers");
+  const wallet = new Wallet(privateKey);
+  const client = Object.assign(clobClient, { wallet });
 
   const result = await ensureTradingReady({
     client,
@@ -102,8 +105,8 @@ async function main(): Promise<void> {
     privateKey,
     configuredPublicKey: publicKey,
     rpcUrl,
-    detectOnly: !credsComplete,
-    clobCredsComplete: credsComplete,
+    detectOnly: false,
+    clobCredsComplete: true,
     clobDeriveEnabled,
     collateralTokenDecimals,
   });

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { loadMonitorConfig, parseCliOverrides } from "../config/loadConfig";
-import { createPolymarketClient } from "../infrastructure/clob-client.factory";
+import { PolymarketAuth, createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
 import { MempoolMonitorService } from "../services/mempool-monitor.service";
 import { TradeExecutorService } from "../services/trade-executor.service";
 import { ConsoleLogger } from "../utils/logger.util";
@@ -47,33 +47,33 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!env.clobCredsComplete && !env.clobDeriveEnabled) {
-    logger.warn("CLOB creds incomplete");
-  }
-
-  const client = await createPolymarketClient({
-    rpcUrl: env.rpcUrl,
-    privateKey: env.privateKey,
-    apiKey: env.polymarketApiKey,
-    apiSecret: env.polymarketApiSecret,
-    apiPassphrase: env.polymarketApiPassphrase,
-    deriveApiKey: env.clobDeriveEnabled,
-    publicKey: env.proxyWallet,
-    logger,
-  });
-  if (client.executionDisabled) {
+  // Simple authentication with ONLY private key (like pmxt and other Polymarket bots)
+  logger.info("🔐 Authenticating with Polymarket...");
+  const auth = createPolymarketAuthFromEnv(logger);
+  
+  const authResult = await auth.authenticate();
+  if (!authResult.success) {
+    logger.error(`❌ Authentication failed: ${authResult.error}`);
+    logger.warn("Running in detect-only mode - trading disabled");
     env.detectOnly = true;
+    env.clobCredsComplete = false;
+    
+    // Exit early if we can't authenticate
+    logger.error("Cannot proceed without valid credentials");
+    return;
+  } else {
+    logger.info(`✅ Authentication successful`);
+    env.clobCredsComplete = true;
+    env.detectOnly = false;
   }
 
-  const clientCredsRaw = (
-    client as { creds?: { key?: string; secret?: string; passphrase?: string } }
-  ).creds;
-  const clientCreds = isApiKeyCreds(clientCredsRaw)
-    ? clientCredsRaw
-    : undefined;
-  const credsComplete = Boolean(clientCreds);
-  env.clobCredsComplete = credsComplete;
-  env.detectOnly = !credsComplete || env.detectOnly;
+  // Get authenticated CLOB client
+  const clobClient = await auth.getClobClient();
+  
+  // Create a client object with wallet attached (for compatibility with existing code)
+  const { Wallet } = await import("ethers");
+  const wallet = new Wallet(env.privateKey);
+  const client = Object.assign(clobClient, { wallet });
   const tradingReady = await ensureTradingReady({
     client,
     logger,
