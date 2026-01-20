@@ -55,8 +55,9 @@ function applyV6Shim(wallet: Wallet): Wallet {
   };
 
   if (typeof typedWallet._signTypedData !== "function" && typeof typedWallet.signTypedData === "function") {
+    const signTypedDataFn = typedWallet.signTypedData;
     typedWallet._signTypedData = async (domain, types, value) =>
-      typedWallet.signTypedData!(domain, types, value);
+      signTypedDataFn.call(typedWallet, domain, types, value);
   }
 
   return wallet;
@@ -174,7 +175,10 @@ async function runDiagnostics(): Promise<void> {
     const timestamp = Math.floor(Date.now() / 1000);
     const headers = await createL1Headers(wallet as unknown as Parameters<typeof createL1Headers>[0], CHAIN_ID, 0, timestamp);
 
-    const response = await axios.get(`${CLOB_HOST}/auth/derive-api-key`, { headers });
+    const response = await axios.get(`${CLOB_HOST}/auth/derive-api-key`, {
+      headers,
+      timeout: 30000, // 30 second timeout
+    });
 
     creds = {
       key: response.data.apiKey,
@@ -263,7 +267,10 @@ async function runDiagnostics(): Promise<void> {
   const fullUrl = `${CLOB_HOST}${requestPath}`;
 
   try {
-    const response = await axios.get(fullUrl, { headers: l2Headers });
+    const response = await axios.get(fullUrl, {
+      headers: l2Headers,
+      timeout: 30000, // 30 second timeout
+    });
 
     log({
       step: "VERIFY",
@@ -276,9 +283,9 @@ async function runDiagnostics(): Promise<void> {
       },
     });
   } catch (err) {
-    const axiosErr = err as { response?: { status?: number; data?: { error?: string } } };
+    const axiosErr = err as { response?: { status?: number; data?: { error?: string } }; code?: string };
     const status = axiosErr?.response?.status;
-    const errorMsg = axiosErr?.response?.data?.error || "Unknown error";
+    const errorMsg = axiosErr?.response?.data?.error || axiosErr?.code || "Unknown error";
 
     if (status === 401) {
       log({
