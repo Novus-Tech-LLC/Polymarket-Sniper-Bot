@@ -1,5 +1,5 @@
 # Stage 1: Build Rust binary
-FROM rust:1.88-alpine AS rust-builder
+FROM rust:alpine AS rust-builder
 WORKDIR /rust-build
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 
