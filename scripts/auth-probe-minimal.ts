@@ -35,7 +35,7 @@ const logger = {
 
 async function main() {
   const runId = generateRunId();
-  
+
   logAuth(logger, "info", "Starting auth probe", {
     category: "PROBE",
     runId,
@@ -116,10 +116,11 @@ async function main() {
 
   try {
     creds = await client.createOrDeriveApiKey();
-    
+
     if (!creds || !creds.key || !creds.secret || !creds.passphrase) {
       httpStatus = 200; // Request succeeded but returned incomplete data
-      errorText = "Incomplete credentials returned (missing key/secret/passphrase)";
+      errorText =
+        "Incomplete credentials returned (missing key/secret/passphrase)";
     } else {
       httpStatus = 200; // Success
     }
@@ -183,7 +184,7 @@ async function main() {
       error?: string;
     };
     const errorResponse = response as ErrorResponse;
-    
+
     if (errorResponse.status === 401 || errorResponse.status === 403) {
       logAuth(logger, "error", "❌ Credential verification failed", {
         category: "PROBE",

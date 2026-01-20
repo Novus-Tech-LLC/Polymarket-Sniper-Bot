@@ -93,12 +93,12 @@ export interface OrderRequest {
 export class RustBridgeClient extends EventEmitter {
   private process: ChildProcess | null = null;
   private rl: readline.Interface | null = null;
-  /* eslint-disable no-unused-vars */
+
   private responseQueue: Array<{
     resolve: (value: BridgeResponse) => void;
     reject: (error: Error) => void;
   }> = [];
-  /* eslint-enable no-unused-vars */
+
   private config: RustBridgeConfig;
   private logger?: Logger;
   private started = false;
@@ -118,10 +118,9 @@ export class RustBridgeClient extends EventEmitter {
     }
 
     // In CommonJS (our compilation target), __dirname is available
-    /* eslint-disable no-undef */
+
     const currentDir =
       typeof __dirname !== "undefined" ? __dirname : process.cwd();
-    /* eslint-enable no-undef */
 
     // Try common locations
     const candidates = [
@@ -273,7 +272,6 @@ export class RustBridgeClient extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       this.responseQueue.push({
-        // eslint-disable-next-line no-unused-vars
         resolve: resolve as (val: BridgeResponse) => void,
         reject,
       });

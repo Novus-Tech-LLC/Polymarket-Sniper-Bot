@@ -100,7 +100,11 @@ export function createAuthLogFingerprint(data: {
     l1Auth: data.context?.l1Auth,
     maker: data.context?.maker,
   });
-  return crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+  return crypto
+    .createHash("sha256")
+    .update(normalized)
+    .digest("hex")
+    .slice(0, 16);
 }
 
 /**
@@ -126,7 +130,9 @@ export function logAuth(
   if (!should) {
     // Suppressed - emit a single "suppressed" message every 10 occurrences
     if (count % 10 === 0) {
-      logger[level](`[${category}] ${message} (suppressed ${count - 1} repeats)`);
+      logger[level](
+        `[${category}] ${message} (suppressed ${count - 1} repeats)`,
+      );
     }
     return;
   }
@@ -135,7 +141,7 @@ export function logAuth(
   const prefix = context?.runId
     ? `[${category}:${context.runId}]`
     : `[${category}]`;
-  
+
   if (context && Object.keys(context).length > 0) {
     const contextStr = Object.entries(context)
       .filter(([key]) => key !== "category" && key !== "runId")

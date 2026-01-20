@@ -29,7 +29,7 @@ export interface RustClobClientConfig {
  * Partial ClobClient interface that we support via Rust bridge
  * Note: Interface method parameters are intentionally named for documentation
  */
-/* eslint-disable no-unused-vars */
+
 export interface RustClobClientInterface {
   wallet: Wallet;
   derivedSignerAddress: string;
@@ -60,7 +60,6 @@ export interface RustClobClientInterface {
   postOrder(signedOrder: unknown, orderType: unknown): Promise<unknown>;
   cancelOrder(orderId: string): Promise<void>;
 }
-/* eslint-enable no-unused-vars */
 
 /**
  * Adapter that wraps RustBridgeClient to provide ClobClient-like interface
@@ -241,7 +240,6 @@ export class RustClobClientAdapter implements RustClobClientInterface {
     return result.data;
   }
 
-  // eslint-disable-next-line no-unused-vars
   async postOrder(signedOrder: unknown, _orderType: unknown): Promise<unknown> {
     // When using Rust bridge, orders are signed and posted in one step
     // This method exists for interface compatibility

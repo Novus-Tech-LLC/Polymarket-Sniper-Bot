@@ -178,7 +178,11 @@ test("address resolution priority: relayer > effectivePolyAddress > signer", asy
   assert.strictEqual(tradingAddress, signerAddress);
 
   // Test 2: Signer + effectivePolyAddress available (Safe/Proxy mode, no relayer)
-  tradingAddress = resolveTradingAddress(noRelayer, funderAddress, signerAddress);
+  tradingAddress = resolveTradingAddress(
+    noRelayer,
+    funderAddress,
+    signerAddress,
+  );
   assert.strictEqual(tradingAddress, funderAddress);
 
   // Test 3: All three available (relayer + Safe/Proxy mode)
