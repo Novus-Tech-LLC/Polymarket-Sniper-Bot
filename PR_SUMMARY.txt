@@ -27,14 +27,14 @@ Implemented a comprehensive **Auth Story diagnostic system** that transforms noi
 
 ### Changes Made
 
-**New Files (6):**
+**New Files (7):**
 1. `docs/AUTH_LOGGING_GUIDE.md` - Comprehensive developer guide (431 lines)
 2. `AUTH_STORY_EXAMPLE.md` - Example outputs for success/failure cases (292 lines)
 3. `AUTH_STORY_QUICKREF.md` - Quick reference guide (267 lines)
 4. `AUTH_STORY_README.md` - Quick start guide (72 lines)
 5. `IMPLEMENTATION_AUTH_STORY.md` - Implementation details (435 lines)
-6. `scripts/check-no-secrets.sh` - Secret leakage detection script (91 lines)
-7. `DELIVERY_SUMMARY.md` - Final delivery summary (370 lines)
+6. `DELIVERY_SUMMARY.md` - Final delivery summary (370 lines)
+7. `scripts/check-no-secrets.sh` - Secret leakage detection script (91 lines)
 
 **Modified Files (2):**
 1. `eslint.config.mjs` - Added no-console rules, secret detection (+17 lines)

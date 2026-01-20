@@ -56,7 +56,7 @@ fi
 echo ""
 echo "Checking for full wallet.privateKey logging..."
 if grep -rn --include="*.ts" --include="*.js" \
-  -E "console\.(log|info|warn|error|debug)\(.*wallet\.privateKey" \
+  -iE "console\.(log|info|warn|error|debug)\(.*wallet\.privateKey" \
   src/ 2>/dev/null; then
   echo -e "${RED}❌ VIOLATION: Found wallet.privateKey logging${NC}"
   VIOLATIONS=$((VIOLATIONS + 1))
