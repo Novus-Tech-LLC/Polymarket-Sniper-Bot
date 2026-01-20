@@ -420,8 +420,34 @@ function logAuthDiagnostics(params: {
 }
 
 /**
- * Attempt to derive credentials with a specific configuration
+ * Build effective signer proxy for L1 auth
+ * When useEffectiveForL1=true, proxy the wallet to return the effective address for getAddress()
  */
+function buildEffectiveSigner(
+  wallet: Wallet,
+  effectiveAddress: string,
+): Wallet {
+  return new Proxy(wallet, {
+    get(target, prop, receiver) {
+      // Intercept both getAddress() method and address property
+      // getAddress() is the standard ethers method (returns Promise<string>)
+      // address is a direct property access (returns string)
+      // Both must be intercepted to ensure consistent behavior across different usage patterns
+      if (prop === "getAddress") {
+        return async () => effectiveAddress;
+      }
+      if (prop === "address") {
+        return effectiveAddress;
+      }
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value === "function") {
+        return value.bind(target);
+      }
+      return value;
+    },
+  });
+}
+
 async function attemptDerive(params: {
   wallet: Wallet;
   attempt: FallbackAttempt;
@@ -433,11 +459,34 @@ async function attemptDerive(params: {
   attemptId?: string;
 }): Promise<CredentialAttemptResult> {
   try {
+    // Determine the L1 auth address for this attempt
+    const l1AuthAddress = params.attempt.useEffectiveForL1
+      ? params.orderIdentity.effectiveAddress
+      : params.l1AuthIdentity.signingAddress;
+
+    // Build effective signer if needed (for L1 auth headers)
+    const effectiveSigner = params.attempt.useEffectiveForL1
+      ? buildEffectiveSigner(params.wallet, l1AuthAddress)
+      : params.wallet;
+
+    log("debug", "Creating CLOB client for credential derivation", {
+      logger: params.logger,
+      structuredLogger: params.structuredLogger,
+      context: {
+        category: "CRED_DERIVE",
+        attemptId: params.attemptId,
+        signatureType: params.attempt.signatureType,
+        l1AuthAddress,
+        useEffectiveForL1: params.attempt.useEffectiveForL1,
+      },
+    });
+
     // Create a client with the specific signature type and funder address
+    // CRITICAL FIX: Use effectiveSigner (not params.wallet) so L1 auth headers use correct address
     const client = new ClobClient(
       POLYMARKET_API.BASE_URL,
       Chain.POLYGON,
-      asClobSigner(params.wallet),
+      asClobSigner(effectiveSigner),
       undefined, // No creds yet
       params.attempt.signatureType,
       params.funderAddress,
@@ -475,6 +524,11 @@ async function attemptDerive(params: {
             attemptId: params.attemptId,
             status: status ?? "unknown",
             error: message,
+            signatureType: params.attempt.signatureType,
+            l1AuthAddress: params.attempt.useEffectiveForL1
+              ? params.orderIdentity.effectiveAddress
+              : params.l1AuthIdentity.signingAddress,
+            useEffectiveForL1: params.attempt.useEffectiveForL1,
           },
         },
       );
