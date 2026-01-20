@@ -55,9 +55,26 @@ export default [
       'src/utils/auth-logger.ts',
       'src/utils/structured-logger.ts',
       'src/infrastructure/clob-client.factory.ts',
+      'src/infrastructure/clob-http-client.ts',
+      'src/clob/diagnostics.ts',
+      'src/clob/identity-resolver.ts',
+      'src/polymarket/preflight.ts',
     ],
     rules: {
       'no-console': 'error', // Block console.log in auth files (use structured logger)
+    },
+  },
+  // Global no-secrets rule - warn about potential secret logging
+  {
+    files: ['**/*.ts', '**/*.js'],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: "CallExpression[callee.property.name=/^(log|info|warn|error|debug)$/] > Literal[value=/(private|Private|PRIVATE).*(key|Key|KEY)|(secret|Secret|SECRET)|(passphrase|Passphrase|PASSPHRASE)|(api|Api|API).*(key|Key|KEY)/]",
+          message: 'Do not log secrets directly. Use structured logger with redaction.',
+        },
+      ],
     },
   },
 ];

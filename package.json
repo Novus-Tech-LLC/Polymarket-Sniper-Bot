@@ -42,6 +42,8 @@
     "test-auth": "node test-auth-harness.js",
     "auth:probe": "ts-node scripts/auth-probe-minimal.ts",
     "auth:diag": "ts-node scripts/auth_diagnostic.ts",
+    "check:secrets": "bash scripts/check-no-secrets.sh",
+    "lint:secrets": "bash scripts/check-no-secrets.sh && npm run lint",
     "auth:diag:debug": "LOG_LEVEL=debug ts-node scripts/auth_diagnostic.ts",
     "clob:probe": "ts-node scripts/clob_auth_probe.ts",
     "clob:matrix": "DEBUG_PREFLIGHT_MATRIX=true ts-node scripts/clob_auth_probe.ts",
