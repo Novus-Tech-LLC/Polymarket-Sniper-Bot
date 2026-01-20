@@ -44,7 +44,7 @@ fi
 echo ""
 echo "Checking for secret string interpolation..."
 if grep -rn --include="*.ts" --include="*.js" \
-  -iE "\`.*\$\{(private.*key|secret|passphrase|api.*key)\}.*\`" \
+  -iE '`.*\$\{(private.*key|secret|passphrase|api.*key)\}.*`' \
   src/ 2>/dev/null | grep -v "src/utils/structured-logger.ts"; then
   echo -e "${RED}❌ VIOLATION: Found secret string interpolation${NC}"
   VIOLATIONS=$((VIOLATIONS + 1))
