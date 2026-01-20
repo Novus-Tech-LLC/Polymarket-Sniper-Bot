@@ -84,7 +84,6 @@ EXCLUDED_FROM_CONSOLE_CHECK=(
   "src/utils/logger.util.ts"
   "src/utils/console-filter.util.ts"
   "src/clob/minimal-auth.ts"
-  "src/clob/auth-probe.ts"
 )
 
 CONSOLE_ERROR_FILES=$(grep -rn --include="*.ts" -E "console\.(error|warn)" src/ 2>/dev/null | grep -v "eslint-disable" || true)
