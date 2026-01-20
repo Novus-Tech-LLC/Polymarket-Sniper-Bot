@@ -48,7 +48,31 @@ export interface AuthResult {
 }
 
 /**
+ * On-chain transaction tracking
+ */
+export interface OnchainTxInfo {
+  type: "SAFE_DEPLOY" | "PROXY_DEPLOY" | "APPROVAL" | "OTHER";
+  txHash?: string;
+  description: string;
+  gasUsed?: string;
+}
+
+/**
  * Complete auth story for one run
+ *
+ * NOTE: This tracks TWO distinct authentication systems:
+ * 1. CLOB API Authentication (off-chain): Verifies ability to submit orders to Polymarket's API
+ *    - Uses HMAC signatures with API key/secret/passphrase
+ *    - Required for all order operations
+ *
+ * 2. Wallet Setup (on-chain): Deploys Smart Contract Wallets on Polygon
+ *    - Safe/Proxy wallet deployment
+ *    - Token approvals
+ *    - These require gas (POL) and create blockchain transactions
+ *
+ * A user may see on-chain transactions even when CLOB API auth fails if
+ * the wallet setup happens before the auth check. The fix ensures auth
+ * is verified BEFORE any on-chain transactions are sent.
  */
 export interface AuthStory {
   runId: string;
@@ -63,6 +87,10 @@ export interface AuthStory {
   derivedCredFingerprint?: CredentialFingerprint;
   attempts: AuthAttempt[];
   finalResult: AuthResult;
+  /** On-chain transactions sent during this run (wallet setup, approvals) */
+  onchainTxs?: OnchainTxInfo[];
+  /** Whether on-chain transactions were blocked due to auth failure */
+  onchainBlocked?: boolean;
 }
 
 /**
@@ -149,6 +177,8 @@ export class AuthStoryBuilder {
         readyToTrade: false,
         reason: "Not yet determined",
       },
+      onchainTxs: [],
+      onchainBlocked: false,
     };
   }
 
@@ -188,6 +218,23 @@ export class AuthStoryBuilder {
    */
   setFinalResult(result: AuthResult): void {
     this.story.finalResult = result;
+  }
+
+  /**
+   * Add an on-chain transaction record
+   */
+  addOnchainTx(tx: OnchainTxInfo): void {
+    if (!this.story.onchainTxs) {
+      this.story.onchainTxs = [];
+    }
+    this.story.onchainTxs.push(tx);
+  }
+
+  /**
+   * Mark that on-chain transactions were blocked due to auth failure
+   */
+  setOnchainBlocked(blocked: boolean): void {
+    this.story.onchainBlocked = blocked;
   }
 
   /**
@@ -272,6 +319,41 @@ export class AuthStoryBuilder {
         signedPath: attempt.signedPath,
         usedAxiosParams: attempt.usedAxiosParams,
         httpStatus: attempt.httpStatus,
+      });
+    }
+
+    // On-chain transactions status
+    if (this.story.onchainBlocked) {
+      logger.info("⛔ On-chain Transactions: BLOCKED (auth failed)", {
+        category: "SUMMARY",
+        runId: this.story.runId,
+        onchainBlocked: true,
+        reason:
+          "CLOB API auth failed - no on-chain transactions were sent to prevent gas waste",
+      });
+    } else if (this.story.onchainTxs && this.story.onchainTxs.length > 0) {
+      logger.info(`On-chain Transactions: ${this.story.onchainTxs.length}`, {
+        category: "SUMMARY",
+        runId: this.story.runId,
+        onchainTxCount: this.story.onchainTxs.length,
+      });
+      for (const tx of this.story.onchainTxs) {
+        logger.info(
+          `  [${tx.type}] ${tx.description} hash=${tx.txHash ?? "n/a"}`,
+          {
+            category: "SUMMARY",
+            runId: this.story.runId,
+            txType: tx.type,
+            txHash: tx.txHash,
+            description: tx.description,
+          },
+        );
+      }
+    } else {
+      logger.info("On-chain Transactions: None", {
+        category: "SUMMARY",
+        runId: this.story.runId,
+        onchainTxCount: 0,
       });
     }
 

@@ -28,39 +28,36 @@ const applyMultiplier = (value: bigint, multiplier: number): bigint => {
  * Checks if gas price exceeds configured maximum to prevent excessive fees
  * @throws Error if gas price exceeds cap
  */
-export const validateGasCap = (
-  maxFeePerGas: bigint,
-  logger?: Logger,
-): void => {
+const validateGasCap = (maxFeePerGas: bigint, logger?: Logger): void => {
   const gasCapEnv = readEnv("POLY_MAX_FEE_GWEI_CAP");
   if (!gasCapEnv) return; // No cap configured, skip validation
-  
+
   const gasCapGwei = parseFloat(gasCapEnv);
-  
+
   // Validate the parsed value is a valid positive number
   if (isNaN(gasCapGwei) || gasCapGwei <= 0) {
     logger?.warn(
-      `[Gas][Safety] Invalid POLY_MAX_FEE_GWEI_CAP value: "${gasCapEnv}". Must be a positive number. Skipping gas cap validation.`
+      `[Gas][Safety] Invalid POLY_MAX_FEE_GWEI_CAP value: "${gasCapEnv}". Must be a positive number. Skipping gas cap validation.`,
     );
     return;
   }
-  
+
   const gasCap = parseGwei(gasCapGwei);
   const maxFeeGwei = parseFloat(formatUnits(maxFeePerGas, "gwei"));
-  
+
   if (maxFeePerGas > gasCap) {
     const errorMsg = `[Gas][Safety] GAS PRICE TOO HIGH: ${maxFeeGwei.toFixed(2)} gwei exceeds cap of ${gasCapGwei} gwei. Transaction BLOCKED to prevent excessive fees. Current Polygon gas is abnormally high - wait for network to stabilize or increase POLY_MAX_FEE_GWEI_CAP if intentional.`;
     logger?.error(errorMsg);
     throw new Error(errorMsg);
   }
-  
+
   // Warning at 80% of cap - use BigInt arithmetic for precision
-  const warningThreshold = gasCap * 80n / 100n;
+  const warningThreshold = (gasCap * 80n) / 100n;
   if (maxFeePerGas > warningThreshold) {
     // Calculate percentage using BigInt to avoid precision loss
     const percentOfCap = (maxFeePerGas * 100n) / gasCap;
     logger?.warn(
-      `[Gas][Safety] Gas price ${maxFeeGwei.toFixed(2)} gwei is ${percentOfCap}% of cap (${gasCapGwei} gwei). Consider waiting if not urgent.`
+      `[Gas][Safety] Gas price ${maxFeeGwei.toFixed(2)} gwei is ${percentOfCap}% of cap (${gasCapGwei} gwei). Consider waiting if not urgent.`,
     );
   }
 };

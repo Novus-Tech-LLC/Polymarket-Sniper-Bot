@@ -415,27 +415,8 @@ export const ensureTradingReady = async (
 
   const approvalsConfig = readApprovalsConfig();
   const wallet = params.client.wallet;
-  if (relayer.enabled) {
-    try {
-      await deployIfNeeded({ relayer, logger: params.logger });
-    } catch (error) {
-      params.logger.warn(
-        `[Relayer] Deploy check failed; falling back to EOA approvals. ${sanitizeErrorMessage(error)}`,
-      );
-    }
-  }
 
-  // Determine effective trading address:
-  // 1. If relayer is enabled, use relayer's trading address
-  // 2. Otherwise, use CLOB client's effectivePolyAddress (which accounts for Safe/Proxy modes)
-  // 3. Fall back to signer address if neither is available
-  const tradingAddress =
-    relayer.tradingAddress ??
-    params.client.effectivePolyAddress ??
-    derivedSignerAddress;
-  params.logger.info(
-    `[Preflight] signer=${derivedSignerAddress} effective_trading_address=${tradingAddress} public_key=${params.configuredPublicKey ?? "none"}`,
-  );
+  // Log contract addresses first (before any early returns)
   params.logger.info(
     `[Preflight] contracts usdc=${contracts.usdcAddress} ctf=${contracts.ctfAddress ?? "n/a"} ctf_exchange=${contracts.ctfExchangeAddress ?? "n/a"} neg_risk_exchange=${contracts.negRiskExchangeAddress ?? "n/a"} neg_risk_adapter=${contracts.negRiskAdapterAddress ?? "n/a"}`,
   );
@@ -443,6 +424,13 @@ export const ensureTradingReady = async (
   if (!liveTradingEnabled) {
     params.logger.info(
       "[Preflight] READY_TO_TRADE=false reason=LIVE_TRADING_DISABLED",
+    );
+    const tradingAddress =
+      relayer.tradingAddress ??
+      params.client.effectivePolyAddress ??
+      derivedSignerAddress;
+    params.logger.info(
+      `[Preflight] signer=${derivedSignerAddress} effective_trading_address=${tradingAddress} public_key=${params.configuredPublicKey ?? "none"}`,
     );
     logPreflightSummary({
       logger: params.logger,
@@ -470,21 +458,49 @@ export const ensureTradingReady = async (
     return { detectOnly: true, authOk, approvalsOk: false, geoblockPassed };
   }
 
-  // CRITICAL: Block all on-chain operations if authentication failed
-  // This prevents gas waste on approval transactions when CLOB API is unreachable
+  // CRITICAL: Block ALL on-chain operations (including Safe/Proxy deployment) if authentication failed
+  // This prevents gas waste on wallet setup and approval transactions when CLOB API auth fails
+  //
+  // NOTE: There are TWO distinct authentication systems:
+  // 1. CLOB API Authentication (off-chain): Verifies you can submit orders to Polymarket's API
+  // 2. Wallet Setup (on-chain): Deploys Safe/Proxy smart contracts on Polygon
+  //
+  // If CLOB API auth fails, there's no point in deploying a Safe wallet or setting up approvals
+  // because you won't be able to trade anyway. This guard prevents wasting gas on on-chain
+  // transactions that serve no purpose without working API authentication.
   if (!authOk) {
     params.logger.error(
-      "[Preflight][GasGuard] ⛔ BLOCKING APPROVALS: Authentication failed. Will not send on-chain transactions to prevent gas waste.",
+      "[Preflight][GasGuard] ⛔ BLOCKING ALL ON-CHAIN TRANSACTIONS",
     );
     params.logger.error(
-      "[Preflight][GasGuard] Fix authentication issues before approvals will be attempted.",
+      "[Preflight][GasGuard] CLOB API authentication failed - will not send any transactions to prevent gas waste.",
     );
-    
+    params.logger.error(
+      "[Preflight][GasGuard] This includes Safe/Proxy wallet deployment AND token approvals.",
+    );
+    params.logger.error(
+      "[Preflight][GasGuard] Fix CLOB API authentication before any on-chain operations will be attempted.",
+    );
+    params.logger.error(
+      "[Preflight][GasGuard] Run 'npm run auth:diag' for detailed authentication diagnostics.",
+    );
+
+    const tradingAddress =
+      relayer.tradingAddress ??
+      params.client.effectivePolyAddress ??
+      derivedSignerAddress;
+    params.logger.info(
+      `[Preflight] signer=${derivedSignerAddress} effective_trading_address=${tradingAddress} public_key=${params.configuredPublicKey ?? "none"}`,
+    );
+
+    // Mark that on-chain transactions were blocked due to auth failure
+    authStory.setOnchainBlocked(true);
+
     // Set final result and print auth story summary
     authStory.setFinalResult({
       authOk: false,
       readyToTrade: false,
-      reason: "AUTH_FAILED_BLOCKED_APPROVALS",
+      reason: "AUTH_FAILED_BLOCKED_ALL_ONCHAIN",
     });
     authStory.printSummary();
 
@@ -493,8 +509,40 @@ export const ensureTradingReady = async (
         relayerContext?: ReturnType<typeof createRelayerContext>;
       }
     ).relayerContext = relayer;
-    return { detectOnly: true, authOk: false, approvalsOk: false, geoblockPassed };
+    return {
+      detectOnly: true,
+      authOk: false,
+      approvalsOk: false,
+      geoblockPassed,
+    };
   }
+
+  // Auth passed - now safe to proceed with on-chain operations
+  // First deploy Safe/Proxy if needed (requires gas but auth is already verified)
+  if (relayer.enabled) {
+    try {
+      params.logger.info(
+        "[Preflight][Wallet] CLOB API auth passed - proceeding with wallet setup if needed.",
+      );
+      await deployIfNeeded({ relayer, logger: params.logger });
+    } catch (error) {
+      params.logger.warn(
+        `[Relayer] Deploy check failed; falling back to EOA approvals. ${sanitizeErrorMessage(error)}`,
+      );
+    }
+  }
+
+  // Determine effective trading address:
+  // 1. If relayer is enabled, use relayer's trading address
+  // 2. Otherwise, use CLOB client's effectivePolyAddress (which accounts for Safe/Proxy modes)
+  // 3. Fall back to signer address if neither is available
+  const tradingAddress =
+    relayer.tradingAddress ??
+    params.client.effectivePolyAddress ??
+    derivedSignerAddress;
+  params.logger.info(
+    `[Preflight] signer=${derivedSignerAddress} effective_trading_address=${tradingAddress} public_key=${params.configuredPublicKey ?? "none"}`,
+  );
 
   let approvalResult;
   let approvalsOk = false;
