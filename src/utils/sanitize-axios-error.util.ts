@@ -24,7 +24,7 @@ export function redactSensitiveValues(value: string): string {
   let redacted = value;
   for (const key of SENSITIVE_KEYS) {
     const keyRegex = new RegExp(
-      `(${key})\\s*[:=]\\s*([\"']?)[^\\s\"',;]+\\2`,
+      `(${key})\\s*[:=]\\s*(["']?)[^\\s"',;]+\\2`,
       "gi",
     );
     redacted = redacted.replace(keyRegex, "$1=<redacted>");

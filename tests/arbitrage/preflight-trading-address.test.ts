@@ -8,6 +8,15 @@ import type { Wallet } from "ethers";
  * Verifies that the correct address is used for different wallet modes
  */
 
+// Helper to resolve trading address using the same priority chain as production code
+function resolveTradingAddress(
+  relayerAddress: string | undefined,
+  effectivePolyAddress: string | undefined,
+  signerAddress: string,
+): string {
+  return relayerAddress ?? effectivePolyAddress ?? signerAddress;
+}
+
 test("effective trading address uses signer address for EOA mode", async () => {
   // In EOA mode (signatureType=0), the signer address should be used
   // since there's no separate funder/proxy address
@@ -23,10 +32,12 @@ test("effective trading address uses signer address for EOA mode", async () => {
   // The trading address resolution logic should be:
   // relayer.tradingAddress ?? client.effectivePolyAddress ?? derivedSignerAddress
 
-  const tradingAddress =
-    undefined ?? // relayer not enabled
-    mockClient.effectivePolyAddress ??
-    signerAddress;
+  const relayerAddress: string | undefined = undefined; // relayer not enabled
+  const tradingAddress = resolveTradingAddress(
+    relayerAddress,
+    mockClient.effectivePolyAddress,
+    signerAddress,
+  );
 
   assert.strictEqual(
     tradingAddress,
@@ -51,10 +62,12 @@ test("effective trading address uses funder address for Gnosis Safe mode", async
   // The trading address resolution logic should be:
   // relayer.tradingAddress ?? client.effectivePolyAddress ?? derivedSignerAddress
 
-  const tradingAddress =
-    undefined ?? // relayer not enabled
-    mockClient.effectivePolyAddress ??
-    signerAddress;
+  const relayerAddress: string | undefined = undefined; // relayer not enabled
+  const tradingAddress = resolveTradingAddress(
+    relayerAddress,
+    mockClient.effectivePolyAddress,
+    signerAddress,
+  );
 
   assert.strictEqual(
     tradingAddress,
@@ -85,10 +98,12 @@ test("effective trading address uses funder address for Proxy mode", async () =>
   // The trading address resolution logic should be:
   // relayer.tradingAddress ?? client.effectivePolyAddress ?? derivedSignerAddress
 
-  const tradingAddress =
-    undefined ?? // relayer not enabled
-    mockClient.effectivePolyAddress ??
-    signerAddress;
+  const relayerAddress: string | undefined = undefined; // relayer not enabled
+  const tradingAddress = resolveTradingAddress(
+    relayerAddress,
+    mockClient.effectivePolyAddress,
+    signerAddress,
+  );
 
   assert.strictEqual(
     tradingAddress,
@@ -120,10 +135,11 @@ test("effective trading address prefers relayer address when enabled", async () 
   // The trading address resolution logic should be:
   // relayer.tradingAddress ?? client.effectivePolyAddress ?? derivedSignerAddress
 
-  const tradingAddress =
-    relayerAddress ?? // relayer enabled
-    mockClient.effectivePolyAddress ??
-    signerAddress;
+  const tradingAddress = resolveTradingAddress(
+    relayerAddress, // relayer enabled
+    mockClient.effectivePolyAddress,
+    signerAddress,
+  );
 
   assert.strictEqual(
     tradingAddress,
@@ -152,15 +168,25 @@ test("address resolution priority: relayer > effectivePolyAddress > signer", asy
   const relayerAddress = "0x3333333333333333333333333333333333333333";
 
   // Test 1: Only signer available (EOA mode, no relayer)
-  let tradingAddress = undefined ?? undefined ?? signerAddress;
+  let noRelayer: string | undefined;
+  let noEffectivePolyAddress: string | undefined;
+  let tradingAddress = resolveTradingAddress(
+    noRelayer,
+    noEffectivePolyAddress,
+    signerAddress,
+  );
   assert.strictEqual(tradingAddress, signerAddress);
 
   // Test 2: Signer + effectivePolyAddress available (Safe/Proxy mode, no relayer)
-  tradingAddress = undefined ?? funderAddress ?? signerAddress;
+  tradingAddress = resolveTradingAddress(noRelayer, funderAddress, signerAddress);
   assert.strictEqual(tradingAddress, funderAddress);
 
   // Test 3: All three available (relayer + Safe/Proxy mode)
-  tradingAddress = relayerAddress ?? funderAddress ?? signerAddress;
+  tradingAddress = resolveTradingAddress(
+    relayerAddress,
+    funderAddress,
+    signerAddress,
+  );
   assert.strictEqual(tradingAddress, relayerAddress);
 
   assert.ok(true, "Address resolution follows correct priority chain");

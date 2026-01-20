@@ -71,6 +71,7 @@ function parseArgs() {
       case "-h":
         printHelp();
         process.exit(0);
+      // eslint-disable-next-line no-fallthrough -- process.exit() never returns
       default:
         console.error(`Unknown option: ${args[i]}`);
         process.exit(1);

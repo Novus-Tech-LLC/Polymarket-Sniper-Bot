@@ -3,6 +3,7 @@ import tsParser from '@typescript-eslint/parser';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import prettierPlugin from 'eslint-plugin-prettier';
 import configPrettier from 'eslint-config-prettier';
+import globals from 'globals';
 
 export default [
   eslint.configs.recommended,
@@ -10,20 +11,35 @@ export default [
   {
     ignores: ['dist/**', 'node_modules/**', 'signer/**'],
   },
+  // JavaScript files - use Node.js globals
+  {
+    files: ['**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-console': 'off',
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    },
+  },
+  // TypeScript files
   {
     files: ['**/*.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: { project: false, sourceType: 'module' },
       globals: {
-        console: 'readonly',
-        process: 'readonly',
+        ...globals.node,
+        NodeJS: 'readonly',
       },
     },
     plugins: { '@typescript-eslint': tsPlugin, prettier: prettierPlugin },
     rules: {
       'prettier/prettier': 'warn',
       'no-console': 'off',
+      'no-unused-vars': 'off', // Disable base rule for TypeScript
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
