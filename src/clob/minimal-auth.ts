@@ -357,23 +357,33 @@ export function printAuthStory(
 ): void {
   if (format === "json") {
     // Pure JSON output - single line for easy parsing
+    // eslint-disable-next-line no-console -- Auth Story structured output to stdout
     console.log(JSON.stringify(story));
   } else {
     // Pretty format with header/footer (for human readability)
+    // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
     console.log("\n" + "=".repeat(60));
+    // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
     console.log("AUTH STORY");
+    // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
     console.log("=".repeat(60));
+    // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
     console.log(JSON.stringify(story, null, 2));
+    // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
     console.log("=".repeat(60));
 
     if (story.success) {
+      // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
       console.log("✅ Authentication successful - ready to trade");
     } else {
+      // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
       console.log("❌ Authentication failed");
       if (story.errorMessage) {
+        // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
         console.log(`   Reason: ${story.errorMessage}`);
       }
     }
+    // eslint-disable-next-line no-console -- Auth Story formatted output to stdout
     console.log("=".repeat(60) + "\n");
   }
 }
@@ -397,6 +407,7 @@ export function createMinimalAuthConfigFromEnv(): MinimalAuthConfig {
       signatureType = parsed;
     } else {
       // Log warning for invalid signature type but continue
+      // eslint-disable-next-line no-console -- Config validation warning to stderr
       console.warn(
         `[MinimalAuth] Invalid signature type "${sigTypeStr}" - must be 0, 1, or 2. Using default.`,
       );

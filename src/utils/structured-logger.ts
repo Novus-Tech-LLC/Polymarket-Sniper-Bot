@@ -204,7 +204,19 @@ export class StructuredLogger {
       // If entry hasn't been seen in the last window, emit suppression message
       if (now - entry.lastSeen >= DEDUP_WINDOW_MS) {
         if (entry.count > 1) {
-          this.emitSuppressionMessage(entry);
+          // Emit suppression message without deduplication (to avoid recursive dedup)
+          const context: LogContext = {
+            ...this.baseContext,
+            category: entry.category,
+            suppressedCount: entry.count - 1,
+            suppressedMessage: entry.message.slice(0, 80), // Truncate to 80 chars
+          };
+          // Emit directly to avoid re-entering dedup logic
+          this.emitLog(
+            "debug",
+            `(suppressed ${entry.count - 1} identical log messages)`,
+            context,
+          );
         }
         this.deduplicationMap.delete(key);
       }
@@ -278,6 +290,7 @@ export class StructuredLogger {
         message,
         context: redactedContext,
       };
+      // eslint-disable-next-line no-console -- Structured logger output to stdout
       console.log(JSON.stringify(entry));
     } else {
       // Pretty format
@@ -321,8 +334,10 @@ export class StructuredLogger {
             return `${k}=${value}`;
           })
           .join(" ");
+        // eslint-disable-next-line no-console -- Structured logger output to stdout
         console.log(`${prefix} ${message} ${chalk.dim(contextStr)}`);
       } else {
+        // eslint-disable-next-line no-console -- Structured logger output to stdout
         console.log(`${prefix} ${message}`);
       }
     }

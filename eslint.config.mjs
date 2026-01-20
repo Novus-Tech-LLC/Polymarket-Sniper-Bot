@@ -48,9 +48,12 @@ export default [
     files: [
       'src/clob/credential-derivation-v2.ts',
       'src/clob/auth-fallback.ts',
+      'src/clob/minimal-auth.ts',
       'src/utils/clob-auth-headers.util.ts',
       'src/utils/l1-auth-headers.util.ts',
       'src/utils/auth-diagnostic.util.ts',
+      'src/utils/auth-logger.ts',
+      'src/utils/structured-logger.ts',
       'src/infrastructure/clob-client.factory.ts',
     ],
     rules: {
