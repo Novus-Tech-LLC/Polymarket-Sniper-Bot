@@ -55,12 +55,12 @@ export class MempoolMonitorService {
 
   async start(): Promise<void> {
     const { logger, env } = this.deps;
-    logger.info("Starting Polymarket Frontrun Bot - Mempool Monitor");
+    logger.info("🚀 Starting Polymarket Frontrun Bot - Mempool Monitor");
     const overridesInfo = env.overridesApplied.length
       ? ` overrides=${env.overridesApplied.join(",")}`
       : "";
     logger.info(
-      `[Monitor] Preset=${env.presetName} min_trade_usd=${env.minTradeSizeUsd.toFixed(2)} recent_window=${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s fetch_interval=${env.fetchIntervalSeconds}s trade_multiplier=${env.tradeMultiplier} gas_multiplier=${env.gasPriceMultiplier} require_confirmed=${env.requireConfirmed} targets=${env.targetAddresses.length}${overridesInfo}`,
+      `[Monitor] ⚙️  Preset=${env.presetName} min_trade_usd=${env.minTradeSizeUsd.toFixed(2)} recent_window=${DEFAULT_CONFIG.ACTIVITY_CHECK_WINDOW_SECONDS}s fetch_interval=${env.fetchIntervalSeconds}s trade_multiplier=${env.tradeMultiplier} gas_multiplier=${env.gasPriceMultiplier} require_confirmed=${env.requireConfirmed} targets=${env.targetAddresses.length}${overridesInfo}`,
     );
     logger.debug(
       `Target addresses: ${env.targetAddresses.map((addr) => addr.toLowerCase()).join(", ") || "none"}`,
@@ -80,7 +80,7 @@ export class MempoolMonitorService {
     await this.monitorRecentOrders();
 
     logger.info(
-      "Mempool monitoring active. Waiting for pending transactions...",
+      "👀 Mempool monitoring active. Waiting for pending transactions...",
     );
   }
 
@@ -92,7 +92,7 @@ export class MempoolMonitorService {
     if (this.timer) {
       clearInterval(this.timer);
     }
-    this.deps.logger.info("Mempool monitoring stopped");
+    this.deps.logger.info("🛑 Mempool monitoring stopped");
   }
 
   private async enablePendingSubscription(): Promise<void> {
@@ -376,7 +376,7 @@ export class MempoolMonitorService {
 
         stats.eligibleTrades += 1;
         logger.info(
-          `[Frontrun] Detected pending trade: ${activity.side.toUpperCase()} ${sizeUsd.toFixed(2)} USD on market ${activity.conditionId}`,
+          `[Frontrun] 🎯 Detected pending trade: ${activity.side.toUpperCase()} ${sizeUsd.toFixed(2)} USD on market ${activity.conditionId}`,
         );
 
         const signal: TradeSignal = {

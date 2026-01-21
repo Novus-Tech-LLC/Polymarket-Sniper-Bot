@@ -61,7 +61,7 @@ export class QuickFlipStrategy {
       if (this.shouldSell(position.marketId, position.tokenId)) {
         const netProfitPct = calculateNetProfit(position.pnlPct);
         this.logger.info(
-          `[QuickFlip] Selling position at +${position.pnlPct.toFixed(2)}% gross (+${netProfitPct.toFixed(2)}% net after fees): ${position.marketId}`,
+          `[QuickFlip] 📈 Selling position at +${position.pnlPct.toFixed(2)}% gross (+${netProfitPct.toFixed(2)}% net after fees): ${position.marketId}`,
         );
 
         try {
@@ -74,7 +74,7 @@ export class QuickFlipStrategy {
           soldCount++;
         } catch (err) {
           this.logger.error(
-            `[QuickFlip] Failed to sell position ${position.marketId}`,
+            `[QuickFlip] ❌ Failed to sell position ${position.marketId}`,
             err as Error,
           );
         }
@@ -90,7 +90,7 @@ export class QuickFlipStrategy {
       if (this.shouldSell(position.marketId, position.tokenId)) {
         const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
         this.logger.warn(
-          `[QuickFlip] Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`,
+          `[QuickFlip] 🔻 Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`,
         );
 
         try {
@@ -103,7 +103,7 @@ export class QuickFlipStrategy {
           soldCount++;
         } catch (err) {
           this.logger.error(
-            `[QuickFlip] Failed to execute stop-loss for ${position.marketId}`,
+            `[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`,
             err as Error,
           );
         }
@@ -111,7 +111,7 @@ export class QuickFlipStrategy {
     }
 
     if (soldCount > 0) {
-      this.logger.info(`[QuickFlip] Sold ${soldCount} positions`);
+      this.logger.info(`[QuickFlip] ✅ Sold ${soldCount} positions`);
     }
 
     return soldCount;
@@ -178,7 +178,7 @@ export class QuickFlipStrategy {
 
       if (totalBidLiquidity < size * 0.5) {
         this.logger.warn(
-          `[QuickFlip] Low liquidity warning: attempting to sell ${size.toFixed(2)} but only ${totalBidLiquidity.toFixed(2)} available in top 3 levels`,
+          `[QuickFlip] ⚠️ Low liquidity warning: attempting to sell ${size.toFixed(2)} but only ${totalBidLiquidity.toFixed(2)} available in top 3 levels`,
         );
       }
 
@@ -190,7 +190,7 @@ export class QuickFlipStrategy {
       const minOrderUsd = 10; // From DEFAULT_CONFIG
       if (!isStopLoss && sizeUsd < minOrderUsd) {
         this.logger.warn(
-          `[QuickFlip] Position too small to sell: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,
+          `[QuickFlip] ⚠️ Position too small to sell: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,
         );
         return;
       }
@@ -199,7 +199,7 @@ export class QuickFlipStrategy {
       const wallet = (this.client as { wallet?: Wallet }).wallet;
 
       this.logger.info(
-        `[QuickFlip] Executing sell: ${size.toFixed(2)} shares at ~${(bestBid * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)})`,
+        `[QuickFlip] 🔄 Executing sell: ${size.toFixed(2)} shares at ~${(bestBid * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)})`,
       );
 
       // Execute sell order using postOrder utility
@@ -220,22 +220,22 @@ export class QuickFlipStrategy {
 
       if (result.status === "submitted") {
         this.logger.info(
-          `[QuickFlip] ✓ Sold ${size.toFixed(2)} shares at ~${(bestBid * 100).toFixed(1)}¢`,
+          `[QuickFlip] ✅ Sold ${size.toFixed(2)} shares at ~${(bestBid * 100).toFixed(1)}¢`,
         );
       } else if (result.status === "skipped") {
         this.logger.warn(
-          `[QuickFlip] Sell order skipped: ${result.reason ?? "unknown reason"}`,
+          `[QuickFlip] ⏭️ Sell order skipped: ${result.reason ?? "unknown reason"}`,
         );
       } else {
         this.logger.error(
-          `[QuickFlip] Sell order failed: ${result.reason ?? "unknown reason"}`,
+          `[QuickFlip] ❌ Sell order failed: ${result.reason ?? "unknown reason"}`,
         );
         throw new Error(`Sell order failed: ${result.reason ?? "unknown"}`);
       }
     } catch (err) {
       // Re-throw error for caller to handle
       this.logger.error(
-        `[QuickFlip] Failed to sell position: ${err instanceof Error ? err.message : String(err)}`,
+        `[QuickFlip] ❌ Failed to sell position: ${err instanceof Error ? err.message : String(err)}`,
       );
       throw err;
     } finally {

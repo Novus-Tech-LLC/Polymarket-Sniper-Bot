@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   const mode = String(
     process.env.MODE ?? process.env.mode ?? "mempool",
   ).toLowerCase();
-  logger.info(`Starting Polymarket runtime mode=${mode}`);
+  logger.info(`🚀 Starting Polymarket runtime mode=${mode}`);
 
   // Run authentication and preflight ONCE at top level before starting any engines
   // This ensures MODE=both only runs preflight once, not twice
@@ -147,11 +147,11 @@ async function main(): Promise<void> {
         mempoolEnv.collateralTokenAddress,
         mempoolEnv.collateralTokenDecimals,
       );
-      logger.info(`Wallet: ${client.wallet.address}`);
-      logger.info(`POL Balance: ${polBalance.toFixed(4)} POL`);
-      logger.info(`USDC Balance: ${usdcBalance.toFixed(2)} USDC`);
+      logger.info(`💳 Wallet: ${client.wallet.address}`);
+      logger.info(`⛽ POL Balance: ${polBalance.toFixed(4)} POL`);
+      logger.info(`💵 USDC Balance: ${usdcBalance.toFixed(2)} USDC`);
     } catch (err) {
-      logger.error("Failed to fetch balances", err as Error);
+      logger.error("❌ Failed to fetch balances", err as Error);
     }
 
     // Log prominent trading status banner for MEMPOOL mode

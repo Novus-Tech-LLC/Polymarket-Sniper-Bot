@@ -42,17 +42,17 @@ export async function startArbitrageEngine(
   }
 
   if (!config.clobCredsComplete && !config.clobDeriveEnabled) {
-    logger.warn("CLOB creds incomplete");
+    logger.warn("⚠️  CLOB creds incomplete");
   }
 
   const overridesInfo = config.overridesApplied.length
     ? ` overrides=${config.overridesApplied.join(",")}`
     : "";
   logger.info(
-    `[ARB] Preset=${config.presetName} scan_interval_ms=${config.scanIntervalMs} min_edge_bps=${config.minEdgeBps} min_profit_usd=${config.minProfitUsd} min_liquidity_usd=${config.minLiquidityUsd} max_spread_bps=${config.maxSpreadBps} trade_base_usd=${config.tradeBaseUsd} slippage_bps=${config.slippageBps} fee_bps=${config.feeBps} max_position_usd=${config.maxPositionUsd} max_wallet_exposure_usd=${config.maxWalletExposureUsd} max_trades_per_hour=${config.maxTradesPerHour}${overridesInfo}`,
+    `[ARB] ⚙️  Preset=${config.presetName} scan_interval_ms=${config.scanIntervalMs} min_edge_bps=${config.minEdgeBps} min_profit_usd=${config.minProfitUsd} min_liquidity_usd=${config.minLiquidityUsd} max_spread_bps=${config.maxSpreadBps} trade_base_usd=${config.tradeBaseUsd} slippage_bps=${config.slippageBps} fee_bps=${config.feeBps} max_position_usd=${config.maxPositionUsd} max_wallet_exposure_usd=${config.maxWalletExposureUsd} max_trades_per_hour=${config.maxTradesPerHour}${overridesInfo}`,
   );
   logger.info(
-    `[ARB] Collateral token address=${config.collateralTokenAddress}`,
+    `[ARB] 💰 Collateral token address=${config.collateralTokenAddress}`,
   );
 
   // Use pre-authenticated client if provided (MODE=both), otherwise create new one
@@ -73,7 +73,7 @@ export async function startArbitrageEngine(
     config.detectOnly = tradingReady.detectOnly;
   } else {
     // Standalone ARB mode - create client and run preflight
-    logger.info("[ARB] Creating new CLOB client and running preflight...");
+    logger.info("[ARB] 🔄 Creating new CLOB client and running preflight...");
     client = await createPolymarketClient({
       rpcUrl: config.rpcUrl,
       privateKey: config.privateKey,
