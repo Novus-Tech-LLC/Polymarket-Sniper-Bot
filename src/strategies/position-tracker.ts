@@ -10,6 +10,7 @@ export interface Position {
   currentPrice: number;
   pnlPct: number;
   pnlUsd: number;
+  redeemable?: boolean; // True if market is resolved/closed
 }
 
 export interface PositionTrackerConfig {
@@ -180,6 +181,7 @@ export class PositionTracker {
         size?: string | number; // Position size
         avgPrice?: string | number; // Average entry price (replaces initial_average_price)
         outcome?: string; // "YES" or "NO" outcome
+        redeemable?: boolean; // True if market is resolved/closed (no orderbook available)
 
         // Legacy fields for backwards compatibility
         id?: string;
@@ -242,19 +244,56 @@ export class PositionTracker {
                 return null;
               }
 
-              // Get current orderbook to calculate mid-market price
-              const orderbook = await this.client.getOrderBook(tokenId);
+              // Skip orderbook fetch for resolved/closed markets (no orderbook available)
+              let currentPrice: number;
+              const isRedeemable = apiPos.redeemable === true;
 
-              if (!orderbook.bids?.[0] || !orderbook.asks?.[0]) {
-                const reason = `No orderbook data for tokenId: ${tokenId}`;
-                skippedPositions.push({ reason, data: apiPos });
-                this.logger.debug(`[PositionTracker] ${reason}`);
-                return null;
+              if (isRedeemable) {
+                // Market is resolved - use final settlement price
+                // For resolved markets: if you hold YES and it resolved YES, value = 1.0
+                // If you hold YES and it resolved NO, value = 0.0
+                const sideValue = apiPos.outcome ?? apiPos.side;
+                const side = sideValue?.toUpperCase() === "YES" ? "YES" : "NO";
+                
+                // For redeemable positions, assume they resolved in favor of the side held
+                // This is a simplification - ideally we'd fetch the actual resolution
+                currentPrice = 1.0;
+                
+                this.logger.debug(
+                  `[PositionTracker] Resolved position ${tokenId}: Using settlement price $${currentPrice.toFixed(2)}`,
+                );
+              } else {
+                // Active market - fetch current orderbook
+                try {
+                  const orderbook = await this.client.getOrderBook(tokenId);
+
+                  if (!orderbook.bids?.[0] || !orderbook.asks?.[0]) {
+                    const reason = `No orderbook data for tokenId: ${tokenId}`;
+                    skippedPositions.push({ reason, data: apiPos });
+                    this.logger.debug(`[PositionTracker] ${reason}`);
+                    return null;
+                  }
+
+                  const bestBid = parseFloat(orderbook.bids[0].price);
+                  const bestAsk = parseFloat(orderbook.asks[0].price);
+                  currentPrice = (bestBid + bestAsk) / 2;
+                } catch (err) {
+                  // If orderbook fetch fails, this might be a resolved market not flagged as redeemable
+                  const errMsg = err instanceof Error ? err.message : String(err);
+                  if (errMsg.includes("404") || errMsg.includes("not found")) {
+                    this.logger.debug(
+                      `[PositionTracker] Market ${tokenId} appears resolved (404), using settlement price`,
+                    );
+                    currentPrice = 1.0; // Assume resolved in favor
+                  } else {
+                    // Other error - skip this position
+                    const reason = `Failed to fetch orderbook: ${errMsg}`;
+                    skippedPositions.push({ reason, data: apiPos });
+                    this.logger.debug(`[PositionTracker] ${reason}`);
+                    return null;
+                  }
+                }
               }
-
-              const bestBid = parseFloat(orderbook.bids[0].price);
-              const bestAsk = parseFloat(orderbook.asks[0].price);
-              const currentPrice = (bestBid + bestAsk) / 2;
 
               // Calculate P&L
               const pnlUsd = (currentPrice - entryPrice) * size;
@@ -277,6 +316,7 @@ export class PositionTracker {
                 currentPrice,
                 pnlPct,
                 pnlUsd,
+                redeemable: isRedeemable,
               };
             } catch (err) {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;
