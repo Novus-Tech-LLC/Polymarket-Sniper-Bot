@@ -16,7 +16,7 @@ type BuildPolyHmacSignatureFn = (
   method: string,
   requestPath: string,
   body?: string,
-) => Promise<string>;
+) => string | Promise<string>;
 
 let originalBuildPolyHmacSignature: BuildPolyHmacSignatureFn | null = null;
 let overrideInstalled = false;
@@ -75,18 +75,21 @@ export function installHmacSignatureOverride(logger?: {
       logger.debug(`  secret: [HASH:${secretHash}] (len=${secret.length})`);
     }
 
-    // Call original
+    // Call original (handle both sync and async versions)
     if (!originalBuildPolyHmacSignature) {
       throw new Error("Original buildPolyHmacSignature not found");
     }
 
-    const signature = await originalBuildPolyHmacSignature(
+    const result = originalBuildPolyHmacSignature(
       secret,
       timestamp,
       method,
       requestPath,
       body,
     );
+    
+    // Handle both Promise and direct return
+    const signature = await Promise.resolve(result);
 
     if (process.env.DEBUG_HMAC_SIGNING === "true" && logger) {
       logger.debug(
