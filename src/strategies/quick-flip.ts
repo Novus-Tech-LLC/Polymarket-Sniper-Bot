@@ -141,7 +141,11 @@ export class QuickFlipStrategy {
   /**
    * Sell a position using postOrder utility
    * Executes market sell order at best bid price
-   * @param isStopLoss - If true, bypasses minimum order size check to ensure stop-loss can execute
+   * @param marketId - The market ID
+   * @param tokenId - The token ID to sell
+   * @param size - Number of shares to sell
+   * @param isStopLoss - If true, bypasses minimum order size check to ensure stop-loss can execute.
+   *                     Defaults to false for regular profit-taking sells which respect the minimum.
    */
   private async sellPosition(
     marketId: string,
@@ -181,7 +185,8 @@ export class QuickFlipStrategy {
       // Calculate sell value (size * best bid price)
       const sizeUsd = size * bestBid;
 
-      // Validate minimum order size (skip for stop-loss to prevent being stuck in losing positions)
+      // Validate minimum order size for regular sells only
+      // Stop-loss sells bypass this check to prevent being stuck in losing positions
       const minOrderUsd = 10; // From DEFAULT_CONFIG
       if (!isStopLoss && sizeUsd < minOrderUsd) {
         this.logger.warn(
