@@ -141,6 +141,7 @@ export const ensureTradingReady = async (
       success: boolean;
       verifyEndpoint?: string;
       signedPath?: string;
+      severity?: "FATAL" | "NON_FATAL" | "TRANSIENT";
     },
   ): AuthAttempt => ({
     attemptId,
@@ -156,6 +157,7 @@ export const ensureTradingReady = async (
     errorCode: options.errorCode,
     errorTextShort: options.errorTextShort,
     success: options.success,
+    severity: options.severity,
   });
 
   // Set identity on auth story
@@ -328,6 +330,7 @@ export const ensureTradingReady = async (
               httpStatus: preflight.status,
               errorTextShort: preflight.reason ?? "Unauthorized",
               success: false,
+              severity: "FATAL",
             }),
           );
         } else if (preflight && !preflight.ok && preflight.severity === "NON_FATAL") {
@@ -344,6 +347,7 @@ export const ensureTradingReady = async (
               httpStatus: preflight.status,
               errorTextShort: `Non-fatal: ${preflight.reason ?? "Unknown"}`,
               success: true, // Mark as success since we're allowing trading
+              severity: "NON_FATAL",
             }),
           );
         } else if (preflight && !preflight.ok && preflight.severity === "TRANSIENT") {
@@ -360,6 +364,7 @@ export const ensureTradingReady = async (
               httpStatus: preflight.status,
               errorTextShort: `Transient: ${preflight.reason ?? "Network/Server"}`,
               success: true, // Mark as success since we're allowing trading
+              severity: "TRANSIENT",
             }),
           );
         } else if (preflight && !preflight.ok) {

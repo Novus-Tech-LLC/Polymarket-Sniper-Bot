@@ -31,6 +31,10 @@ test("classifyPreflightIssue distinguishes network errors", () => {
     classifyPreflightIssue({ code: "ECONNRESET", message: "socket hang up" }),
     "NETWORK",
   );
+  assert.equal(
+    classifyPreflightIssue({ status: 429, message: "Too Many Requests" }),
+    "NETWORK",
+  );
 });
 
 test("classifyPreflightSeverity marks 401/403 as FATAL", () => {
@@ -61,6 +65,14 @@ test("classifyPreflightSeverity marks network errors as TRANSIENT", () => {
     }),
     "TRANSIENT",
   );
+  assert.equal(
+    classifyPreflightSeverity({
+      status: 429,
+      issue: "NETWORK",
+      code: null,
+    }),
+    "TRANSIENT",
+  );
 });
 
 test("classifyPreflightSeverity marks 500+ errors as TRANSIENT", () => {
@@ -74,6 +86,13 @@ test("classifyPreflightSeverity marks 500+ errors as TRANSIENT", () => {
   );
   assert.equal(
     classifyPreflightSeverity({ status: 503, issue: "UNKNOWN", code: null }),
+    "TRANSIENT",
+  );
+});
+
+test("classifyPreflightSeverity marks 429 rate limit as TRANSIENT", () => {
+  assert.equal(
+    classifyPreflightSeverity({ status: 429, issue: "UNKNOWN", code: null }),
     "TRANSIENT",
   );
 });

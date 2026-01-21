@@ -507,6 +507,9 @@ export const classifyPreflightIssue = (params: {
   if (params.status === 401 || params.status === 403) {
     return "AUTH";
   }
+  if (params.status === 429) {
+    return "NETWORK"; // Rate limiting - should trigger backoff
+  }
   const dataText =
     typeof params.data === "string"
       ? params.data
@@ -533,8 +536,10 @@ export const classifyPreflightIssue = (params: {
  * Classify the severity of a preflight failure to determine if trading should be blocked.
  * 
  * - FATAL: Authentication failed (401/403) - must block all trading
- * - TRANSIENT: Network errors, rate limits - should retry, don't block trading permanently
+ * - TRANSIENT: Network errors, rate limits (429), 500+ - should retry with backoff, don't block permanently
  * - NON_FATAL: Other errors (params, unknown) - log but don't block if credentials are valid
+ * 
+ * IMPORTANT: TRANSIENT errors trigger exponential backoff (preflightBackoffMs) to avoid hammering the API.
  */
 export const classifyPreflightSeverity = (params: {
   status?: number;
@@ -544,6 +549,11 @@ export const classifyPreflightSeverity = (params: {
   // 401/403 are fatal auth failures - must block trading
   if (params.status === 401 || params.status === 403) {
     return "FATAL";
+  }
+  
+  // Rate limiting (429) is transient - backoff and retry
+  if (params.status === 429) {
+    return "TRANSIENT";
   }
   
   // Network errors and transient codes should be retried, not block permanently
