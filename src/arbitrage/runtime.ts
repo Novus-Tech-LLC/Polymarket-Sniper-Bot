@@ -15,9 +15,18 @@ import {
 } from "../utils/clob-credentials.util";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
+import type { ClobClient } from "@polymarket/clob-client";
+import type { Wallet } from "ethers";
 
 export async function startArbitrageEngine(
   overrides: Record<string, string | undefined> = {},
+  preAuthenticatedClient?: ClobClient & { wallet: Wallet },
+  preflightResult?: {
+    detectOnly: boolean;
+    authOk: boolean;
+    approvalsOk: boolean;
+    geoblockPassed: boolean;
+  },
 ): Promise<ArbitrageEngine | null> {
   const logger = new ConsoleLogger();
   suppressClobOrderbookErrors(logger);
@@ -45,41 +54,59 @@ export async function startArbitrageEngine(
     `[ARB] Collateral token address=${config.collateralTokenAddress}`,
   );
 
-  const client = await createPolymarketClient({
-    rpcUrl: config.rpcUrl,
-    privateKey: config.privateKey,
-    apiKey: config.polymarketApiKey,
-    apiSecret: config.polymarketApiSecret,
-    apiPassphrase: config.polymarketApiPassphrase,
-    deriveApiKey: config.clobDeriveEnabled,
-    publicKey: config.proxyWallet,
-    logger,
-  });
-  if (client.executionDisabled) {
-    config.detectOnly = true;
-  }
+  // Use pre-authenticated client if provided (MODE=both), otherwise create new one
+  let client: ClobClient & { wallet: Wallet };
+  let tradingReady: {
+    detectOnly: boolean;
+    authOk: boolean;
+    approvalsOk: boolean;
+    geoblockPassed: boolean;
+  };
 
-  const clientCredsRaw = (
-    client as { creds?: { key?: string; secret?: string; passphrase?: string } }
-  ).creds;
-  const clientCreds = isApiKeyCreds(clientCredsRaw)
-    ? clientCredsRaw
-    : undefined;
-  const credsComplete = Boolean(clientCreds);
-  config.clobCredsComplete = credsComplete;
-  config.detectOnly = !credsComplete || config.detectOnly;
-  const tradingReady = await ensureTradingReady({
-    client,
-    logger,
-    privateKey: config.privateKey,
-    configuredPublicKey: config.proxyWallet,
-    rpcUrl: config.rpcUrl,
-    detectOnly: config.detectOnly,
-    clobCredsComplete: config.clobCredsComplete,
-    clobDeriveEnabled: config.clobDeriveEnabled,
-    collateralTokenDecimals: config.collateralTokenDecimals,
-  });
-  config.detectOnly = tradingReady.detectOnly;
+  if (preAuthenticatedClient && preflightResult) {
+    logger.info("[ARB] ⚡ Using pre-authenticated client from main (preflight already completed)");
+    client = preAuthenticatedClient;
+    tradingReady = preflightResult;
+    config.detectOnly = tradingReady.detectOnly;
+  } else {
+    // Standalone ARB mode - create client and run preflight
+    logger.info("[ARB] Creating new CLOB client and running preflight...");
+    client = await createPolymarketClient({
+      rpcUrl: config.rpcUrl,
+      privateKey: config.privateKey,
+      apiKey: config.polymarketApiKey,
+      apiSecret: config.polymarketApiSecret,
+      apiPassphrase: config.polymarketApiPassphrase,
+      deriveApiKey: config.clobDeriveEnabled,
+      publicKey: config.proxyWallet,
+      logger,
+    });
+    if (client.executionDisabled) {
+      config.detectOnly = true;
+    }
+
+    const clientCredsRaw = (
+      client as { creds?: { key?: string; secret?: string; passphrase?: string } }
+    ).creds;
+    const clientCreds = isApiKeyCreds(clientCredsRaw)
+      ? clientCredsRaw
+      : undefined;
+    const credsComplete = Boolean(clientCreds);
+    config.clobCredsComplete = credsComplete;
+    config.detectOnly = !credsComplete || config.detectOnly;
+    tradingReady = await ensureTradingReady({
+      client,
+      logger,
+      privateKey: config.privateKey,
+      configuredPublicKey: config.proxyWallet,
+      rpcUrl: config.rpcUrl,
+      detectOnly: config.detectOnly,
+      clobCredsComplete: config.clobCredsComplete,
+      clobDeriveEnabled: config.clobDeriveEnabled,
+      collateralTokenDecimals: config.collateralTokenDecimals,
+    });
+    config.detectOnly = tradingReady.detectOnly;
+  }
 
   // Check if ARB_LIVE_TRADING is set
   const liveTradingEnabled =

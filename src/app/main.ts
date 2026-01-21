@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { loadMonitorConfig, parseCliOverrides } from "../config/loadConfig";
+import { loadMonitorConfig, loadArbConfig, parseCliOverrides } from "../config/loadConfig";
 import { PolymarketAuth, createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
 import { MempoolMonitorService } from "../services/mempool-monitor.service";
 import { TradeExecutorService } from "../services/trade-executor.service";
@@ -29,143 +29,145 @@ async function main(): Promise<void> {
   ).toLowerCase();
   logger.info(`Starting Polymarket runtime mode=${mode}`);
 
-  if (mode === "arb" || mode === "both") {
-    await startArbitrageEngine(cliOverrides);
-  }
-
-  if (mode !== "mempool" && mode !== "both") {
-    return;
-  }
-
-  const env = loadMonitorConfig(cliOverrides);
-  logger.info(formatClobCredsChecklist(env.clobCredsChecklist));
-
-  if (!env.enabled) {
-    logger.info(
-      `[Monitor] Preset=${env.presetName} disabled; skipping monitor runtime.`,
-    );
-    return;
-  }
-
-  // Simple authentication with ONLY private key (like pmxt and other Polymarket bots)
+  // Run authentication and preflight ONCE at top level before starting any engines
+  // This ensures MODE=both only runs preflight once, not twice
   logger.info("🔐 Authenticating with Polymarket...");
   const auth = createPolymarketAuthFromEnv(logger);
   
   const authResult = await auth.authenticate();
   if (!authResult.success) {
     logger.error(`❌ Authentication failed: ${authResult.error}`);
-    logger.warn("Running in detect-only mode - trading disabled");
-    env.detectOnly = true;
-    env.clobCredsComplete = false;
-    
-    // Exit early if we can't authenticate
     logger.error("Cannot proceed without valid credentials");
     return;
-  } else {
-    logger.info(`✅ Authentication successful`);
-    env.clobCredsComplete = true;
-    env.detectOnly = false;
   }
+  logger.info(`✅ Authentication successful`);
 
   // Get authenticated CLOB client (already has wallet with provider)
   const client = await auth.getClobClient();
+  
+  // Load config to get parameters for preflight
+  const env = mode === "arb" ? loadArbConfig(cliOverrides) : loadMonitorConfig(cliOverrides);
+  
+  // Run preflight ONCE for all modes
+  logger.info("🔍 Running preflight checks...");
   const tradingReady = await ensureTradingReady({
     client,
     logger,
     privateKey: env.privateKey,
     configuredPublicKey: env.proxyWallet,
     rpcUrl: env.rpcUrl,
-    detectOnly: env.detectOnly,
-    clobCredsComplete: env.clobCredsComplete,
+    detectOnly: false,
+    clobCredsComplete: true,
     clobDeriveEnabled: env.clobDeriveEnabled,
     collateralTokenDecimals: env.collateralTokenDecimals,
   });
-  env.detectOnly = tradingReady.detectOnly;
 
-  // Check if ARB_LIVE_TRADING is set
-  const liveTradingEnabled =
-    process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
-
-  // Log balances at startup
-  try {
-    const polBalance = await getPolBalance(client.wallet);
-    const usdcBalance = await getUsdBalanceApprox(
-      client.wallet,
-      env.collateralTokenAddress,
-      env.collateralTokenDecimals,
-    );
-    logger.info(`Wallet: ${client.wallet.address}`);
-    logger.info(`POL Balance: ${polBalance.toFixed(4)} POL`);
-    logger.info(`USDC Balance: ${usdcBalance.toFixed(2)} USDC`);
-  } catch (err) {
-    logger.error("Failed to fetch balances", err as Error);
+  // Start ARB engine if configured, passing pre-authenticated client
+  if (mode === "arb" || mode === "both") {
+    await startArbitrageEngine(cliOverrides, client, tradingReady);
   }
 
-  // Log prominent trading status banner
-  if (env.detectOnly) {
-    logger.warn(
-      "=====================================================================",
-    );
-    logger.warn("⚠️  TRADING DISABLED - Running in DETECT-ONLY mode");
-    logger.warn(
-      "=====================================================================",
-    );
-    logger.warn("The bot will monitor trades but will NOT submit orders.");
-    logger.warn("");
+  // Start MEMPOOL monitor if configured, using same authenticated client
+  if (mode === "mempool" || mode === "both") {
+    const mempoolEnv = loadMonitorConfig(cliOverrides);
+    logger.info(formatClobCredsChecklist(mempoolEnv.clobCredsChecklist));
 
-    // Get context-aware warnings based on actual failure reasons
-    const warnings = getContextAwareWarnings({
-      liveTradingEnabled,
-      authOk: tradingReady.authOk,
-      approvalsOk: tradingReady.approvalsOk,
-      geoblockPassed: tradingReady.geoblockPassed,
-    });
-
-    if (warnings.length > 0) {
-      logger.warn("Active blockers:");
-      warnings.forEach((warning, idx) => {
-        logger.warn(`  ${idx + 1}. ${warning}`);
-      });
-      logger.warn("");
+    if (!mempoolEnv.enabled) {
+      logger.info(
+        `[Monitor] Preset=${mempoolEnv.presetName} disabled; skipping monitor runtime.`,
+      );
+      return;
     }
 
-    logger.warn("General troubleshooting:");
-    logger.warn("  - Visit https://polymarket.com and connect your wallet");
-    logger.warn("  - Make at least one small trade on the website");
-    logger.warn("  - Then restart this bot to generate valid API credentials");
-    logger.warn(
-      "  - Or generate API keys at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)",
-    );
-    logger.warn(
-      "=====================================================================",
-    );
-  } else {
-    logger.info(
-      "=====================================================================",
-    );
-    logger.info("✅ TRADING ENABLED - Bot will submit orders");
-    logger.info(
-      "=====================================================================",
-    );
+    // Update config with preflight results
+    mempoolEnv.clobCredsComplete = true;
+    mempoolEnv.detectOnly = tradingReady.detectOnly;
+
+    // Check if ARB_LIVE_TRADING is set
+    const liveTradingEnabled =
+      process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+
+    // Log balances at startup
+    try {
+      const polBalance = await getPolBalance(client.wallet);
+      const usdcBalance = await getUsdBalanceApprox(
+        client.wallet,
+        mempoolEnv.collateralTokenAddress,
+        mempoolEnv.collateralTokenDecimals,
+      );
+      logger.info(`Wallet: ${client.wallet.address}`);
+      logger.info(`POL Balance: ${polBalance.toFixed(4)} POL`);
+      logger.info(`USDC Balance: ${usdcBalance.toFixed(2)} USDC`);
+    } catch (err) {
+      logger.error("Failed to fetch balances", err as Error);
+    }
+
+    // Log prominent trading status banner for MEMPOOL mode
+    if (mempoolEnv.detectOnly) {
+      logger.warn(
+        "=====================================================================",
+      );
+      logger.warn("⚠️  TRADING DISABLED - Running in DETECT-ONLY mode");
+      logger.warn(
+        "=====================================================================",
+      );
+      logger.warn("The bot will monitor trades but will NOT submit orders.");
+      logger.warn("");
+
+      // Get context-aware warnings based on actual failure reasons
+      const warnings = getContextAwareWarnings({
+        liveTradingEnabled,
+        authOk: tradingReady.authOk,
+        approvalsOk: tradingReady.approvalsOk,
+        geoblockPassed: tradingReady.geoblockPassed,
+      });
+
+      if (warnings.length > 0) {
+        logger.warn("Active blockers:");
+        warnings.forEach((warning, idx) => {
+          logger.warn(`  ${idx + 1}. ${warning}`);
+        });
+        logger.warn("");
+      }
+
+      logger.warn("General troubleshooting:");
+      logger.warn("  - Visit https://polymarket.com and connect your wallet");
+      logger.warn("  - Make at least one small trade on the website");
+      logger.warn("  - Then restart this bot to generate valid API credentials");
+      logger.warn(
+        "  - Or generate API keys at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)",
+      );
+      logger.warn(
+        "=====================================================================",
+      );
+    } else {
+      logger.info(
+        "=====================================================================",
+      );
+      logger.info("✅ MEMPOOL TRADING ENABLED - Bot will submit orders");
+      logger.info(
+        "=====================================================================",
+      );
+    }
+
+    const executor = new TradeExecutorService({
+      client,
+      proxyWallet: mempoolEnv.proxyWallet,
+      logger,
+      env: mempoolEnv,
+    });
+
+    const monitor = new MempoolMonitorService({
+      client,
+      logger,
+      env: mempoolEnv,
+      onDetectedTrade: async (signal) => {
+        await executor.frontrunTrade(signal);
+      },
+    });
+
+    await monitor.start();
   }
-
-  const executor = new TradeExecutorService({
-    client,
-    proxyWallet: env.proxyWallet,
-    logger,
-    env,
-  });
-
-  const monitor = new MempoolMonitorService({
-    client,
-    logger,
-    env,
-    onDetectedTrade: async (signal) => {
-      await executor.frontrunTrade(signal);
-    },
-  });
-
-  await monitor.start();
 }
 
 main().catch((err) => {

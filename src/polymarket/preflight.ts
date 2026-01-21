@@ -29,20 +29,6 @@ import {
 
 export { readApprovalsConfig };
 
-// Global cache for preflight results to avoid duplicate runs in MODE=both
-let preflightCache: {
-  timestamp: number;
-  signerAddress: string;
-  result: {
-    detectOnly: boolean;
-    authOk: boolean;
-    approvalsOk: boolean;
-    geoblockPassed: boolean;
-  };
-} | null = null;
-
-const PREFLIGHT_CACHE_TTL_MS = 30000; // 30 seconds
-
 export type TradingReadyParams = {
   client: ClobClient & {
     wallet: Wallet;
@@ -108,30 +94,6 @@ export const ensureTradingReady = async (
   geoblockPassed: boolean;
 }> => {
   const derivedSignerAddress = deriveSignerAddress(params.privateKey);
-
-  // Check if we have a recent cached result for this signer
-  // This prevents duplicate preflight runs when MODE=both starts both ARB and MEMPOOL
-  const now = Date.now();
-  if (
-    preflightCache &&
-    preflightCache.signerAddress === derivedSignerAddress &&
-    now - preflightCache.timestamp < PREFLIGHT_CACHE_TTL_MS
-  ) {
-    const age = ((now - preflightCache.timestamp) / 1000).toFixed(1);
-    log(
-      params.logger,
-      "info",
-      `[Preflight] ⚡ Reusing cached preflight result from ${age}s ago (prevents duplicate runs in MODE=both)`,
-      "PREFLIGHT",
-    );
-    log(
-      params.logger,
-      "info",
-      `[Preflight] Cached result: authOk=${preflightCache.result.authOk} approvalsOk=${preflightCache.result.approvalsOk} detectOnly=${preflightCache.result.detectOnly}`,
-      "PREFLIGHT",
-    );
-    return preflightCache.result;
-  }
 
   // Initialize auth story
   const runId = generateRunId();
@@ -780,15 +742,7 @@ export const ensureTradingReady = async (
     }
   ).relayerContext = relayer;
 
-  // Cache the result to prevent duplicate preflight runs
-  const result = { detectOnly, authOk, approvalsOk, geoblockPassed };
-  preflightCache = {
-    timestamp: Date.now(),
-    signerAddress: derivedSignerAddress,
-    result,
-  };
-
-  return result;
+  return { detectOnly, authOk, approvalsOk, geoblockPassed };
 };
 
 const logPreflightSummary = (params: {
