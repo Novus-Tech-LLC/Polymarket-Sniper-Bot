@@ -95,8 +95,8 @@ export class TradeExecutorService {
       }
 
       // Validate our order meets minimum size requirements
-      // Note: When MAX_POSITION_USD is set, it takes precedence - if you set MAX_POSITION_USD=5,
-      // you want to trade $5, so we respect that and adjust the minimum accordingly.
+      // Note: When MAX_POSITION_USD is set lower than MIN_ORDER_USD, the effective minimum
+      // is adjusted to match MAX_POSITION_USD. This allows trades to execute at the capped size.
       const minOrderSize = sizing.effectiveMinOrderUsd;
       if (frontrunSize < minOrderSize) {
         logger.warn(

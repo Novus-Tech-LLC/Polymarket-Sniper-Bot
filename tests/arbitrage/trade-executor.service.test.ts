@@ -231,7 +231,7 @@ test("frontrun executes trade when MAX_POSITION_USD is set below MIN_ORDER_USD",
     );
     assert.ok(
       postOrderCalled,
-      "postOrder should be called when MAX_POSITION_USD is set (takes precedence over MIN_ORDER_USD)",
+      "postOrder should be called - effective min is adjusted to 5 USD (matching MAX_POSITION_USD)",
     );
     assert.ok(
       !logs.some((line) => line.includes("is below minimum")),
