@@ -25,6 +25,7 @@ const baseEnv: RuntimeEnv = {
   polymarketApiPassphrase: undefined,
   minTradeSizeUsd: 10,
   frontrunSizeMultiplier: 0.1,
+  frontrunMaxSizeUsd: 50,
   gasPriceMultiplier: 1.0,
   minOrderUsd: 10,
   orderSubmitMinIntervalMs: 20000,

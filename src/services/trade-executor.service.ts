@@ -74,16 +74,25 @@ export class TradeExecutorService {
 
       // For frontrunning, we execute the same trade but with higher priority
       // Calculate frontrun size (typically smaller or same as target)
-      const frontrunSize = this.calculateFrontrunSize(signal.sizeUsd, env);
-      const frontrunMultiplier =
-        env.frontrunSizeMultiplier || DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER;
+      const sizing = this.calculateFrontrunSize(signal.sizeUsd, env);
+      const frontrunSize = sizing.size;
+      const calculatedSize = signal.sizeUsd * sizing.multiplier;
 
       logger.info(
         `[Frontrun] Detected trade: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD by other trader`,
       );
-      logger.info(
-        `[Frontrun] Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (${(frontrunMultiplier * 100).toFixed(1)}% of target)`,
-      );
+      if (sizing.wasCapped) {
+        const capSource = sizing.cappedByEndgame
+          ? "ENDGAME_MAX_POSITION_USD"
+          : "FRONTRUN_MAX_SIZE_USD";
+        logger.info(
+          `[Frontrun] Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (capped from ${calculatedSize.toFixed(2)} USD by ${capSource}=${sizing.maxSize})`,
+        );
+      } else {
+        logger.info(
+          `[Frontrun] Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (${(sizing.multiplier * 100).toFixed(1)}% of target)`,
+        );
+      }
 
       // Validate our order meets minimum size requirements
       // Note: This validation is also performed by OrderSubmissionController.checkPreflight,
@@ -94,7 +103,7 @@ export class TradeExecutorService {
           `[Frontrun] Order size ${frontrunSize.toFixed(2)} USD is below minimum ${minOrderSize.toFixed(2)} USD. Skipping trade.`,
         );
         logger.info(
-          `[Frontrun] Tip: Increase FRONTRUN_SIZE_MULTIPLIER (current: ${(frontrunMultiplier * 100).toFixed(1)}%) or decrease MIN_ORDER_USD to execute smaller trades.`,
+          `[Frontrun] Tip: Increase FRONTRUN_SIZE_MULTIPLIER (current: ${(sizing.multiplier * 100).toFixed(1)}%) or decrease MIN_ORDER_USD to execute smaller trades.`,
         );
         return;
       }
@@ -172,12 +181,36 @@ export class TradeExecutorService {
     }
   }
 
-  private calculateFrontrunSize(targetSize: number, env: RuntimeEnv): number {
+  private calculateFrontrunSize(
+    targetSize: number,
+    env: RuntimeEnv,
+  ): {
+    size: number;
+    multiplier: number;
+    maxSize: number;
+    wasCapped: boolean;
+    cappedByEndgame: boolean;
+  } {
     // Frontrun with a percentage of the target size
     // This can be configured via env variable
-    const frontrunMultiplier =
+    const multiplier =
       env.frontrunSizeMultiplier || DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER;
-    return targetSize * frontrunMultiplier;
+    const calculatedSize = targetSize * multiplier;
+
+    // Cap at max frontrun size if configured
+    // Also respect ENDGAME_MAX_POSITION_USD from environment as an additional cap
+    const frontrunMax =
+      env.frontrunMaxSizeUsd || DEFAULT_CONFIG.FRONTRUN_MAX_SIZE_USD;
+    const endgameMax = Number(process.env.ENDGAME_MAX_POSITION_USD);
+    const hasEndgameCap = Number.isFinite(endgameMax) && endgameMax > 0;
+    const maxSize = hasEndgameCap
+      ? Math.min(frontrunMax, endgameMax)
+      : frontrunMax;
+    const wasCapped = calculatedSize > maxSize;
+    const cappedByEndgame = hasEndgameCap && endgameMax < frontrunMax;
+    const size = Math.min(calculatedSize, maxSize);
+
+    return { size, multiplier, maxSize, wasCapped, cappedByEndgame };
   }
 
   // Keep copyTrade for backward compatibility, but redirect to frontrun

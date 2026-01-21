@@ -42,6 +42,7 @@ export type MonitorRuntimeConfig = {
   polymarketApiPassphrase: string;
   minTradeSizeUsd: number;
   frontrunSizeMultiplier?: number;
+  frontrunMaxSizeUsd?: number;
   gasPriceMultiplier?: number;
   minOrderUsd: number;
   orderBalanceBufferBps: number;
@@ -101,6 +102,8 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   "TRADE_MULTIPLIER",
   "FETCH_INTERVAL",
   "GAS_PRICE_MULTIPLIER",
+  "FRONTRUN_SIZE_MULTIPLIER",
+  "FRONTRUN_MAX_SIZE_USD",
   "MONITOR_REQUIRE_CONFIRMED",
   "MIN_ORDER_USD",
   "ORDER_BALANCE_BUFFER_BPS",
@@ -184,6 +187,7 @@ const MONITOR_LEGACY_DEFAULTS = {
   requireConfirmed: true,
   minTradeSizeUsd: DEFAULT_CONFIG.MIN_TRADE_SIZE_USD,
   frontrunSizeMultiplier: DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER,
+  frontrunMaxSizeUsd: DEFAULT_CONFIG.FRONTRUN_MAX_SIZE_USD,
   gasPriceMultiplier: DEFAULT_CONFIG.GAS_PRICE_MULTIPLIER,
   minOrderUsd: DEFAULT_CONFIG.MIN_ORDER_USD,
   orderBalanceBufferBps: 0,
@@ -329,6 +333,10 @@ const MONITOR_ENV_MAP = {
     key: "frontrunSizeMultiplier",
     parse: parseNumber,
   },
+  FRONTRUN_MAX_SIZE_USD: {
+    key: "frontrunMaxSizeUsd",
+    parse: parseNumber,
+  },
   GAS_PRICE_MULTIPLIER: { key: "gasPriceMultiplier", parse: parseNumber },
   MONITOR_REQUIRE_CONFIRMED: { key: "requireConfirmed", parse: parseBool },
   MIN_ORDER_USD: { key: "minOrderUsd", parse: parseNumber },
@@ -373,6 +381,7 @@ const MONITOR_LEGACY_KEYS = [
   "TRADE_AGGREGATION_ENABLED",
   "TRADE_AGGREGATION_WINDOW_SECONDS",
   "FRONTRUN_SIZE_MULTIPLIER",
+  "FRONTRUN_MAX_SIZE_USD",
   "GAS_PRICE_MULTIPLIER",
   "MONITOR_REQUIRE_CONFIRMED",
   "MIN_ORDER_USD",
@@ -916,6 +925,7 @@ export function loadMonitorConfig(
     polymarketApiPassphrase: clobCreds.passphrase ?? "",
     minTradeSizeUsd: MONITOR_LEGACY_DEFAULTS.minTradeSizeUsd,
     frontrunSizeMultiplier: MONITOR_LEGACY_DEFAULTS.frontrunSizeMultiplier,
+    frontrunMaxSizeUsd: MONITOR_LEGACY_DEFAULTS.frontrunMaxSizeUsd,
     gasPriceMultiplier: MONITOR_LEGACY_DEFAULTS.gasPriceMultiplier,
     minOrderUsd: MONITOR_LEGACY_DEFAULTS.minOrderUsd,
     orderBalanceBufferBps: MONITOR_LEGACY_DEFAULTS.orderBalanceBufferBps,
