@@ -211,13 +211,19 @@ function printAuthStory(story: AuthStory): void {
       !story.verificationPassed &&
       story.errorMessage?.includes("401")
     ) {
-      console.log("\n  🔑 MOST LIKELY CAUSE: Wallet not registered on Polymarket");
+      console.log(
+        "\n  🔑 MOST LIKELY CAUSE: Wallet not registered on Polymarket",
+      );
       console.log("");
-      console.log("  The deriveApiKey() endpoint returned credentials, but the");
+      console.log(
+        "  The deriveApiKey() endpoint returned credentials, but the",
+      );
       console.log("  credentials failed verification. This typically means:");
       console.log("");
       console.log("  1. Your wallet has NEVER made a trade on Polymarket");
-      console.log("  2. The credentials are computed locally but not recognized server-side");
+      console.log(
+        "  2. The credentials are computed locally but not recognized server-side",
+      );
       console.log("");
       console.log("  TO FIX:");
       console.log("  1. Visit https://polymarket.com");
@@ -226,9 +232,13 @@ function printAuthStory(story: AuthStory): void {
       console.log("  4. Run this probe again");
       console.log("");
       console.log("  OTHER POSSIBILITIES:");
-      console.log("  - Wrong signature type (try POLYMARKET_SIGNATURE_TYPE=2 for browser wallets)");
+      console.log(
+        "  - Wrong signature type (try POLYMARKET_SIGNATURE_TYPE=2 for browser wallets)",
+      );
       console.log("  - Geographic restriction (try VPN if applicable)");
-      console.log("  - Cached stale credentials (delete /data/clob-creds.json if exists)");
+      console.log(
+        "  - Cached stale credentials (delete /data/clob-creds.json if exists)",
+      );
     }
     // Case 2: Credentials not obtained
     else if (!story.credentialsObtained) {

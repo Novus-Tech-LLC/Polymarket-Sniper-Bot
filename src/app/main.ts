@@ -1,6 +1,13 @@
 import "dotenv/config";
-import { loadMonitorConfig, loadArbConfig, parseCliOverrides } from "../config/loadConfig";
-import { PolymarketAuth, createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
+import {
+  loadMonitorConfig,
+  loadArbConfig,
+  parseCliOverrides,
+} from "../config/loadConfig";
+import {
+  PolymarketAuth,
+  createPolymarketAuthFromEnv,
+} from "../clob/polymarket-auth";
 import { MempoolMonitorService } from "../services/mempool-monitor.service";
 import { TradeExecutorService } from "../services/trade-executor.service";
 import { ConsoleLogger } from "../utils/logger.util";
@@ -33,7 +40,7 @@ async function main(): Promise<void> {
   // This ensures MODE=both only runs preflight once, not twice
   logger.info("🔐 Authenticating with Polymarket...");
   const auth = createPolymarketAuthFromEnv(logger);
-  
+
   const authResult = await auth.authenticate();
   if (!authResult.success) {
     logger.error(`❌ Authentication failed: ${authResult.error}`);
@@ -44,13 +51,14 @@ async function main(): Promise<void> {
 
   // Get authenticated CLOB client (already has wallet with provider)
   const client = await auth.getClobClient();
-  
+
   // Load config to get parameters for preflight
   // For MODE=both, prefer ARB config as it has all necessary parameters
-  const env = (mode === "arb" || mode === "both") 
-    ? loadArbConfig(cliOverrides) 
-    : loadMonitorConfig(cliOverrides);
-  
+  const env =
+    mode === "arb" || mode === "both"
+      ? loadArbConfig(cliOverrides)
+      : loadMonitorConfig(cliOverrides);
+
   // Run preflight ONCE for all modes
   logger.info("🔍 Running preflight checks...");
   const tradingReady = await ensureTradingReady({
@@ -136,7 +144,9 @@ async function main(): Promise<void> {
       logger.warn("General troubleshooting:");
       logger.warn("  - Visit https://polymarket.com and connect your wallet");
       logger.warn("  - Make at least one small trade on the website");
-      logger.warn("  - Then restart this bot to generate valid API credentials");
+      logger.warn(
+        "  - Then restart this bot to generate valid API credentials",
+      );
       logger.warn(
         "  - Or generate API keys at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)",
       );
@@ -147,7 +157,9 @@ async function main(): Promise<void> {
       logger.info(
         "=====================================================================",
       );
-      logger.info("✅ MEMPOOL MONITOR TRADING ENABLED - Bot will submit orders");
+      logger.info(
+        "✅ MEMPOOL MONITOR TRADING ENABLED - Bot will submit orders",
+      );
       logger.info(
         "=====================================================================",
       );

@@ -1,6 +1,9 @@
 import "dotenv/config";
 import { ConsoleLogger } from "../utils/logger.util";
-import { PolymarketAuth, createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
+import {
+  PolymarketAuth,
+  createPolymarketAuthFromEnv,
+} from "../clob/polymarket-auth";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { isApiKeyCreds } from "../utils/clob-credentials.util";
 
@@ -80,7 +83,7 @@ async function main(): Promise<void> {
   // Simple authentication with ONLY private key (like pmxt and other Polymarket bots)
   logger.info("🔐 Authenticating with Polymarket...");
   const auth = createPolymarketAuthFromEnv(logger);
-  
+
   const authResult = await auth.authenticate();
   if (!authResult.success) {
     logger.error(`❌ Authentication failed: ${authResult.error}`);
@@ -88,9 +91,9 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  
+
   logger.info(`✅ Authentication successful`);
-  
+
   // Get authenticated CLOB client (already has wallet with provider)
   const client = await auth.getClobClient();
 

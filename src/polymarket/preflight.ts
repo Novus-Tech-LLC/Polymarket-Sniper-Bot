@@ -309,11 +309,7 @@ export const ensureTradingReady = async (
           derivedCredsEnabled: params.clobDeriveEnabled,
           force: readEnv("CLOB_AUTH_FORCE") === "true",
         });
-        if (
-          preflight &&
-          !preflight.ok &&
-          preflight.severity === "FATAL"
-        ) {
+        if (preflight && !preflight.ok && preflight.severity === "FATAL") {
           detectOnly = true;
           authOk = false;
           authFailureContext.verificationFailed = true;
@@ -334,7 +330,11 @@ export const ensureTradingReady = async (
               severity: "FATAL",
             }),
           );
-        } else if (preflight && !preflight.ok && preflight.severity === "NON_FATAL") {
+        } else if (
+          preflight &&
+          !preflight.ok &&
+          preflight.severity === "NON_FATAL"
+        ) {
           // Non-fatal error - log warning but don't block trading
           authOk = true; // Auth credentials are OK, just a non-critical preflight issue
           authFailureContext.verificationFailed = false;
@@ -351,7 +351,11 @@ export const ensureTradingReady = async (
               severity: "NON_FATAL",
             }),
           );
-        } else if (preflight && !preflight.ok && preflight.severity === "TRANSIENT") {
+        } else if (
+          preflight &&
+          !preflight.ok &&
+          preflight.severity === "TRANSIENT"
+        ) {
           // Transient error - log warning but don't block trading
           authOk = true; // Auth credentials are OK, just a transient network/server issue
           authFailureContext.verificationFailed = false;
@@ -496,13 +500,13 @@ export const ensureTradingReady = async (
     ).relayerContext = relayer;
     return { detectOnly: true, authOk, approvalsOk: false, geoblockPassed };
   }
-  
+
   // Log warning if bypass is enabled
   const allowTradingWithoutPreflight = parseBool(
     readEnv("ALLOW_TRADING_WITHOUT_PREFLIGHT"),
     false,
   );
-  
+
   if (!authOk && allowTradingWithoutPreflight) {
     params.logger.warn(
       "[Preflight][GasGuard] ⚠️  ALLOW_TRADING_WITHOUT_PREFLIGHT=true - bypassing auth check (NOT RECOMMENDED)",
@@ -524,7 +528,7 @@ export const ensureTradingReady = async (
   // transactions that serve no purpose without working API authentication.
   //
   // Override: Set ALLOW_TRADING_WITHOUT_PREFLIGHT=true to bypass this check (not recommended)
-  
+
   if (!authOk && !allowTradingWithoutPreflight) {
     params.logger.error(
       "[Preflight][GasGuard] ⛔ BLOCKING ALL ON-CHAIN TRANSACTIONS",
@@ -752,7 +756,7 @@ export const ensureTradingReady = async (
     relayerContext?: ReturnType<typeof createRelayerContext>;
     onchainApprovalsVerified?: boolean;
   };
-  
+
   (params.client as ClobClientExtended).relayerContext = relayer;
   (params.client as ClobClientExtended).onchainApprovalsVerified = approvalsOk;
 

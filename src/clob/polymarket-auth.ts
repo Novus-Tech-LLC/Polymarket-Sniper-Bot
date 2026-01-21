@@ -92,7 +92,7 @@ export class PolymarketAuth {
     const privateKey = credentials.privateKey.startsWith("0x")
       ? credentials.privateKey
       : `0x${credentials.privateKey}`;
-    
+
     if (credentials.rpcUrl) {
       const provider = new JsonRpcProvider(credentials.rpcUrl);
       this.signer = new Wallet(privateKey, provider);
@@ -224,13 +224,11 @@ export class PolymarketAuth {
   /**
    * Get an authenticated CLOB client for L2 operations (trading).
    * This client can place orders, cancel orders, query positions, etc.
-   * 
+   *
    * Returns a client with wallet attached for compatibility with existing code.
    * The returned client is cached and the same instance is returned on subsequent calls.
    */
-  async getClobClient(): Promise<
-    ClobClient & { wallet: Wallet }
-  > {
+  async getClobClient(): Promise<ClobClient & { wallet: Wallet }> {
     // Return cached wrapped client if available
     if (this.cachedClientWithWallet) {
       return this.cachedClientWithWallet;
@@ -260,7 +258,9 @@ export class PolymarketAuth {
     );
 
     // Create and cache wrapped client for consistency
-    this.cachedClientWithWallet = Object.assign(this.clobClient, { wallet: this.signer });
+    this.cachedClientWithWallet = Object.assign(this.clobClient, {
+      wallet: this.signer,
+    });
     return this.cachedClientWithWallet;
   }
 

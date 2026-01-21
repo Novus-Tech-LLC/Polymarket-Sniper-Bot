@@ -15,7 +15,11 @@
  */
 
 import { Wallet } from "ethers";
-import { Chain, createL1Headers, createL2Headers } from "@polymarket/clob-client";
+import {
+  Chain,
+  createL1Headers,
+  createL2Headers,
+} from "@polymarket/clob-client";
 import type { ApiKeyCreds } from "@polymarket/clob-client";
 import axios from "axios";
 import * as crypto from "crypto";
@@ -28,7 +32,11 @@ const CHAIN_ID = Chain.POLYGON;
 const SIGNATURE_TYPES = [
   { type: 0, name: "EOA", description: "Direct wallet (no proxy)" },
   { type: 1, name: "PROXY", description: "Magic Link / Email login" },
-  { type: 2, name: "GNOSIS_SAFE", description: "Browser wallet (MetaMask, etc.)" },
+  {
+    type: 2,
+    name: "GNOSIS_SAFE",
+    description: "Browser wallet (MetaMask, etc.)",
+  },
 ] as const;
 
 interface DiagnosticResult {
@@ -50,12 +58,16 @@ const results: DiagnosticResult[] = [];
 
 function log(result: DiagnosticResult): void {
   results.push(result);
-  const icon = result.status === "pass" ? "✅" : result.status === "fail" ? "❌" : "⚠️";
+  const icon =
+    result.status === "pass" ? "✅" : result.status === "fail" ? "❌" : "⚠️";
   console.log(`${icon} [${result.step}] ${result.message}`);
   if (result.details && Object.keys(result.details).length > 0) {
     for (const [key, value] of Object.entries(result.details)) {
-      const valueStr = typeof value === "object" ? JSON.stringify(value) : String(value);
-      console.log(`   ${key}: ${valueStr.slice(0, 80)}${valueStr.length > 80 ? "..." : ""}`);
+      const valueStr =
+        typeof value === "object" ? JSON.stringify(value) : String(value);
+      console.log(
+        `   ${key}: ${valueStr.slice(0, 80)}${valueStr.length > 80 ? "..." : ""}`,
+      );
     }
   }
 }
@@ -69,7 +81,10 @@ function applyV6Shim(wallet: Wallet): Wallet {
     signTypedData?: typeof wallet.signTypedData;
   };
 
-  if (typeof typedWallet._signTypedData !== "function" && typeof typedWallet.signTypedData === "function") {
+  if (
+    typeof typedWallet._signTypedData !== "function" &&
+    typeof typedWallet.signTypedData === "function"
+  ) {
     const signTypedDataFn = typedWallet.signTypedData;
     typedWallet._signTypedData = async (domain, types, value) =>
       signTypedDataFn.call(typedWallet, domain, types, value);
@@ -108,7 +123,7 @@ async function testSignatureType(
       wallet as unknown as Parameters<typeof createL2Headers>[0],
       creds,
       { method, requestPath },
-      timestamp
+      timestamp,
     )) as unknown as Record<string, string>;
 
     const fullUrl = `${CLOB_HOST}${requestPath}`;
@@ -124,13 +139,19 @@ async function testSignatureType(
       status: response.status,
     };
   } catch (err) {
-    const axiosErr = err as { response?: { status?: number; data?: { error?: string } }; code?: string };
+    const axiosErr = err as {
+      response?: { status?: number; data?: { error?: string } };
+      code?: string;
+    };
     return {
       signatureType,
       name,
       success: false,
       status: axiosErr?.response?.status,
-      error: axiosErr?.response?.data?.error || axiosErr?.code || (err instanceof Error ? err.message : "Unknown error"),
+      error:
+        axiosErr?.response?.data?.error ||
+        axiosErr?.code ||
+        (err instanceof Error ? err.message : "Unknown error"),
     };
   }
 }
@@ -153,7 +174,9 @@ async function runDiagnostics(): Promise<void> {
     return;
   }
 
-  const normalizedKey = privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`;
+  const normalizedKey = privateKey.startsWith("0x")
+    ? privateKey
+    : `0x${privateKey}`;
 
   log({
     step: "ENV",
@@ -174,7 +197,9 @@ async function runDiagnostics(): Promise<void> {
       message: "Wallet created successfully",
       details: {
         address: wallet.address,
-        hasSignTypedData: typeof (wallet as unknown as { signTypedData?: unknown }).signTypedData === "function",
+        hasSignTypedData:
+          typeof (wallet as unknown as { signTypedData?: unknown })
+            .signTypedData === "function",
       },
     });
   } catch (err) {
@@ -189,12 +214,16 @@ async function runDiagnostics(): Promise<void> {
 
   // Step 2: Apply v6 shim
   wallet = applyV6Shim(wallet);
-  const hasShim = typeof (wallet as unknown as { _signTypedData?: unknown })._signTypedData === "function";
+  const hasShim =
+    typeof (wallet as unknown as { _signTypedData?: unknown })
+      ._signTypedData === "function";
 
   log({
     step: "SHIM",
     status: hasShim ? "pass" : "fail",
-    message: hasShim ? "ethers v6 → v5 compatibility shim applied" : "Failed to apply shim",
+    message: hasShim
+      ? "ethers v6 → v5 compatibility shim applied"
+      : "Failed to apply shim",
     details: { _signTypedData: hasShim ? "function" : "undefined" },
   });
 
@@ -207,14 +236,25 @@ async function runDiagnostics(): Promise<void> {
   let l1HeadersOk = false;
   try {
     const timestamp = Math.floor(Date.now() / 1000);
-    const headers = await createL1Headers(wallet as unknown as Parameters<typeof createL1Headers>[0], CHAIN_ID, 0, timestamp);
+    const headers = await createL1Headers(
+      wallet as unknown as Parameters<typeof createL1Headers>[0],
+      CHAIN_ID,
+      0,
+      timestamp,
+    );
 
-    l1HeadersOk = !!(headers.POLY_ADDRESS && headers.POLY_SIGNATURE && headers.POLY_TIMESTAMP);
+    l1HeadersOk = !!(
+      headers.POLY_ADDRESS &&
+      headers.POLY_SIGNATURE &&
+      headers.POLY_TIMESTAMP
+    );
 
     log({
       step: "L1-HEADERS",
       status: l1HeadersOk ? "pass" : "fail",
-      message: l1HeadersOk ? "L1 headers created successfully" : "L1 headers missing fields",
+      message: l1HeadersOk
+        ? "L1 headers created successfully"
+        : "L1 headers missing fields",
       details: {
         POLY_ADDRESS: headers.POLY_ADDRESS,
         POLY_TIMESTAMP: headers.POLY_TIMESTAMP,
@@ -237,7 +277,12 @@ async function runDiagnostics(): Promise<void> {
   let creds: ApiKeyCreds | null = null;
   try {
     const timestamp = Math.floor(Date.now() / 1000);
-    const headers = await createL1Headers(wallet as unknown as Parameters<typeof createL1Headers>[0], CHAIN_ID, 0, timestamp);
+    const headers = await createL1Headers(
+      wallet as unknown as Parameters<typeof createL1Headers>[0],
+      CHAIN_ID,
+      0,
+      timestamp,
+    );
 
     const response = await axios.get(`${CLOB_HOST}/auth/derive-api-key`, {
       headers,
@@ -282,14 +327,18 @@ async function runDiagnostics(): Promise<void> {
   const signatureTypeResults: SignatureTypeResult[] = [];
 
   for (const sigType of SIGNATURE_TYPES) {
-    process.stdout.write(`Testing signature_type=${sigType.type} (${sigType.name})... `);
+    process.stdout.write(
+      `Testing signature_type=${sigType.type} (${sigType.name})... `,
+    );
     const result = await testSignatureType(wallet, creds, sigType.type);
     signatureTypeResults.push(result);
 
     if (result.success) {
       console.log(`✅ SUCCESS`);
     } else {
-      console.log(`❌ FAILED (${result.status || "error"}: ${result.error?.slice(0, 50) || "unknown"})`);
+      console.log(
+        `❌ FAILED (${result.status || "error"}: ${result.error?.slice(0, 50) || "unknown"})`,
+      );
     }
   }
 
@@ -308,14 +357,20 @@ async function runDiagnostics(): Promise<void> {
       status: "pass",
       message: `Found ${workingTypes.length} working signature type(s)`,
       details: {
-        working: workingTypes.map((r) => `${r.signatureType} (${r.name})`).join(", "),
+        working: workingTypes
+          .map((r) => `${r.signatureType} (${r.name})`)
+          .join(", "),
       },
     });
 
     console.log("\n✅ WORKING CONFIGURATION(S):");
     for (const result of workingTypes) {
-      const sigInfo = SIGNATURE_TYPES.find((s) => s.type === result.signatureType);
-      console.log(`   • signature_type=${result.signatureType} (${result.name})`);
+      const sigInfo = SIGNATURE_TYPES.find(
+        (s) => s.type === result.signatureType,
+      );
+      console.log(
+        `   • signature_type=${result.signatureType} (${result.name})`,
+      );
       console.log(`     ${sigInfo?.description}`);
     }
 
@@ -324,7 +379,9 @@ async function runDiagnostics(): Promise<void> {
     console.log("\n📝 RECOMMENDED .env CONFIGURATION:");
     console.log(`   POLYMARKET_SIGNATURE_TYPE=${recommended.signatureType}`);
     if (recommended.signatureType !== 0) {
-      console.log(`   POLYMARKET_PROXY_ADDRESS=<your Polymarket deposit address>`);
+      console.log(
+        `   POLYMARKET_PROXY_ADDRESS=<your Polymarket deposit address>`,
+      );
       console.log("\n   To find your deposit address:");
       console.log("   1. Go to https://polymarket.com");
       console.log("   2. Connect your wallet");
@@ -345,9 +402,15 @@ async function runDiagnostics(): Promise<void> {
     console.log("This typically means:");
     console.log("");
     console.log("1. MOST LIKELY: Your wallet has NEVER traded on Polymarket");
-    console.log("   - The deriveApiKey endpoint returns deterministic credentials");
-    console.log("   - But those credentials only work if your wallet is registered");
-    console.log("   - FIX: Visit polymarket.com, connect wallet, make any trade");
+    console.log(
+      "   - The deriveApiKey endpoint returns deterministic credentials",
+    );
+    console.log(
+      "   - But those credentials only work if your wallet is registered",
+    );
+    console.log(
+      "   - FIX: Visit polymarket.com, connect wallet, make any trade",
+    );
     console.log("");
     console.log("2. Geographic restriction:");
     console.log("   - Polymarket blocks some regions");
@@ -373,7 +436,9 @@ async function runDiagnostics(): Promise<void> {
   console.log(`  ⚠️ Warnings: ${warned}`);
 
   if (workingTypes.length > 0) {
-    console.log(`\n✅ Found working signature type: ${workingTypes[0].signatureType} (${workingTypes[0].name})`);
+    console.log(
+      `\n✅ Found working signature type: ${workingTypes[0].signatureType} (${workingTypes[0].name})`,
+    );
     console.log("   Use this value for POLYMARKET_SIGNATURE_TYPE in your .env");
   } else if (failed === 0) {
     console.log("\n✅ All diagnostics passed but no signature type worked.");

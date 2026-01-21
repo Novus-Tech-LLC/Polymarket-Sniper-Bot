@@ -219,7 +219,9 @@ const parseTradeMode: EnvParser<TradeMode> = (raw) => {
   }
   // Invalid value - log warning and return default
   // Note: Using process.stderr since logger isn't available in config loading phase
-  process.stderr.write(`[Config] Invalid TRADE_MODE="${raw}", defaulting to "clob". Valid values: "clob", "onchain"\n`);
+  process.stderr.write(
+    `[Config] Invalid TRADE_MODE="${raw}", defaulting to "clob". Valid values: "clob", "onchain"\n`,
+  );
   return "clob";
 };
 

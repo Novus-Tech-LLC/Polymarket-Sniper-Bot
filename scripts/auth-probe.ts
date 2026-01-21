@@ -182,7 +182,9 @@ async function main(): Promise<number> {
       creds = await client.createOrDeriveApiKey();
 
       if (!creds || !creds.apiKey || !creds.secret || !creds.passphrase) {
-        throw new Error("Invalid credentials returned from createOrDeriveApiKey");
+        throw new Error(
+          "Invalid credentials returned from createOrDeriveApiKey",
+        );
       }
 
       // Set credential fingerprint
@@ -222,7 +224,8 @@ async function main(): Promise<number> {
       // Record successful attempt
       const attempt: AuthAttempt = {
         attemptId: "A",
-        mode: signatureType === 0 ? "EOA" : signatureType === 1 ? "PROXY" : "SAFE",
+        mode:
+          signatureType === 0 ? "EOA" : signatureType === 1 ? "PROXY" : "SAFE",
         sigType: signatureType,
         l1Auth: signerAddress,
         maker: signerAddress,
@@ -250,7 +253,8 @@ async function main(): Promise<number> {
       // Record failed attempt
       const attempt: AuthAttempt = {
         attemptId: "A",
-        mode: signatureType === 0 ? "EOA" : signatureType === 1 ? "PROXY" : "SAFE",
+        mode:
+          signatureType === 0 ? "EOA" : signatureType === 1 ? "PROXY" : "SAFE",
         sigType: signatureType,
         l1Auth: signerAddress,
         maker: signerAddress,
@@ -315,7 +319,6 @@ main()
     process.exit(exitCode);
   })
   .catch((err) => {
-    // eslint-disable-next-line no-console -- Fatal error handler needs direct console.error
     console.error("Fatal error:", err);
     process.exit(1);
   });

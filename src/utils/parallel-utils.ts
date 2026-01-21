@@ -39,7 +39,9 @@ export async function parallelBatch<T, R>(
   const { concurrency = 6, logger, label = "batch" } = options;
   const startTime = Date.now();
   // Use sentinel value to distinguish "no result" from "undefined result"
-  const results: (R | typeof NO_RESULT)[] = new Array(items.length).fill(NO_RESULT);
+  const results: (R | typeof NO_RESULT)[] = new Array(items.length).fill(
+    NO_RESULT,
+  );
   const errors: Error[] = [];
 
   // Process items in batches
@@ -48,7 +50,11 @@ export async function parallelBatch<T, R>(
     const batchPromises = batch.map((item, batchIndex) => {
       const globalIndex = i + batchIndex;
       return fn(item, globalIndex)
-        .then((result) => ({ success: true as const, result, index: globalIndex }))
+        .then((result) => ({
+          success: true as const,
+          result,
+          index: globalIndex,
+        }))
         .catch((error) => ({
           success: false as const,
           error: error instanceof Error ? error : new Error(String(error)),
@@ -94,7 +100,10 @@ export async function parallelFetch<T extends Record<string, Promise<unknown>>>(
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
     const value = values[i];
-    result[key] = value.status === "fulfilled" ? (value.value as Awaited<T[typeof key]>) : null;
+    result[key] =
+      value.status === "fulfilled"
+        ? (value.value as Awaited<T[typeof key]>)
+        : null;
   }
   return result;
 }

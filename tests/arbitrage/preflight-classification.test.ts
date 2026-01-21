@@ -107,7 +107,11 @@ test("classifyPreflightSeverity marks param/funds/unknown errors as NON_FATAL", 
     "NON_FATAL",
   );
   assert.equal(
-    classifyPreflightSeverity({ status: undefined, issue: "UNKNOWN", code: null }),
+    classifyPreflightSeverity({
+      status: undefined,
+      issue: "UNKNOWN",
+      code: null,
+    }),
     "NON_FATAL",
   );
 });
@@ -118,4 +122,3 @@ test("classifyPreflightSeverity marks unknown status codes as NON_FATAL", () => 
     "NON_FATAL",
   );
 });
-

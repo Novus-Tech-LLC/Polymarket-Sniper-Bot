@@ -211,12 +211,12 @@ export class MempoolMonitorService {
     // Monitor all addresses from env in parallel (these are the addresses we want to frontrun)
     // Use parallelBatch to control concurrency and prevent overwhelming the API
     const MAX_CONCURRENT_ADDRESS_CHECKS = 4;
-    
+
     const batchResult = await parallelBatch(
       env.targetAddresses,
       async (targetAddress) => {
         const localStats = this.createEmptyStats();
-        
+
         try {
           await this.checkRecentActivity(targetAddress, localStats);
           return { success: true, stats: localStats };
@@ -232,7 +232,11 @@ export class MempoolMonitorService {
           return { success: false, stats: localStats };
         }
       },
-      { concurrency: MAX_CONCURRENT_ADDRESS_CHECKS, logger, label: "activity-check" },
+      {
+        concurrency: MAX_CONCURRENT_ADDRESS_CHECKS,
+        logger,
+        label: "activity-check",
+      },
     );
 
     // Aggregate stats from all parallel checks
@@ -252,9 +256,12 @@ export class MempoolMonitorService {
         stats.skippedUnconfirmedTrades += result.stats.skippedUnconfirmedTrades;
         stats.skippedNonTargetTrades += result.stats.skippedNonTargetTrades;
         stats.skippedParseErrorTrades += result.stats.skippedParseErrorTrades;
-        stats.skippedOutsideRecentWindowTrades += result.stats.skippedOutsideRecentWindowTrades;
-        stats.skippedUnsupportedActionTrades += result.stats.skippedUnsupportedActionTrades;
-        stats.skippedMissingFieldsTrades += result.stats.skippedMissingFieldsTrades;
+        stats.skippedOutsideRecentWindowTrades +=
+          result.stats.skippedOutsideRecentWindowTrades;
+        stats.skippedUnsupportedActionTrades +=
+          result.stats.skippedUnsupportedActionTrades;
+        stats.skippedMissingFieldsTrades +=
+          result.stats.skippedMissingFieldsTrades;
         stats.skippedApiErrorTrades += result.stats.skippedApiErrorTrades;
         stats.skippedOtherTrades += result.stats.skippedOtherTrades;
       }

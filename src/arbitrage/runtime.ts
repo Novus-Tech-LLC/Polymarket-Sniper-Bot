@@ -64,7 +64,9 @@ export async function startArbitrageEngine(
   };
 
   if (preAuthenticatedClient && preflightResult) {
-    logger.info("[ARB] ⚡ Using pre-authenticated client from main (preflight already completed)");
+    logger.info(
+      "[ARB] ⚡ Using pre-authenticated client from main (preflight already completed)",
+    );
     client = preAuthenticatedClient;
     tradingReady = preflightResult;
     config.detectOnly = tradingReady.detectOnly;
@@ -86,7 +88,9 @@ export async function startArbitrageEngine(
     }
 
     const clientCredsRaw = (
-      client as { creds?: { key?: string; secret?: string; passphrase?: string } }
+      client as {
+        creds?: { key?: string; secret?: string; passphrase?: string };
+      }
     ).creds;
     const clientCreds = isApiKeyCreds(clientCredsRaw)
       ? clientCredsRaw

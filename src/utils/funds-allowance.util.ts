@@ -466,7 +466,7 @@ export const checkFundsAndAllowance = async (
     if (insufficientSnapshot) {
       // Always refresh cache on first insufficient check to ensure we have fresh data
       await refreshAndRetry();
-      
+
       // Re-check after refresh
       const refreshedInsufficient = !isSnapshotSufficient(
         collateralSnapshot,
@@ -477,11 +477,13 @@ export const checkFundsAndAllowance = async (
             !isSnapshotSufficient(conditionalSnapshot, requiredUsd)
           ? conditionalSnapshot
           : null;
-      
+
       if (refreshedInsufficient) {
-        const balanceSufficient = refreshedInsufficient.balanceUsd >= requiredUsd;
-        const allowanceSufficient = refreshedInsufficient.allowanceUsd >= requiredUsd;
-        
+        const balanceSufficient =
+          refreshedInsufficient.balanceUsd >= requiredUsd;
+        const allowanceSufficient =
+          refreshedInsufficient.allowanceUsd >= requiredUsd;
+
         // Trust mode bypass: Only applies to COLLATERAL tokens (USDC) when:
         // 1. Trust mode is enabled (TRUST_ONCHAIN_APPROVALS=true)
         // 2. Preflight verified on-chain approvals
@@ -494,7 +496,7 @@ export const checkFundsAndAllowance = async (
           balanceSufficient &&
           !allowanceSufficient &&
           refreshedInsufficient.assetType === AssetType.COLLATERAL;
-        
+
         if (canBypassAllowanceCheck) {
           params.logger.info(
             `[CLOB][TrustMode] Bypassing CLOB allowance check for COLLATERAL (known bug). Balance sufficient and on-chain approvals verified. need=${formatUsd(requiredUsd)} have=${formatUsd(refreshedInsufficient.balanceUsd)} allowance=${formatUsd(refreshedInsufficient.allowanceUsd)}`,
@@ -535,7 +537,8 @@ export const checkFundsAndAllowance = async (
                 }
 
                 const approvalKey = `${tradingAddress}:${params.collateralTokenAddress}`;
-                const lastAttempt = approvalAttemptCooldown.get(approvalKey) ?? 0;
+                const lastAttempt =
+                  approvalAttemptCooldown.get(approvalKey) ?? 0;
                 if (Date.now() - lastAttempt < APPROVAL_RETRY_COOLDOWN_MS) {
                   params.logger.warn(
                     "[CLOB] Auto-approve cooldown active; skipping approval retry.",
@@ -560,8 +563,9 @@ export const checkFundsAndAllowance = async (
                   await ensureApprovals({
                     wallet,
                     owner: tradingAddress,
-                    relayer: (params.client as { relayerContext?: RelayerContext })
-                      .relayerContext,
+                    relayer: (
+                      params.client as { relayerContext?: RelayerContext }
+                    ).relayerContext,
                     logger: params.logger,
                     config: approvalsConfig,
                   });

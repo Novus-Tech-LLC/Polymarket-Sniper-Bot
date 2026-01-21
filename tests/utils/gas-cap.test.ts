@@ -161,7 +161,11 @@ test("validateGasCap skips validation for non-numeric cap value", () => {
 
     // Should log a warning about invalid config
     const warnLogs = logger.logs.filter((log) => log.level === "warn");
-    assert.equal(warnLogs.length, 1, "Should log one warning about invalid config");
+    assert.equal(
+      warnLogs.length,
+      1,
+      "Should log one warning about invalid config",
+    );
     assert.ok(
       warnLogs[0].message.includes("Invalid POLY_MAX_FEE_GWEI_CAP"),
       "Warning should mention invalid config",
@@ -184,7 +188,11 @@ test("validateGasCap skips validation for negative cap value", () => {
 
     // Should log a warning about invalid config
     const warnLogs = logger.logs.filter((log) => log.level === "warn");
-    assert.equal(warnLogs.length, 1, "Should log one warning about invalid config");
+    assert.equal(
+      warnLogs.length,
+      1,
+      "Should log one warning about invalid config",
+    );
     assert.ok(
       warnLogs[0].message.includes("Invalid POLY_MAX_FEE_GWEI_CAP"),
       "Warning should mention invalid config",
@@ -203,7 +211,11 @@ test("validateGasCap skips validation for zero cap value", () => {
 
     // Should log a warning about invalid config
     const warnLogs = logger.logs.filter((log) => log.level === "warn");
-    assert.equal(warnLogs.length, 1, "Should log one warning about invalid config");
+    assert.equal(
+      warnLogs.length,
+      1,
+      "Should log one warning about invalid config",
+    );
   });
 });
 
@@ -217,7 +229,11 @@ test("validateGasCap skips validation when cap not configured", () => {
     assert.doesNotThrow(() => validateGasCap(maxFeePerGas, logger));
 
     // Should not log anything
-    assert.equal(logger.logs.length, 0, "Should not log anything when cap not configured");
+    assert.equal(
+      logger.logs.length,
+      0,
+      "Should not log anything when cap not configured",
+    );
   });
 });
 

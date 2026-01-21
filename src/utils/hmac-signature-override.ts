@@ -12,11 +12,11 @@ import { trackHmacSigningInputs } from "./hmac-diagnostic-interceptor";
 
 /**
  * Type definition for buildPolyHmacSignature function
- * 
+ *
  * Note: The return type differs between versions:
  * - v4.22.8 (current): returns `string` synchronously
  * - v5.x: returns `Promise<string>` asynchronously
- * 
+ *
  * This wrapper uses `Promise.resolve()` to handle both cases uniformly.
  */
 type BuildPolyHmacSignatureFn = (
@@ -98,7 +98,7 @@ export function installHmacSignatureOverride(logger?: {
       requestPath,
       body,
     );
-    
+
     // Handle both Promise and direct return
     const signature = await Promise.resolve(result);
 

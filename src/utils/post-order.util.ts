@@ -45,22 +45,22 @@ const missingOrderbooks = new Set<string>();
 
 /**
  * Post an order to Polymarket
- * 
+ *
  * This function routes orders based on the TRADE_MODE environment variable:
  * - TRADE_MODE=clob (default): Uses CLOB API with authentication
  * - TRADE_MODE=onchain (experimental): Bypasses CLOB API and trades directly on-chain
  *   (Note: On-chain mode infrastructure is in place but requires additional integration)
- * 
+ *
  * On-chain mode benefits (when fully implemented):
  * - No API credentials required (only PRIVATE_KEY and RPC_URL)
  * - No rate limits from CLOB API
  * - Direct blockchain interaction
  * - More transparent execution
- * 
+ *
  * Note: TRADE_MODE is read from environment for simplicity since it affects
  * early initialization before config is fully loaded. For testability, you can
  * mock process.env.TRADE_MODE in tests.
- * 
+ *
  * @param input Order parameters
  * @returns Order submission result
  */
@@ -70,11 +70,11 @@ export async function postOrder(
   // Check if on-chain mode is enabled
   // Note: Read from env for early initialization; set process.env.TRADE_MODE in tests
   const tradeMode = (process.env.TRADE_MODE ?? "clob").toLowerCase();
-  
+
   if (tradeMode === "onchain") {
     return postOrderOnChain(input);
   }
-  
+
   // Default CLOB mode
   return postOrderClob(input);
 }
@@ -85,22 +85,32 @@ export async function postOrder(
 async function postOrderOnChain(
   input: PostOrderInput,
 ): Promise<OrderSubmissionResult> {
-  const { wallet, tokenId, outcome, side, sizeUsd, maxAcceptablePrice, logger } = input;
-  
+  const {
+    wallet,
+    tokenId,
+    outcome,
+    side,
+    sizeUsd,
+    maxAcceptablePrice,
+    logger,
+  } = input;
+
   const liveTradingEnabled =
     process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
   if (!liveTradingEnabled) {
     logger.warn("[ONCHAIN] Live trading disabled; skipping order submission.");
     return { status: "skipped", reason: "LIVE_TRADING_DISABLED" };
   }
-  
+
   if (!wallet) {
     logger.error("[ONCHAIN] Wallet required for on-chain trading mode");
     return { status: "failed", reason: "NO_WALLET" };
   }
-  
-  logger.info(`[ONCHAIN] Executing on-chain order: ${side} ${sizeUsd} USD of token ${tokenId}`);
-  
+
+  logger.info(
+    `[ONCHAIN] Executing on-chain order: ${side} ${sizeUsd} USD of token ${tokenId}`,
+  );
+
   try {
     const result = await executeOnChainOrder({
       wallet,
@@ -114,7 +124,7 @@ async function postOrderOnChain(
       logger,
       dryRun: !liveTradingEnabled,
     });
-    
+
     if (result.success) {
       logger.info(
         `[ONCHAIN] Order executed successfully${result.transactionHash ? ` - tx: ${result.transactionHash}` : ""}`,

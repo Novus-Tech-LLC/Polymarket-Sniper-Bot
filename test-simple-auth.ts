@@ -20,7 +20,9 @@ async function main(): Promise<void> {
   logger.info("Testing Polymarket Authentication");
   logger.info("========================================");
   logger.info("Input: PRIVATE_KEY only");
-  logger.info("Expected: Auto-derive credentials and authenticate successfully");
+  logger.info(
+    "Expected: Auto-derive credentials and authenticate successfully",
+  );
   logger.info("");
 
   try {
@@ -47,9 +49,13 @@ async function main(): Promise<void> {
       logger.info("✅ CLOB client created successfully");
       logger.info("");
       logger.info("========================================");
-      logger.info("✅ AUTH TEST PASSED - Can create client with PRIVATE_KEY only!");
+      logger.info(
+        "✅ AUTH TEST PASSED - Can create client with PRIVATE_KEY only!",
+      );
       logger.info("========================================");
-      logger.info("Note: Full API test skipped (requires real wallet with funds)");
+      logger.info(
+        "Note: Full API test skipped (requires real wallet with funds)",
+      );
       process.exit(0);
     } else {
       logger.error("❌ FAILED: Authentication failed");

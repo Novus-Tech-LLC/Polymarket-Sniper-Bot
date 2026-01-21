@@ -113,8 +113,12 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
   private readonly missingOrderbooks = new Set<string>();
   private readonly tokenMarketMap = new Map<string, string>();
   // TTL caches to reduce redundant API calls
-  private readonly orderbookCache = new TTLCache<string, OrderBookTop>(ORDERBOOK_CACHE_TTL_MS);
-  private readonly marketsCache = new TTLCache<string, MarketSummary[]>(MARKETS_CACHE_TTL_MS);
+  private readonly orderbookCache = new TTLCache<string, OrderBookTop>(
+    ORDERBOOK_CACHE_TTL_MS,
+  );
+  private readonly marketsCache = new TTLCache<string, MarketSummary[]>(
+    MARKETS_CACHE_TTL_MS,
+  );
 
   constructor(params: { client: ClobClient; logger: Logger }) {
     this.client = params.client;

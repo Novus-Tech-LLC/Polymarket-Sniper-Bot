@@ -52,11 +52,12 @@ export class TradeExecutorService {
       const balances = await parallelFetch({
         usdBalance: this.balanceCache.getOrFetch(
           `usdc:${client.wallet.address}`,
-          () => getUsdBalanceApprox(
-            client.wallet,
-            env.collateralTokenAddress,
-            env.collateralTokenDecimals,
-          ),
+          () =>
+            getUsdBalanceApprox(
+              client.wallet,
+              env.collateralTokenAddress,
+              env.collateralTokenDecimals,
+            ),
         ),
         polBalance: this.balanceCache.getOrFetch(
           `pol:${client.wallet.address}`,
