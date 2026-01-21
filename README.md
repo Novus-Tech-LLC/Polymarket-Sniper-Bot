@@ -832,6 +832,13 @@ If preflight fails with 401, the logs will classify the likely root cause as one
 
 When a 401 occurs, the runtime automatically switches to detect-only mode.
 
+**⚠️ Important:** The bot now uses **severity-based classification** for preflight errors:
+- **FATAL** (401/403): Blocks trading - credentials are invalid
+- **TRANSIENT** (network/server errors): Allows trading - temporary issues
+- **NON_FATAL** (bad params, unknown): Allows trading - credentials are valid
+
+See [Preflight Severity Guide](docs/PREFLIGHT_SEVERITY_GUIDE.md) for details on how the bot handles different failure types.
+
 ### Balance/Allowance API params
 
 Polymarket’s `/balance-allowance` endpoint requires the following query parameters:
