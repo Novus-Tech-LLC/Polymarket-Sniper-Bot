@@ -1169,7 +1169,7 @@ export function loadStrategyConfig(
     // MIN_ORDER_USD: respect env override > preset > default
     minOrderUsd:
       parseNumber(readEnv("MIN_ORDER_USD", overrides) ?? "") ??
-      (preset as Record<string, unknown>).MIN_ORDER_USD as number | undefined ??
+      ("MIN_ORDER_USD" in preset ? (preset as { MIN_ORDER_USD: number }).MIN_ORDER_USD : undefined) ??
       DEFAULT_CONFIG.MIN_ORDER_USD,
   };
 
