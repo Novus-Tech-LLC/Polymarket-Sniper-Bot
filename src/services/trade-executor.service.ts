@@ -86,6 +86,8 @@ export class TradeExecutorService {
       );
 
       // Validate our order meets minimum size requirements
+      // Note: This validation is also performed by OrderSubmissionController.checkPreflight,
+      // but we check early here to provide immediate feedback with helpful tips to the user.
       const minOrderSize = env.minOrderUsd || DEFAULT_CONFIG.MIN_ORDER_USD;
       if (frontrunSize < minOrderSize) {
         logger.warn(

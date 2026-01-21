@@ -249,19 +249,13 @@ export class PositionTracker {
               const isRedeemable = apiPos.redeemable === true;
 
               if (isRedeemable) {
-                // Market is resolved - use final settlement price
-                // For resolved markets: if you hold YES and it resolved YES, value = 1.0
-                // If you hold YES and it resolved NO, value = 0.0
-                const sideValue = apiPos.outcome ?? apiPos.side;
-                const side = sideValue?.toUpperCase() === "YES" ? "YES" : "NO";
-                
-                // For redeemable positions, assume they resolved in favor of the side held
-                // This is a simplification - ideally we'd fetch the actual resolution
-                currentPrice = 1.0;
-                
-                this.logger.debug(
-                  `[PositionTracker] Resolved position ${tokenId}: Using settlement price $${currentPrice.toFixed(2)}`,
-                );
+                // Market is resolved - we cannot reliably determine the settlement price
+                // without fetching the actual market resolution outcome.
+                // Skipping this position as we cannot determine if it won (1.0) or lost (0.0).
+                const reason = `Position is redeemable (market resolved) - cannot determine settlement price for tokenId: ${tokenId}`;
+                skippedPositions.push({ reason, data: apiPos });
+                this.logger.debug(`[PositionTracker] ${reason}`);
+                return null;
               } else {
                 // Active market - fetch current orderbook
                 try {
@@ -278,13 +272,13 @@ export class PositionTracker {
                   const bestAsk = parseFloat(orderbook.asks[0].price);
                   currentPrice = (bestBid + bestAsk) / 2;
                 } catch (err) {
-                  // If orderbook fetch fails, this might be a resolved market not flagged as redeemable
+                  // If orderbook fetch fails, we cannot safely assume a favorable settlement
                   const errMsg = err instanceof Error ? err.message : String(err);
                   if (errMsg.includes("404") || errMsg.includes("not found")) {
-                    this.logger.debug(
-                      `[PositionTracker] Market ${tokenId} appears resolved (404), using settlement price`,
-                    );
-                    currentPrice = 1.0; // Assume resolved in favor
+                    const reason = `Orderbook not found for tokenId: ${tokenId} (404/not found) - skipping position due to ambiguous resolution`;
+                    skippedPositions.push({ reason, data: apiPos });
+                    this.logger.debug(`[PositionTracker] ${reason}`);
+                    return null;
                   } else {
                     // Other error - skip this position
                     const reason = `Failed to fetch orderbook: ${errMsg}`;
