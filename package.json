@@ -53,7 +53,8 @@
     "auth:validate": "ts-node scripts/validate_minimal_auth.ts",
     "auth:validate-logging": "ts-node scripts/validate_auth_logging.ts",
     "wallet:check": "ts-node scripts/check_wallet_status.ts",
-    "wallet:detect": "ts-node scripts/detect_wallet_type.ts"
+    "wallet:detect": "ts-node scripts/detect_wallet_type.ts",
+    "onchain:status": "ts-node src/cli/onchain-status.command.ts"
   },
   "keywords": [
     "polymarket",
