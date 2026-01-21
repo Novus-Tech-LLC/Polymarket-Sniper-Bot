@@ -286,7 +286,7 @@ export class EndgameSweepStrategy {
       }
 
       // Sort by expected profit (1 - price) descending
-      opportunities.sort((a, b) => 1 - b.price - (1 - a.price));
+      opportunities.sort((a, b) => (1 - b.price) - (1 - a.price));
 
       this.logger.debug(
         `[EndgameSweep] Found ${opportunities.length} opportunities in target price range`,
