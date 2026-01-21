@@ -10,6 +10,15 @@
 import * as clobSigning from "@polymarket/clob-client/dist/signing";
 import { trackHmacSigningInputs } from "./hmac-diagnostic-interceptor";
 
+/**
+ * Type definition for buildPolyHmacSignature function
+ * 
+ * Note: The return type differs between versions:
+ * - v4.22.8 (current): returns `string` synchronously
+ * - v5.x: returns `Promise<string>` asynchronously
+ * 
+ * This wrapper uses `Promise.resolve()` to handle both cases uniformly.
+ */
 type BuildPolyHmacSignatureFn = (
   secret: string,
   timestamp: number,
@@ -76,6 +85,8 @@ export function installHmacSignatureOverride(logger?: {
     }
 
     // Call original (handle both sync and async versions)
+    // v4.22.8 returns string directly, v5.x returns Promise<string>
+    // Using Promise.resolve() normalizes both cases to Promise<string>
     if (!originalBuildPolyHmacSignature) {
       throw new Error("Original buildPolyHmacSignature not found");
     }
