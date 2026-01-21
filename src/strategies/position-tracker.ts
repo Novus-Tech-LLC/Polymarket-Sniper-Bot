@@ -244,18 +244,36 @@ export class PositionTracker {
                 return null;
               }
 
+              // Determine position side early (needed for both redeemable and active positions)
+              const sideValue = apiPos.outcome ?? apiPos.side;
+              const side =
+                sideValue?.toUpperCase() === "YES" ||
+                sideValue?.toUpperCase() === "NO"
+                  ? (sideValue.toUpperCase() as "YES" | "NO")
+                  : "YES"; // Default to YES if unknown
+
               // Skip orderbook fetch for resolved/closed markets (no orderbook available)
               let currentPrice: number;
               const isRedeemable = apiPos.redeemable === true;
 
               if (isRedeemable) {
-                // Market is resolved - we cannot reliably determine the settlement price
-                // without fetching the actual market resolution outcome.
-                // Skipping this position as we cannot determine if it won (1.0) or lost (0.0).
-                const reason = `Position is redeemable (market resolved) - cannot determine settlement price for tokenId: ${tokenId}`;
-                skippedPositions.push({ reason, data: apiPos });
-                this.logger.debug(`[PositionTracker] ${reason}`);
-                return null;
+                // Market is resolved - fetch the actual market outcome to determine settlement price
+                const winningOutcome = await this.fetchMarketOutcome(marketId);
+
+                if (!winningOutcome) {
+                  // Cannot determine outcome - skip this position
+                  const reason = `Position is redeemable (market resolved) - cannot determine settlement price for tokenId: ${tokenId} (market outcome unavailable)`;
+                  skippedPositions.push({ reason, data: apiPos });
+                  this.logger.debug(`[PositionTracker] ${reason}`);
+                  return null;
+                }
+
+                // Calculate settlement price based on whether position won or lost
+                currentPrice = side === winningOutcome ? 1.0 : 0.0;
+
+                this.logger.debug(
+                  `[PositionTracker] Resolved position: tokenId=${tokenId}, side=${side}, winner=${winningOutcome}, settlementPrice=${currentPrice}`,
+                );
               } else {
                 // Active market - fetch current orderbook
                 try {
@@ -292,14 +310,6 @@ export class PositionTracker {
               // Calculate P&L
               const pnlUsd = (currentPrice - entryPrice) * size;
               const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
-
-              // Try new API field first, then fall back to legacy field
-              const sideValue = apiPos.outcome ?? apiPos.side;
-              const side =
-                sideValue?.toUpperCase() === "YES" ||
-                sideValue?.toUpperCase() === "NO"
-                  ? (sideValue.toUpperCase() as "YES" | "NO")
-                  : "YES"; // Default to YES if unknown
 
               return {
                 marketId,
@@ -413,6 +423,103 @@ export class PositionTracker {
     }
 
     return 0;
+  }
+
+  /**
+   * Fetch market resolution/outcome data from Gamma API
+   * Returns the winning outcome side ("YES" or "NO") or null if not resolved
+   */
+  private async fetchMarketOutcome(
+    marketId: string,
+  ): Promise<"YES" | "NO" | null> {
+    try {
+      const { httpGet } = await import("../utils/fetch-data.util");
+      const { POLYMARKET_API } =
+        await import("../constants/polymarket.constants");
+
+      // Fetch market details from Gamma API
+      interface GammaMarketResponse {
+        condition_id?: string;
+        market_slug?: string;
+        outcomes?: string[];
+        outcomePrices?: string[];
+        outcome_prices?: string[];
+        tokens?: Array<{
+          outcome?: string;
+          winner?: boolean;
+          token_id?: string;
+        }>;
+        resolvedOutcome?: string;
+        resolved_outcome?: string;
+        winningOutcome?: string;
+        winning_outcome?: string;
+        closed?: boolean;
+        resolved?: boolean;
+      }
+
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets/${marketId}`;
+
+      this.logger.debug(
+        `[PositionTracker] Fetching market outcome from ${url}`,
+      );
+
+      const market = await httpGet<GammaMarketResponse>(url, {
+        timeout: 5000,
+      });
+
+      if (!market) {
+        this.logger.debug(
+          `[PositionTracker] No market data returned for ${marketId}`,
+        );
+        return null;
+      }
+
+      // Check for explicit winning outcome field
+      const winningOutcome =
+        market.resolvedOutcome ??
+        market.resolved_outcome ??
+        market.winningOutcome ??
+        market.winning_outcome;
+
+      if (winningOutcome) {
+        const normalized = winningOutcome.trim().toUpperCase();
+        if (normalized === "YES" || normalized === "NO") {
+          this.logger.debug(
+            `[PositionTracker] Market ${marketId} resolved with outcome: ${normalized}`,
+          );
+          return normalized as "YES" | "NO";
+        }
+      }
+
+      // Check tokens for winner flag
+      if (market.tokens && Array.isArray(market.tokens)) {
+        for (const token of market.tokens) {
+          if (token.winner === true && token.outcome) {
+            const normalized = token.outcome.trim().toUpperCase();
+            if (normalized === "YES" || normalized === "NO") {
+              this.logger.debug(
+                `[PositionTracker] Market ${marketId} resolved with winning token: ${normalized}`,
+              );
+              return normalized as "YES" | "NO";
+            }
+          }
+        }
+      }
+
+      // If market is closed/resolved but no winner info, cannot determine
+      if (market.closed || market.resolved) {
+        this.logger.debug(
+          `[PositionTracker] Market ${marketId} is closed/resolved but winning outcome not available`,
+        );
+      }
+
+      return null;
+    } catch (err) {
+      this.logger.debug(
+        `[PositionTracker] Failed to fetch market outcome for ${marketId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
   }
 
   /**
