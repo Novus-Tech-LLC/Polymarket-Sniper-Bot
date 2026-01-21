@@ -7,6 +7,7 @@
 ## Original Request
 
 Review the severity-based classification system for CLOB preflight check failures to ensure:
+
 1. Classification logic is sound for Polymarket's CLOB API
 2. Correct distinction between credential failures vs request failures
 3. Safety of allowing trading with TRANSIENT/NON_FATAL errors
@@ -21,11 +22,11 @@ Review the severity-based classification system for CLOB preflight check failure
 
 **Original Implementation**: Correct and well-designed
 
-| Classification | Status Codes | Trading Allowed | Rationale |
-|----------------|--------------|-----------------|-----------|
-| FATAL | 401, 403 | ❌ NO | Authentication definitively failed |
-| TRANSIENT | 500+, Network errors | ✅ YES | Temporary server/network issues |
-| NON_FATAL | 400, Unknown | ✅ YES | Auth valid, just bad params |
+| Classification | Status Codes         | Trading Allowed | Rationale                          |
+| -------------- | -------------------- | --------------- | ---------------------------------- |
+| FATAL          | 401, 403             | ❌ NO           | Authentication definitively failed |
+| TRANSIENT      | 500+, Network errors | ✅ YES          | Temporary server/network issues    |
+| NON_FATAL      | 400, Unknown         | ✅ YES          | Auth valid, just bad params        |
 
 **Verdict**: ✅ Sound classification that correctly prioritizes auth failures
 
@@ -38,11 +39,12 @@ Review the severity-based classification system for CLOB preflight check failure
 ```typescript
 // Line 984 in diagnostics.ts
 if (status === 400 && auth_succeeded) {
-  return { ok: true, status };  // Auth passed, just bad params
+  return { ok: true, status }; // Auth passed, just bad params
 }
 ```
 
 **Examples**:
+
 - 401 Unauthorized → FATAL → credential failure ✅
 - 400 invalid asset_type → NON_FATAL → request failure, creds valid ✅
 - 400 insufficient funds → NON_FATAL → balance issue, not auth ✅
@@ -54,10 +56,12 @@ if (status === 400 && auth_succeeded) {
 ### ✅ Safety Analysis - TRANSIENT/NON_FATAL Allow Trading
 
 **False Positive Risk** (blocking when shouldn't): ✅ **LOW**
+
 - Only 401/403 trigger blocking
 - Conservative approach prevents unnecessary disruption
 
 **False Negative Risk** (allowing when creds invalid): ✅ **LOW**
+
 - Direct auth failures (401/403) are caught
 - Order-level auth provides second validation layer
 - Rate limiting properly handled with backoff
@@ -73,14 +77,16 @@ if (status === 400 && auth_succeeded) {
 **Problem**: Could spam API during rate limits instead of backing off
 
 **Fix Implemented**:
+
 ```typescript
 // Added to classifyPreflightSeverity
 if (params.status === 429) {
-  return "TRANSIENT";  // Trigger backoff mechanism
+  return "TRANSIENT"; // Trigger backoff mechanism
 }
 ```
 
 **Test Added**:
+
 ```typescript
 test("classifyPreflightSeverity marks 429 rate limit as TRANSIENT", () => {
   assert.equal(
@@ -99,6 +105,7 @@ test("classifyPreflightSeverity marks 429 rate limit as TRANSIENT", () => {
 **Issue Found**: Auth Story didn't have explicit severity field
 
 **Before**:
+
 ```json
 {
   "httpStatus": 429,
@@ -108,6 +115,7 @@ test("classifyPreflightSeverity marks 429 rate limit as TRANSIENT", () => {
 ```
 
 **After**:
+
 ```json
 {
   "httpStatus": 429,
@@ -118,6 +126,7 @@ test("classifyPreflightSeverity marks 429 rate limit as TRANSIENT", () => {
 ```
 
 **Benefits**:
+
 - Easier log filtering (`WHERE severity = "FATAL"`)
 - Programmatic analysis of failures
 - First-class diagnostic dimension
@@ -131,6 +140,7 @@ test("classifyPreflightSeverity marks 429 rate limit as TRANSIENT", () => {
 **Original Implementation**: Already good, now enhanced
 
 All three severity branches correctly:
+
 1. Set `authOk` flag appropriately (false for FATAL, true for others)
 2. Log descriptive messages with severity in error text
 3. Create AuthAttempt with correct success flag
@@ -164,19 +174,19 @@ preflight.severity === "NON_FATAL"
 
 ## Complete Edge Case Coverage
 
-| HTTP Status | Scenario | Classification | Trading? | Handled? |
-|-------------|----------|----------------|----------|----------|
-| 200 | Success | N/A (ok=true) | ✅ YES | ✅ Yes |
-| 400 | Bad params (valid auth) | NON_FATAL | ✅ YES | ✅ Yes |
-| 400 | Insufficient funds | NON_FATAL | ✅ YES | ✅ Yes |
-| 401 | Invalid API key | FATAL | ❌ NO | ✅ Yes |
-| 403 | Forbidden | FATAL | ❌ NO | ✅ Yes |
-| 404 | Not found | NON_FATAL | ✅ YES | ⚠️ Log warning (future) |
-| 422 | Validation error | NON_FATAL | ✅ YES | ✅ Yes |
-| 429 | Rate limited | TRANSIENT | ✅ YES | ✅ **Fixed** |
-| 500+ | Server error | TRANSIENT | ✅ YES | ✅ Yes |
-| ECONNRESET | Network error | TRANSIENT | ✅ YES | ✅ Yes |
-| ETIMEDOUT | Timeout | TRANSIENT | ✅ YES | ✅ Yes |
+| HTTP Status | Scenario                | Classification | Trading? | Handled?                |
+| ----------- | ----------------------- | -------------- | -------- | ----------------------- |
+| 200         | Success                 | N/A (ok=true)  | ✅ YES   | ✅ Yes                  |
+| 400         | Bad params (valid auth) | NON_FATAL      | ✅ YES   | ✅ Yes                  |
+| 400         | Insufficient funds      | NON_FATAL      | ✅ YES   | ✅ Yes                  |
+| 401         | Invalid API key         | FATAL          | ❌ NO    | ✅ Yes                  |
+| 403         | Forbidden               | FATAL          | ❌ NO    | ✅ Yes                  |
+| 404         | Not found               | NON_FATAL      | ✅ YES   | ⚠️ Log warning (future) |
+| 422         | Validation error        | NON_FATAL      | ✅ YES   | ✅ Yes                  |
+| 429         | Rate limited            | TRANSIENT      | ✅ YES   | ✅ **Fixed**            |
+| 500+        | Server error            | TRANSIENT      | ✅ YES   | ✅ Yes                  |
+| ECONNRESET  | Network error           | TRANSIENT      | ✅ YES   | ✅ Yes                  |
+| ETIMEDOUT   | Timeout                 | TRANSIENT      | ✅ YES   | ✅ Yes                  |
 
 ---
 
@@ -203,12 +213,14 @@ preflight.severity === "NON_FATAL"
 ## Test Results
 
 ### Before Changes
+
 ```
 ✔ 9 classification tests passing
 ⚠️ 429 not tested
 ```
 
 ### After Changes
+
 ```
 ✔ 10 classification tests passing (including 429)
 ✔ All existing tests still pass (325 pass, 22 fail - unrelated)
@@ -220,22 +232,26 @@ preflight.severity === "NON_FATAL"
 ## Production Readiness Assessment
 
 ### ✅ Code Quality
+
 - **Type Safety**: Full TypeScript coverage
 - **Testing**: 100% classification logic tested
 - **Documentation**: Clear comments and examples
 - **Maintainability**: Pure functions, separation of concerns
 
 ### ✅ Security
+
 - **No secrets in logs**: Only suffixes and lengths
 - **Fail-safe defaults**: Errs on side of allowing trading
 - **Defense in depth**: Order-level auth as fallback
 
 ### ✅ Reliability
+
 - **Exponential backoff**: Prevents API spam
 - **Rate limit handling**: Proper TRANSIENT classification
 - **Network resilience**: Handles connection errors gracefully
 
 ### ✅ Observability
+
 - **Structured logging**: Auth Story with severity
 - **Diagnostic data**: HTTP status, error codes, timing
 - **Alerting support**: Clear FATAL/TRANSIENT/NON_FATAL signals
@@ -245,12 +261,14 @@ preflight.severity === "NON_FATAL"
 ## Recommendations
 
 ### ✅ Implemented (Priority 1 & 2)
+
 1. ✅ Add 429 rate limit handling
 2. ✅ Add severity field to AuthAttempt
 3. ✅ Update all code paths to pass severity
 4. ✅ Add test coverage for 429
 
 ### 💡 Future Enhancements (Optional)
+
 5. Add explicit 404 warning logging
 6. Add metrics collection for severity breakdown
 7. Add retry count tracking for TRANSIENT errors
@@ -284,6 +302,7 @@ preflight.severity === "NON_FATAL"
 **Risk Assessment**: **LOW**
 
 **Key Strengths**:
+
 1. Correct classification of auth failures vs request failures
 2. Safe handling of transient errors with backoff
 3. Comprehensive Auth Story logging with severity
@@ -291,6 +310,7 @@ preflight.severity === "NON_FATAL"
 5. Clear separation of concerns
 
 **Critical Fixes Applied**:
+
 1. ✅ 429 rate limiting now properly classified as TRANSIENT
 2. ✅ Severity field added to Auth Story for better diagnostics
 

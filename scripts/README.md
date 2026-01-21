@@ -40,17 +40,18 @@ ts-node scripts/clob_auth_smoke_test.ts
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PRIVATE_KEY` | Yes | - | Private key of the signer EOA (with or without 0x prefix) |
-| `CLOB_HOST` | No | https://clob.polymarket.com | CLOB API host |
-| `RPC_URL` | No | https://polygon-rpc.com | Polygon RPC endpoint |
-| `CLOB_FUNDER` | Conditional* | - | Funder/proxy address for Safe/Proxy mode |
-| `CLOB_SIGNATURE_TYPE` | No | 0 | Signature type: 0=EOA, 1=Proxy, 2=Safe |
+| Variable              | Required      | Default                     | Description                                               |
+| --------------------- | ------------- | --------------------------- | --------------------------------------------------------- |
+| `PRIVATE_KEY`         | Yes           | -                           | Private key of the signer EOA (with or without 0x prefix) |
+| `CLOB_HOST`           | No            | https://clob.polymarket.com | CLOB API host                                             |
+| `RPC_URL`             | No            | https://polygon-rpc.com     | Polygon RPC endpoint                                      |
+| `CLOB_FUNDER`         | Conditional\* | -                           | Funder/proxy address for Safe/Proxy mode                  |
+| `CLOB_SIGNATURE_TYPE` | No            | 0                           | Signature type: 0=EOA, 1=Proxy, 2=Safe                    |
 
 \* Required when `CLOB_SIGNATURE_TYPE` is 1 or 2
 
 **Alternative Names:**
+
 - `CLOB_FUNDER` or `POLYMARKET_PROXY_ADDRESS`
 - `CLOB_SIGNATURE_TYPE` or `POLYMARKET_SIGNATURE_TYPE`
 
@@ -143,6 +144,7 @@ Summary
 ```
 
 **Fix:**
+
 1. Visit https://polymarket.com
 2. Connect your wallet (use the private key you're testing with)
 3. Make at least one trade (any amount)
@@ -165,6 +167,7 @@ Summary
 ```
 
 **Common causes:**
+
 1. **Query parameters not included in signature** - Use patched clob-client
 2. **Wrong secret decoding** - Secret should be base64, not base64url
 3. **Wrong POLY_ADDRESS** - Should be funder in Safe mode, signer in EOA mode
@@ -180,6 +183,7 @@ Summary
 ```
 
 Set the PRIVATE_KEY environment variable:
+
 ```bash
 export PRIVATE_KEY=0x...
 ```
@@ -191,6 +195,7 @@ export PRIVATE_KEY=0x...
 ```
 
 Add the `0x` prefix:
+
 ```bash
 export PRIVATE_KEY=0x1234567890123456789012345678901234567890123456789012345678901234
 ```
@@ -202,6 +207,7 @@ export PRIVATE_KEY=0x12345678901234567890123456789012345678901234567890123456789
 ```
 
 Set the funder address:
+
 ```bash
 export CLOB_FUNDER=0xb403364076a14e239452f0cb4273bd6814314ce3
 ```
@@ -213,6 +219,7 @@ export CLOB_FUNDER=0xb403364076a14e239452f0cb4273bd6814314ce3
 ```
 
 Your wallet has very low POL (Polygon MATIC). You'll need gas for transactions:
+
 1. Bridge some MATIC to Polygon
 2. Or buy POL on a Polygon DEX
 
@@ -239,6 +246,7 @@ services:
 ```
 
 Then run:
+
 ```bash
 docker-compose run --rm test-auth
 ```
@@ -248,6 +256,7 @@ docker-compose run --rm test-auth
 ## Integration with CI/CD
 
 Use exit codes for automation:
+
 - Exit 0: All tests passed
 - Exit 1: At least one test failed
 

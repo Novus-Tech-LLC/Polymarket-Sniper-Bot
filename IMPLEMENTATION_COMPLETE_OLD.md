@@ -7,38 +7,44 @@ This implementation successfully addresses all requirements in the problem state
 ## Requirements Met
 
 ### ✅ Requirement 1: Separate L1 and L2 Auth Cleanly
+
 **Status**: Already implemented, verified working
 
 **Implementation**:
+
 - `src/utils/l1-auth-headers.util.ts` - L1 auth headers (POLY_ADDRESS, POLY_SIGNATURE with EIP-712, POLY_TIMESTAMP, POLY_NONCE)
 - `src/utils/clob-auth-headers.util.ts` - L2 auth headers (API key/secret/passphrase + HMAC signature)
 - `src/clob/diagnostics.ts` - Explicit logging of which header set is attached
 - Patches prevent query parameter pollution in L1 endpoints
 
 **Evidence**:
+
 ```typescript
 // L1 Authentication (derive/create API keys)
-export async function buildL1Headers(signer, chainId, request, config, logger)
+export async function buildL1Headers(signer, chainId, request, config, logger);
 
 // L2 Authentication (trading requests)
-export async function createL2Headers(signer, creds, options, timestamp)
+export async function createL2Headers(signer, creds, options, timestamp);
 ```
 
 ### ✅ Requirement 2: Correct Identity Model
+
 **Status**: Already implemented, verified working
 
 **Implementation**:
+
 - `src/clob/identity-resolver.ts` - Deterministic wallet mode detection
 - `src/clob/addressing.ts` - Address resolution logic
 - Mode selection based on config, not flip-flopping
 
 **Evidence**:
+
 ```typescript
 export function detectWalletMode(params) {
   if (params.forceWalletMode && params.forceWalletMode !== "auto") {
     return params.forceWalletMode;
   }
-  
+
   if (params.signatureType === SignatureType.POLY_GNOSIS_SAFE) {
     if (!params.funderAddress) {
       logger.warn("signatureType=2 but no funderAddress; defaulting to EOA");
@@ -51,39 +57,47 @@ export function detectWalletMode(params) {
 ```
 
 ### ✅ Requirement 3: Fix "Invalid L1 Request Headers"
+
 **Status**: Already fixed via patches and L1 auth utils
 
 **Implementation**:
+
 - `patches/@polymarket+clob-client+4.22.8.patch` - Prevents query parameter pollution
 - `src/utils/l1-auth-headers.util.ts` - Correct EIP-712 signing
 - `DEBUG_HTTP_HEADERS=true` - Debug logging with redaction
 
 **Evidence**:
+
 ```typescript
 export async function buildL1Headers(signer, chainId, request, config, logger) {
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = 0;
   const domain = { name: "ClobAuthDomain", version: "1", chainId };
   // ... correct EIP-712 signing
-  
+
   if (config?.debugHttpHeaders && logger) {
     logger.debug("[L1Auth] HTTP Request Debug:");
     logger.debug(`  POLY_ADDRESS: ${headers.POLY_ADDRESS}`);
-    logger.debug(`  POLY_SIGNATURE: ${redactHeaderValue(headers.POLY_SIGNATURE)}`);
+    logger.debug(
+      `  POLY_SIGNATURE: ${redactHeaderValue(headers.POLY_SIGNATURE)}`,
+    );
     // ... redacted logging
   }
 }
 ```
 
 ### ✅ Requirement 4: Fix "Unauthorized/Invalid api key"
+
 **Status**: Already implemented with comprehensive diagnostics
 
 **Implementation**:
+
 - `src/clob/credential-derivation-v2.ts` - Systematic fallback with verification
 - `src/clob/auth-fallback.ts` - Error detection and classification
 - `src/clob/diagnostics.ts` - Comprehensive failure summary
 
 **Evidence**:
+
 ```typescript
 // Immediate verification after derivation
 const isValid = await verifyCredentials({
@@ -113,14 +127,17 @@ export function generateFailureSummary(results, logger) {
 ```
 
 ### ✅ Requirement 5: Provide "Known-Good" Manual Test Harness
+
 **Status**: Newly implemented
 
 **Implementation**:
+
 - `test-auth-harness.js` - 468-line CLI tool
 - Added to package.json as `npm run test-auth`
 - Container-friendly, standalone operation
 
 **Features**:
+
 - Takes PRIVATE_KEY + optional FUNDER
 - Runs L1 derive/create with staging
 - Prints "L1 OK / L2 OK" with exact stage of failure
@@ -128,6 +145,7 @@ export function generateFailureSummary(results, logger) {
 - Optional on-chain history verification
 
 **Evidence**:
+
 ```bash
 $ npm run test-auth -- --verbose
 ╔═══════════════════════════════════════════════════════════════╗
@@ -156,15 +174,18 @@ Stage Results:
 ```
 
 ### ✅ Requirement 6: Make the Bot Fail Fast
+
 **Status**: Already implemented
 
 **Implementation**:
+
 - `src/polymarket/preflight.ts` - Fail-fast on auth failure
 - `detectOnly` mode prevents live trading when auth fails
 - Exponential backoff in `src/utils/gas.ts`
 - Credential caching in `src/utils/credential-storage.util.ts`
 
 **Evidence**:
+
 ```typescript
 // Fail-fast behavior
 if (!preflight.ok && (preflight.status === 401 || preflight.status === 403)) {
@@ -178,17 +199,17 @@ export const retryTxWithBackoff = async (operation, params) => {
   const maxAttempts = params.maxAttempts ?? 3;
   const initialDelayMs = params.initialDelayMs ?? 2000;
   const maxDelayMs = params.maxDelayMs ?? 30000;
-  
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await operation();
     } catch (error) {
       const delayMs = Math.min(
         initialDelayMs * Math.pow(2, attempt - 1),
-        maxDelayMs
+        maxDelayMs,
       );
       logger.warn(`Retrying in ${delayMs}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 };
@@ -197,7 +218,7 @@ export const retryTxWithBackoff = async (operation, params) => {
 export const loadCachedCreds = (params) => {
   const filePath = resolveCredsPath(); // /data/clob-creds.json
   const stored = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-  
+
   // Validate stored credentials match current config
   if (stored.signerAddress !== params.signerAddress) {
     return null;
@@ -207,15 +228,18 @@ export const loadCachedCreds = (params) => {
 ```
 
 ### ✅ Requirement 7: Deliverables
+
 **Status**: All delivered
 
 #### Code Changes ✅
+
 - Fixed 5 failing tests
 - Created test-auth-harness.js
 - Verified all existing authentication infrastructure
 - Addressed code review feedback
 
 #### Documentation ✅
+
 - **ALTERNATING_FAILURES.md** - Comprehensive explanation
 - **test-auth-harness.js** - Inline help and examples
 - **README.md** - Updated with test harness usage
@@ -223,6 +247,7 @@ export const loadCachedCreds = (params) => {
 - **.env.example** - Example configs for both modes (already present)
 
 #### Testing ✅
+
 - All 164 tests passing
 - CodeQL security scan: 0 vulnerabilities
 - Manual testing with test harness successful
@@ -230,6 +255,7 @@ export const loadCachedCreds = (params) => {
 ## Key Technical Achievements
 
 ### 1. Deterministic Flow
+
 ```typescript
 // BEFORE: Random flip-flopping
 // Attempt 1: Try EOA -> fail
@@ -249,20 +275,28 @@ const FALLBACK_LADDER = [
 ```
 
 ### 2. Smart Error Handling
+
 ```typescript
 // Detect "Invalid L1 Request headers" -> immediately swap L1 address
 if (isInvalidL1HeadersError(error)) {
-  const swappedAttempt = { ...attempt, useEffectiveForL1: !attempt.useEffectiveForL1 };
+  const swappedAttempt = {
+    ...attempt,
+    useEffectiveForL1: !attempt.useEffectiveForL1,
+  };
   return attemptDerive(swappedAttempt);
 }
 
 // Detect "Could not create api key" -> require user to trade
 if (isCouldNotCreateKeyError(error)) {
-  return { success: false, error: "Wallet needs to trade on polymarket.com first" };
+  return {
+    success: false,
+    error: "Wallet needs to trade on polymarket.com first",
+  };
 }
 ```
 
 ### 3. Verification Before Caching
+
 ```typescript
 // Derive/create credentials
 const creds = await client.deriveApiKey();
@@ -279,12 +313,14 @@ if (isValid) {
 ## Why Alternating Failures Occurred
 
 ### The Problem
+
 1. **Complex Identity Model**: EOA uses single address, Safe/Proxy split between signer and effective
 2. **L1 Auth Ambiguity**: Both signer and effective can be valid for L1 auth depending on setup
 3. **Non-Deterministic**: Old system randomly tried different combinations
 4. **No Verification**: Cached credentials without testing them first
 
 ### The Solution
+
 1. **Deterministic Mode Selection**: Choose wallet mode ONCE based on config
 2. **Systematic Fallback**: Try all combinations in order, not randomly
 3. **Smart Retries**: Immediately swap L1 address on "Invalid L1 Request headers"
@@ -294,6 +330,7 @@ if (isValid) {
 ## Configuration Examples
 
 ### EOA Wallet
+
 ```bash
 PRIVATE_KEY=your_key
 CLOB_DERIVE_CREDS=true
@@ -301,6 +338,7 @@ CLOB_DERIVE_CREDS=true
 ```
 
 ### Gnosis Safe Wallet
+
 ```bash
 PRIVATE_KEY=your_signer_eoa_key
 POLYMARKET_SIGNATURE_TYPE=2
@@ -310,6 +348,7 @@ CLOB_DERIVE_CREDS=true
 ```
 
 ### Advanced Override (Rare)
+
 ```bash
 CLOB_FORCE_WALLET_MODE=safe     # Force Safe mode
 CLOB_FORCE_L1_AUTH=signer       # Force signer for L1 auth

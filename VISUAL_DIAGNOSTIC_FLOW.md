@@ -81,13 +81,13 @@ The diagnostic shows the **exact discrepancy**, enabling a surgical fix.
 
 ## 📊 Probability Assessment
 
-| Root Cause                      | Probability | How Diagnostic Detects It          |
-|---------------------------------|-------------|-------------------------------------|
-| Query param order mismatch      | 70%         | `pathMatch: false`                  |
-| Wrong signature type            | 20%         | User must check wallet type         |
-| Secret encoding issue           | 5%          | Already normalized by clob-client   |
-| Timestamp drift                 | 3%          | `timestamp` field in diagnostic     |
-| Body encoding issue             | 2%          | `bodyHash` comparison               |
+| Root Cause                 | Probability | How Diagnostic Detects It         |
+| -------------------------- | ----------- | --------------------------------- |
+| Query param order mismatch | 70%         | `pathMatch: false`                |
+| Wrong signature type       | 20%         | User must check wallet type       |
+| Secret encoding issue      | 5%          | Already normalized by clob-client |
+| Timestamp drift            | 3%          | `timestamp` field in diagnostic   |
+| Body encoding issue        | 2%          | `bodyHash` comparison             |
 
 ## 🚀 Quick Start
 
@@ -146,11 +146,11 @@ After running diagnostic and applying fix:
 ✅ Only first/last 4-8 chars shown  
 ✅ Opt-in diagnostic mode  
 ✅ Zero overhead when disabled  
-✅ No plaintext credentials in output  
+✅ No plaintext credentials in output
 
 ---
 
 **Implementation Date**: 2025-01-19  
 **Commit**: `d03f486`  
 **Branch**: `copilot/fix-polymarket-clob-issues`  
-**Estimated Time to Resolution**: 30-60 minutes  
+**Estimated Time to Resolution**: 30-60 minutes

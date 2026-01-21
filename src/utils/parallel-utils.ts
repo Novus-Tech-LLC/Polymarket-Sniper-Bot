@@ -34,9 +34,11 @@ export async function parallelBatch<T, R>(
     concurrency?: number;
     logger?: Logger;
     label?: string;
+    /** If true, suppress the completion log (caller will log their own summary) */
+    silent?: boolean;
   } = {},
 ): Promise<BatchResult<R>> {
-  const { concurrency = 6, logger, label = "batch" } = options;
+  const { concurrency = 6, logger, label = "batch", silent = false } = options;
   const startTime = Date.now();
   // Use sentinel value to distinguish "no result" from "undefined result"
   const results: (R | typeof NO_RESULT)[] = new Array(items.length).fill(
@@ -77,9 +79,11 @@ export async function parallelBatch<T, R>(
   }
 
   const totalTime = Date.now() - startTime;
-  logger?.debug(
-    `[${label}] Processed ${items.length} items in ${totalTime}ms (${errors.length} errors)`,
-  );
+  if (!silent) {
+    logger?.debug(
+      `[${label}] Processed ${items.length} items in ${totalTime}ms (${errors.length} errors)`,
+    );
+  }
 
   // Filter out sentinel values but keep legitimate undefined results
   const filteredResults = results.filter((r): r is R => r !== NO_RESULT);

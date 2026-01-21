@@ -89,6 +89,7 @@ HTTP Response
 ## Auth Story Flow with Severity
 
 ### Before (Missing Severity)
+
 ```
 Preflight Failure (429)
     │
@@ -99,6 +100,7 @@ Preflight Failure (429)
 ```
 
 ### After (With Severity) ✅
+
 ```
 Preflight Failure (429)
     │
@@ -167,6 +169,7 @@ Max Backoff Reached
 ## Auth Story Output Example
 
 ### FATAL Failure (401)
+
 ```json
 {
   "runId": "run_abc123",
@@ -189,6 +192,7 @@ Max Backoff Reached
 ```
 
 ### TRANSIENT Failure (429) - NEW ✅
+
 ```json
 {
   "runId": "run_xyz789",
@@ -211,6 +215,7 @@ Max Backoff Reached
 ```
 
 ### NON_FATAL Failure (400)
+
 ```json
 {
   "runId": "run_def456",
@@ -259,6 +264,7 @@ Total: 10/10 passing ✅
 ## Summary
 
 ### Changes Made
+
 - ✅ Added 429 → TRANSIENT classification
 - ✅ Added `severity` field to `AuthAttempt`
 - ✅ Updated all code paths to pass severity
@@ -266,17 +272,20 @@ Total: 10/10 passing ✅
 - ✅ Enhanced documentation
 
 ### Impact
+
 - ✅ Better rate limit handling (no API spam)
 - ✅ Richer Auth Story diagnostics
 - ✅ Clearer observability for ops teams
 - ✅ Production-ready implementation
 
 ### Result
+
 **✅ APPROVED FOR PRODUCTION**
 
 ---
 
 **Legend**:
+
 - ✅ = Allows trading
 - ❌ = Blocks trading
 - 🔄 = Triggers exponential backoff

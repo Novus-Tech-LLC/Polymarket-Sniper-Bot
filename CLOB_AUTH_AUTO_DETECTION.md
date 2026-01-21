@@ -30,12 +30,14 @@ Users were stuck in DETECT-ONLY mode due to CLOB authentication failures. The is
 Two key functions resolve identities for different purposes:
 
 **`resolveOrderIdentity()`**: Returns order signing configuration
+
 - `signatureTypeForOrders`: Which signature type to use (0=EOA, 1=PROXY, 2=SAFE)
 - `makerAddress`: Who places the order
 - `funderAddress`: Who funds the order
 - `effectiveAddress`: What goes in POLY_ADDRESS header
 
 **`resolveL1AuthIdentity()`**: Returns L1 auth configuration
+
 - `signatureTypeForAuth`: Which signature type for L1 auth
 - `l1AuthAddress`: Which address to use in L1 auth headers (POLY_ADDRESS)
 - `signingAddress`: Which address actually signs (EOA from private key)
@@ -61,6 +63,7 @@ E) sigType=1 (PROXY), l1Auth=effective // Legacy proxy with proxy auth
 Main function: `deriveCredentialsWithFallback()`
 
 **Flow:**
+
 1. Check `/data/clob-creds.json` for cached credentials
 2. If cached credentials exist, verify them via `/balance-allowance`
 3. If cache invalid or missing, try each fallback combination in order
@@ -76,6 +79,7 @@ Main function: `deriveCredentialsWithFallback()`
 #### 4. Enhanced Credential Storage (`src/utils/credential-storage.util.ts`)
 
 Cached credentials now include:
+
 - `usedEffectiveForL1`: Whether effective address was used for L1 auth
 - `signatureType`: Which signature type worked
 - `funderAddress`: Funder/proxy address if applicable
@@ -196,6 +200,7 @@ If all attempts fail:
 ### Mock HTTP Scenarios
 
 The tests verify behavior for:
+
 - 401 "Invalid L1 Request headers" → immediate retry with swapped address
 - 400 "Could not create api key" → continue to next fallback
 - Successful verification → cache and stop
@@ -238,6 +243,7 @@ POLYMARKET_PROXY_ADDRESS=0x...
 ## Files Changed
 
 ### New Files
+
 - `src/clob/identity-resolver.ts` - Identity resolution functions
 - `src/clob/auth-fallback.ts` - Fallback ladder and helpers
 - `src/clob/credential-derivation-v2.ts` - New derivation with fallback
@@ -246,6 +252,7 @@ POLYMARKET_PROXY_ADDRESS=0x...
 - `tests/arbitrage/credential-derivation-fallback.test.ts` - Derivation tests
 
 ### Modified Files
+
 - `src/infrastructure/clob-client.factory.ts` - Uses new derivation system
 - `src/utils/credential-storage.util.ts` - Enhanced with fallback metadata
 - `.env.example` - Added new optional overrides with documentation
@@ -272,6 +279,7 @@ POLYMARKET_PROXY_ADDRESS=0x...
 ## Future Enhancements
 
 Possible future improvements:
+
 1. Add telemetry to track which fallback combinations succeed most often
 2. Support for additional wallet types (e.g., hardware wallets)
 3. GUI for credential management

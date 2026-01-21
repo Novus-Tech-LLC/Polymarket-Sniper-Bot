@@ -157,11 +157,15 @@ export class StrategyOrchestrator {
     try {
       // Priority 1: Risk-Free Arb (handled by existing arbitrage engine)
       // This runs continuously in its own loop
-      if (this.arbEnabled) {
-        this.logger.debug("[Orchestrator] ARB engine is active (Priority 1)");
-      }
+      this.logger.debug(
+        `[Orchestrator] ARB engine is ${this.arbEnabled ? "active" : "disabled"} (Priority 1)`,
+      );
 
       // Priority 2: Endgame Sweep (buy 98-99¢)
+      const endgameEnabled = this.endgameSweepStrategy.getStats().enabled;
+      this.logger.debug(
+        `[Orchestrator] Endgame Sweep is ${endgameEnabled ? "active" : "disabled"} (Priority 2)`,
+      );
       const endgameCount = await this.endgameSweepStrategy.execute();
       if (endgameCount > 0) {
         this.logger.info(
@@ -170,6 +174,10 @@ export class StrategyOrchestrator {
       }
 
       // Priority 3: Auto-Sell at 99¢ (free up capital)
+      const autoSellEnabled = this.autoSellStrategy.getStats().enabled;
+      this.logger.debug(
+        `[Orchestrator] Auto-Sell is ${autoSellEnabled ? "active" : "disabled"} (Priority 3)`,
+      );
       const autoSellCount = await this.autoSellStrategy.execute();
       if (autoSellCount > 0) {
         this.logger.info(
@@ -178,6 +186,10 @@ export class StrategyOrchestrator {
       }
 
       // Priority 4: Quick Flip (sell at +5% gain)
+      const quickFlipEnabled = this.quickFlipStrategy.getStats().enabled;
+      this.logger.debug(
+        `[Orchestrator] Quick Flip is ${quickFlipEnabled ? "active" : "disabled"} (Priority 4)`,
+      );
       const quickFlipCount = await this.quickFlipStrategy.execute();
       if (quickFlipCount > 0) {
         this.logger.info(
@@ -187,11 +199,9 @@ export class StrategyOrchestrator {
 
       // Priority 5: Whale Copy (handled by existing monitor service)
       // This runs continuously in its own loop
-      if (this.monitorEnabled) {
-        this.logger.debug(
-          "[Orchestrator] Monitor service is active (Priority 5)",
-        );
-      }
+      this.logger.debug(
+        `[Orchestrator] Monitor service is ${this.monitorEnabled ? "active" : "disabled"} (Priority 5)`,
+      );
 
       this.logger.debug("[Orchestrator] Strategy execution complete");
     } catch (err) {

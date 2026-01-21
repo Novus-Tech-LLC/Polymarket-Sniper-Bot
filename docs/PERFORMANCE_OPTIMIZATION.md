@@ -5,6 +5,7 @@ This document describes the performance optimizations implemented in the Polymar
 ## Summary of Improvements
 
 ### 1. Parallel Address Checking (Mempool Monitor)
+
 **File:** `src/services/mempool-monitor.service.ts`
 
 **Problem:** The mempool monitor was checking target addresses sequentially, causing delays when monitoring multiple addresses.
@@ -14,24 +15,29 @@ This document describes the performance optimizations implemented in the Polymar
 **Impact:** Monitoring time for N addresses reduced from `N * request_time` to approximately `ceil(N/4) * request_time`.
 
 ### 2. Parallel Balance Checks (Trade Executor)
+
 **File:** `src/services/trade-executor.service.ts`
 
 **Problem:** USDC and POL balance checks were performed sequentially, adding unnecessary latency to trade execution.
 
-**Solution:** 
+**Solution:**
+
 - Implemented `parallelFetch` to fetch both balances simultaneously
 - Added a TTL cache (5 seconds) to avoid redundant RPC calls within the same trade cycle
 
 **Impact:** Balance check time reduced by ~50% (from 2 sequential RPC calls to 1 parallel call).
 
 ### 3. Market Data Caching (Arbitrage Provider)
+
 **File:** `src/arbitrage/provider/polymarket.provider.ts`
 
-**Problem:** 
+**Problem:**
+
 - Orderbooks were fetched repeatedly during the same scan cycle
 - Active markets list was fetched on every scan even though it doesn't change frequently
 
 **Solution:**
+
 - Added 2-second TTL cache for orderbook data to avoid redundant API calls within the same scan
 - Added 30-second TTL cache for active markets list
 
@@ -40,6 +46,7 @@ This document describes the performance optimizations implemented in the Polymar
 ## New Utilities
 
 ### TTLCache
+
 A generic time-to-live cache implementation for expensive operations.
 
 ```typescript
@@ -58,22 +65,22 @@ const result = await cache.getOrFetch("key", async () => {
 ```
 
 ### parallelBatch
+
 Execute promises in parallel with a concurrency limit, collecting results and errors.
 
 ```typescript
 import { parallelBatch } from "../utils/parallel-utils";
 
-const result = await parallelBatch(
-  items,
-  async (item) => processItem(item),
-  { concurrency: 4 }
-);
+const result = await parallelBatch(items, async (item) => processItem(item), {
+  concurrency: 4,
+});
 // result.results: successful results
 // result.errors: collected errors
 // result.totalTime: total execution time
 ```
 
 ### parallelFetch
+
 Execute multiple independent promises in parallel, returning null for failures.
 
 ```typescript
@@ -87,6 +94,7 @@ const balances = await parallelFetch({
 ```
 
 ### RequestCoalescer
+
 Coalesce concurrent calls for the same key. All concurrent callers share the result of a single execution.
 No artificial delay is added - deduplication only occurs for truly concurrent calls.
 
@@ -104,18 +112,18 @@ const result = await coalescer.execute("key", async () => expensiveOp());
 
 ### Cache TTLs
 
-| Cache | Default TTL | Environment Variable |
-|-------|-------------|---------------------|
-| Orderbook | 2s | Not configurable |
-| Active Markets | 30s | Not configurable |
-| Balance Check | 5s | Not configurable |
+| Cache          | Default TTL | Environment Variable |
+| -------------- | ----------- | -------------------- |
+| Orderbook      | 2s          | Not configurable     |
+| Active Markets | 30s         | Not configurable     |
+| Balance Check  | 5s          | Not configurable     |
 
 ### Concurrency Limits
 
-| Operation | Default Concurrency | Notes |
-|-----------|-------------------|-------|
-| Address Monitoring | 4 | Parallel checks per polling cycle |
-| Orderbook Fetching | 6 | Per scan cycle (existing limiter) |
+| Operation          | Default Concurrency | Notes                             |
+| ------------------ | ------------------- | --------------------------------- |
+| Address Monitoring | 4                   | Parallel checks per polling cycle |
+| Orderbook Fetching | 6                   | Per scan cycle (existing limiter) |
 
 ## Best Practices
 

@@ -31,6 +31,7 @@ Trade directly on the Polygon blockchain without CLOB API dependencies. The comp
 ### Current Status
 
 **✅ Complete Infrastructure**:
+
 - Configuration system with TRADE_MODE switching
 - Balance and allowance verification
 - Automatic USDC approval
@@ -58,23 +59,23 @@ npm run onchain:status
 To enable live on-chain trading, integrate with one of:
 
 1. **CLOB Order API**: Access authenticated `/orders` endpoint for signed maker orders
-2. **Market Making**: Create and match your own counter-orders on-chain  
+2. **Market Making**: Create and match your own counter-orders on-chain
 3. **Aggregator Pattern**: Build orders from on-chain events
 
 See `src/trading/onchain-executor.ts` for detailed implementation options.
 
 ### Mode Comparison
 
-| Feature | CLOB Mode (default) | On-Chain Mode (experimental) |
-|---------|-------------------|--------------|
-| **Status** | ✅ Fully functional | ⚠️ Infrastructure ready, integration needed |
-| **API Credentials** | Required (or derived) | ❌ Not needed |
-| **Rate Limits** | Yes (36k orders/10min) | ❌ None (only gas) |
-| **Authentication** | Complex (EOA/Proxy/Safe) | ✅ Simple (just wallet) |
-| **Execution** | Via CLOB API | Direct blockchain (pending integration) |
-| **Transparency** | Order IDs | Transaction hashes (when complete) |
-| **Setup Complexity** | Moderate | Minimal (when complete) |
-| **Best For** | All trading (current default) | Future: simple reliable trades |
+| Feature              | CLOB Mode (default)           | On-Chain Mode (experimental)                |
+| -------------------- | ----------------------------- | ------------------------------------------- |
+| **Status**           | ✅ Fully functional           | ⚠️ Infrastructure ready, integration needed |
+| **API Credentials**  | Required (or derived)         | ❌ Not needed                               |
+| **Rate Limits**      | Yes (36k orders/10min)        | ❌ None (only gas)                          |
+| **Authentication**   | Complex (EOA/Proxy/Safe)      | ✅ Simple (just wallet)                     |
+| **Execution**        | Via CLOB API                  | Direct blockchain (pending integration)     |
+| **Transparency**     | Order IDs                     | Transaction hashes (when complete)          |
+| **Setup Complexity** | Moderate                      | Minimal (when complete)                     |
+| **Best For**         | All trading (current default) | Future: simple reliable trades              |
 
 **Note**: On-chain mode currently returns `NOT_IMPLEMENTED` and requires additional integration work to execute actual trades. See `ONCHAIN_TRADING_IMPLEMENTATION.md` for details.
 
@@ -88,6 +89,7 @@ On-chain mode infrastructure uses Polymarket's CTF Exchange smart contracts dire
 - **USDC.e**: `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`
 
 The framework includes:
+
 1. Balance and allowance verification
 2. Automatic USDC approval handling
 3. Price protection and validation
@@ -103,7 +105,7 @@ TRADE_MODE=clob              # Default - uses Polymarket CLOB API
 # TRADE_MODE=onchain         # Experimental - on-chain infrastructure (not yet complete)
 
 # Required for CLOB mode (default)
-PRIVATE_KEY=0x...            # Your wallet private key  
+PRIVATE_KEY=0x...            # Your wallet private key
 RPC_URL=https://polygon-rpc.com
 # API credentials auto-derived from PRIVATE_KEY
 
@@ -115,6 +117,7 @@ POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
 ### When to Use Each Mode
 
 **CLOB Mode (DEFAULT - Recommended):**
+
 - ✅ Fully functional trading
 - Works with all order types
 - Automatic credential derivation from PRIVATE_KEY
@@ -122,19 +125,19 @@ POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
 - **Use this for actual trading**
 
 **On-Chain Mode (Experimental):**
+
 - ⚠️ Infrastructure in place but incomplete
 - Currently returns `NOT_IMPLEMENTED`
 - Will offer: Direct blockchain transactions, no API keys, no rate limits
 - **Only for development/testing of on-chain integration**
 - See `ONCHAIN_TRADING_IMPLEMENTATION.md` for completion roadmap
 
-
 ## 🦀 Rust CLOB Bridge (New)
 
 For users experiencing persistent authentication issues with the JavaScript SDK, we now offer integration with the **official Polymarket Rust CLOB SDK** (`rs-clob-client`). This provides:
 
 - **More reliable authentication** - The Rust SDK handles CREATE2 address derivation correctly
-- **Auto-detection of signature type** - Tries all authentication modes automatically  
+- **Auto-detection of signature type** - Tries all authentication modes automatically
 - **Cleaner error messages** - Structured diagnostic output
 - **Official SDK support** - Maintained by the Polymarket team
 
@@ -168,13 +171,13 @@ Recommended Environment Variables:
   POLYMARKET_PROXY_ADDRESS=0x52d7008a5Cb5661dFed5573BB34E69772CDf0346
 ```
 
-## Contact 
+## Contact
 
-| Platform | Link |
-|----------|------|
-| 📱 Telegram | [t.me/novustch](https://t.me/novustch) |
-| 📲 WhatsApp | [wa.me/14105015750](https://wa.me/14105015750) |
-| 💬 Discord | [discordapp.com/users/985432160498491473](https://discordapp.com/users/985432160498491473)
+| Platform    | Link                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| 📱 Telegram | [t.me/novustch](https://t.me/novustch)                                                     |
+| 📲 WhatsApp | [wa.me/14105015750](https://wa.me/14105015750)                                             |
+| 💬 Discord  | [discordapp.com/users/985432160498491473](https://discordapp.com/users/985432160498491473) |
 
 <div align="left">
     <a href="https://t.me/novustch" target="_blank"><img alt="Telegram"
@@ -404,6 +407,7 @@ TARGET_ADDRESSES=0xabc...,0xdef...
 ```
 
 That's it! The bot automatically:
+
 - ✅ Derives CLOB API credentials from your private key (enabled by default)
 - ✅ Uses EOA signature type (0) by default
 - ✅ Uses the official Polygon USDC.e address and decimals
@@ -422,11 +426,13 @@ These credentials are used to place and manage orders on the Polymarket CLOB (Ce
 **Purpose:** Authenticate API requests to place orders, check balances, manage positions
 
 **Environment Variables:**
+
 - `POLYMARKET_API_KEY`
 - `POLYMARKET_API_SECRET`
 - `POLYMARKET_API_PASSPHRASE`
 
 **How to get them:**
+
 - **RECOMMENDED METHOD:** Set `CLOB_DERIVE_CREDS=true` to automatically derive credentials from your private key
 - The bot uses an intelligent **auto-detection and fallback system** to find the correct authentication method
 - This is the official Polymarket recommendation per their docs: https://docs.polymarket.com/developers/CLOB/authentication
@@ -434,10 +440,11 @@ These credentials are used to place and manage orders on the Polymarket CLOB (Ce
 
 **Auto-Detection & Fallback System (v2):**
 The bot automatically detects your wallet type and tries multiple authentication combinations:
+
 1. Auto-detects wallet mode: EOA (standard wallet) vs Safe (Gnosis Safe) vs Proxy (legacy)
 2. Tries hard-coded fallback ladder in order until one works:
    - A) EOA + signer auth
-   - B) Safe + signer auth  
+   - B) Safe + signer auth
    - C) Safe + effective auth
    - D) Proxy + signer auth
    - E) Proxy + effective auth
@@ -448,6 +455,7 @@ The bot automatically detects your wallet type and tries multiple authentication
 
 **Minimal Optional Overrides:**
 Only needed in rare cases - auto-detection is recommended:
+
 - `CLOB_FORCE_WALLET_MODE=auto|eoa|safe|proxy` - Force specific wallet mode (default: auto)
 - `CLOB_FORCE_L1_AUTH=auto|signer|effective` - Force specific L1 auth address (default: auto)
 
@@ -458,23 +466,27 @@ Only needed in rare cases - auto-detection is recommended:
 #### 2. Builder API Credentials (Optional - For Order Attribution & Gasless Transactions)
 
 These credentials are for the Polymarket Builder program and are **ONLY** needed if you're building an app that routes orders for OTHER users and want:
+
 - Order attribution on the Builder Leaderboard
 - Gasless approval transactions via the relayer
 
 **Purpose:** Track your builder volume, compete for grants, enable gasless approvals
 
 **Environment Variables:**
+
 - `POLY_BUILDER_API_KEY`
 - `POLY_BUILDER_API_SECRET`
 - `POLY_BUILDER_API_PASSPHRASE`
 
 **When to use:**
+
 - Building an application for other users (not for personal trading)
 - Want gasless approval transactions via the relayer (optional optimization)
 - Want to compete on the Builder Leaderboard
 - Can be obtained from: https://docs.polymarket.com/developers/builders/builder-profile
 
 **When NOT needed:**
+
 - Personal auto-trading (like this bot for your own wallet)
 - Basic trading functionality
 
@@ -483,12 +495,14 @@ These credentials are for the Polymarket Builder program and are **ONLY** needed
 #### Credential Setup Guide
 
 **Option A: Just Private Key (Simplest - like pmxt)**
+
 ```env
 # That's it! CLOB credentials are auto-derived by default
 PRIVATE_KEY=your_64_hex_char_private_key
 ```
 
 **Option B: Explicit CLOB Credentials (Advanced)**
+
 ```env
 # Use explicit CLOB credentials (NOT builder credentials!)
 POLYMARKET_API_KEY=your_clob_api_key
@@ -498,6 +512,7 @@ PRIVATE_KEY=your_64_hex_char_private_key
 ```
 
 **Option C: With Builder Credentials (Full Feature Set)**
+
 ```env
 # Just private key for CLOB credentials (auto-derived)
 PRIVATE_KEY=your_64_hex_char_private_key
@@ -518,12 +533,13 @@ If you see this error, follow these steps:
    - The 401 error from `/balance-allowance` means your **CLOB credentials** are invalid or missing
 
 2. **Try auto-derived credentials (recommended):**
+
    ```env
    # ✅ CORRECT - Auto-derive CLOB credentials with smart fallback:
    CLOB_DERIVE_CREDS=true
    PRIVATE_KEY=your_private_key
    # Remove or comment out POLYMARKET_API_* variables
-   
+
    # Builder keys are optional and separate:
    POLY_BUILDER_API_KEY=<your_builder_api_key>
    POLY_BUILDER_API_SECRET=<your_builder_secret>
@@ -532,31 +548,33 @@ If you see this error, follow these steps:
 
 3. **For Safe/Proxy wallets:**
    The bot auto-detects wallet mode, but you can force it if needed:
+
    ```env
    # For Gnosis Safe (browser wallet):
    POLYMARKET_SIGNATURE_TYPE=2
    POLYMARKET_PROXY_ADDRESS=0x... # Your Safe/proxy address (REQUIRED for Safe/Proxy modes)
    # The bot will automatically try both signer and effective addresses for L1 auth
-   
+
    # Optional overrides (rarely needed):
    # CLOB_FORCE_WALLET_MODE=safe
    # CLOB_FORCE_L1_AUTH=auto
    ```
-   
+
    > **⚠️ IMPORTANT:** Safe/Proxy modes (signature_type=1 or 2) **REQUIRE** `POLYMARKET_PROXY_ADDRESS` to be set.
    > Without it, the bot will skip Safe/Proxy authentication attempts and only try EOA mode.
 
 4. **If you're using Builder keys as CLOB keys:**
+
    ```env
    # ❌ WRONG - This will NOT work:
    POLYMARKET_API_KEY=<your_builder_api_key>
    POLYMARKET_API_SECRET=<your_builder_secret>
    POLYMARKET_API_PASSPHRASE=<your_builder_passphrase>
-   
+
    # ✅ CORRECT - Use derived CLOB credentials:
    CLOB_DERIVE_CREDS=true
    # Remove or comment out POLYMARKET_API_* variables
-   
+
    # Builder keys are optional and separate:
    POLY_BUILDER_API_KEY=<your_builder_api_key>
    POLY_BUILDER_API_SECRET=<your_builder_secret>
@@ -569,26 +587,30 @@ If you see this error, follow these steps:
    - The bot's fallback system will try all combinations and tell you which failed
 
 6. **Check the logs for detailed diagnostics:**
+
    ```
    [Auth Identity] signerAddress=0x... effectiveAddress=0x... makerAddress=0x... funderAddress=0x...
    [AuthFallback] Attempt 1/5: A) EOA + signer auth
    [AuthFallback] ✅ Success: A) EOA + signer auth
    ```
+
    - Look for the "Auth Identity" line showing all addresses
    - Check which fallback attempts were tried
    - The bot will generate a comprehensive failure summary if all attempts fail
 
 7. **Use the authentication test harness:**
+
    ```bash
    # Basic test
    npm run test-auth
-   
+
    # Test with specific wallet type
    npm run test-auth -- --signature-type 2 --funder 0xYourSafeAddress
-   
+
    # Test with verbose logging and trade history check
    npm run test-auth -- --verbose --check-history
    ```
+
    The test harness will:
    - Test L1 authentication (derive/create API keys)
    - Test L2 authentication (balance-allowance verification)
@@ -601,6 +623,7 @@ If you see this error, follow these steps:
    ```
    [Preflight][Summary] ... auth_ok=false ready_to_trade=false
    ```
+
    - `auth_ok=false` means CLOB authentication failed
    - `relayer_enabled=false` means Builder credentials are missing (this is OK for basic trading)
    - **See [Authentication Troubleshooting Guide](docs/AUTH_TROUBLESHOOTING.md) for detailed diagnostics and solutions**
@@ -614,6 +637,7 @@ When experiencing persistent 401 Unauthorized errors or identity contamination i
 The probe tool performs a minimal, controlled authentication test with detailed diagnostics:
 
 **Basic Usage:**
+
 ```bash
 # Run the authentication probe
 npm run clob:probe
@@ -623,6 +647,7 @@ PRIVATE_KEY=0x... DEBUG_AUTH_PROBE=true npm run clob:probe
 ```
 
 **What it does:**
+
 1. Derives CLOB credentials from `PRIVATE_KEY`
 2. Forces EOA identity (signatureType=0, no Safe/proxy contamination)
 3. Makes a single GET `/balance-allowance` call
@@ -635,6 +660,7 @@ PRIVATE_KEY=0x... DEBUG_AUTH_PROBE=true npm run clob:probe
 5. Exits with code 0 (success) or 1 (failure)
 
 **Environment Variables:**
+
 - `PRIVATE_KEY` (required) - Your wallet private key
 - `CLOB_HOST` (optional) - CLOB API host (default: https://clob.polymarket.com)
 - `CHAIN_ID` (optional) - Chain ID (default: 137 for Polygon)
@@ -645,6 +671,7 @@ PRIVATE_KEY=0x... DEBUG_AUTH_PROBE=true npm run clob:probe
 **Identity Matrix Testing:**
 
 Test multiple identity configurations in one run:
+
 ```bash
 # Run identity matrix test
 npm run clob:matrix
@@ -654,6 +681,7 @@ SAFE_ADDRESS=0x... PROXY_ADDRESS=0x... npm run clob:matrix
 ```
 
 The matrix mode tests:
+
 1. **EOA mode**: sigType=0, wallet=signer, maker=signer, funder=null
 2. **Safe mode** (if `SAFE_ADDRESS` provided): sigType=2, wallet=signer, maker=safe, funder=safe
 3. **Proxy mode** (if `PROXY_ADDRESS` provided): sigType=1, wallet=signer, maker=proxy, funder=proxy
@@ -661,6 +689,7 @@ The matrix mode tests:
 **Interpreting Results:**
 
 **Success (200 OK):**
+
 ```
 ✅ AUTH_PROBE_OK
   Status: 200
@@ -668,11 +697,13 @@ The matrix mode tests:
 
 [Interpretation] Authentication successful - credentials and identity are correct
 ```
+
 - Your configuration is correct
 - The bot should be able to authenticate successfully
 - Check other potential issues (funds, allowances, etc.)
 
 **Failure (401 Unauthorized):**
+
 ```
 ❌ AUTH_PROBE_FAIL
   Status: 401
@@ -687,12 +718,14 @@ The matrix mode tests:
 ```
 
 **Common Issues Detected:**
+
 - **funderAddress not null**: Indicates Safe/proxy contamination in EOA mode
 - **Query string not in signed path**: Missing parameters in HMAC signature
 - **Secret encoding mismatch**: Using base64 instead of base64url (or vice versa)
 - **Timestamp skew**: System clock differs significantly from server time
 
 **Debug Bundle Example:**
+
 ```
 [Identity - EOA Hard Lock]
   signerAddress:  0x1234...5678
@@ -820,6 +853,7 @@ The preflight process now outputs a comprehensive summary at the end:
 ```
 
 Where:
+
 - `signer`: Your EOA address derived from PRIVATE_KEY
 - `effective_trading_address`: The address that will be used for trading (EOA or Safe proxy)
 - `relayer_enabled`: Whether relayer/builder credentials are configured
@@ -834,12 +868,14 @@ The bot checks multiple conditions at startup. When `ready_to_trade=false`, the 
 **Common Blockers (in priority order):**
 
 1. **`PRIMARY_BLOCKER=AUTH_FAILED`** ❌
+
    ```
    [Preflight] ❌ READY_TO_TRADE=false PRIMARY_BLOCKER=AUTH_FAILED
    [Preflight] ⚠️  PRIMARY STARTUP BLOCKER: Authentication failed
    [Preflight] ⚠️  Note: Approvals may show as OK, but trading is blocked by auth failure
    [Preflight] ⚠️  Run 'npm run auth:diag' for detailed authentication diagnostics
    ```
+
    - **What it means:** CLOB API credentials are invalid, missing, or failed verification
    - **Why approvals show OK:** Approvals check your on-chain token permissions, which are independent of CLOB auth
    - **Next steps:**
@@ -850,9 +886,11 @@ The bot checks multiple conditions at startup. When `ready_to_trade=false`, the 
      - Review [Authentication Troubleshooting Guide](#troubleshooting-401-unauthorizedinvalid-api-key-errors)
 
 2. **`PRIMARY_BLOCKER=APPROVALS_FAILED`** ❌
+
    ```
    [Preflight] ❌ READY_TO_TRADE=false PRIMARY_BLOCKER=APPROVALS_FAILED
    ```
+
    - **What it means:** Your wallet lacks required token approvals or insufficient balance
    - **Next steps:**
      - Check USDC balance with `npm run check-allowance`
@@ -860,9 +898,11 @@ The bot checks multiple conditions at startup. When `ready_to_trade=false`, the 
      - Ensure you have sufficient USDC for trading
 
 3. **`PRIMARY_BLOCKER=GEOBLOCKED`** ❌
+
    ```
    [Preflight] ❌ READY_TO_TRADE=false PRIMARY_BLOCKER=GEOBLOCKED
    ```
+
    - **What it means:** Your IP address is in a restricted region per Polymarket's geo-restrictions
    - **Next steps:**
      - Use a VPN or proxy from an allowed region
@@ -872,12 +912,14 @@ The bot checks multiple conditions at startup. When `ready_to_trade=false`, the 
    ```
    [Preflight] ⚪ READY_TO_TRADE=false PRIMARY_BLOCKER=LIVE_TRADING_DISABLED
    ```
+
    - **What it means:** Safety flag is not set (intentional)
    - **Next steps:**
      - Set `ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS` to enable live trading
      - This is a safety measure to prevent accidental real-money trading
 
 **Important:** The bot will show `approvals_ok=true` even when `auth_ok=false` because these are **independent checks**:
+
 - **Auth check** = Can I communicate with CLOB API?
 - **Approvals check** = Do I have on-chain token permissions?
 
@@ -918,7 +960,6 @@ The bot ships with safe diagnostics to help debug persistent `401 Unauthorized/I
 
 **What you’ll see**
 
-
 - `[Keys]` private key format validation (no key exposure)
 - `[Gas]` RPC feeData and selected gas parameters for EIP-1559
 - `[Relayer]` relayer/builder configuration status
@@ -942,6 +983,7 @@ If preflight fails with 401, the logs will classify the likely root cause as one
 When a 401 occurs, the runtime automatically switches to detect-only mode.
 
 **⚠️ Important:** The bot now uses **severity-based classification** for preflight errors:
+
 - **FATAL** (401/403): Blocks trading - credentials are invalid
 - **TRANSIENT** (network/server errors): Allows trading - temporary issues
 - **NON_FATAL** (bad params, unknown): Allows trading - credentials are valid
@@ -1016,7 +1058,7 @@ This is why `COLLATERAL_TOKEN_ADDRESS` and `COLLATERAL_TOKEN_DECIMALS` exist. Yo
 Polymarket runs on Polygon and currently uses **USDC‑style tokens**. Two common variants exist:
 
 - **USDC (native, Circle-issued)**
-- **USDC.e (bridged)** 
+- **USDC.e (bridged)**
 
 You must provide the address of the one **actually used for settlement** in your environment.
 
@@ -1025,7 +1067,7 @@ You must provide the address of the one **actually used for settlement** in your
 Use **one of these** (pick the one you are comfortable with):
 
 1. **Polymarket / official docs**  
-   Look for “collateral token” or “USDC contract” in official Polymarket docs or announcements.  
+   Look for “collateral token” or “USDC contract” in official Polymarket docs or announcements.
    - This is the most authoritative source if they publish it.
 
 2. **PolygonScan (most direct)**
@@ -1101,6 +1143,7 @@ services:
 #### CLOB Allowance Bug Workaround
 
 **Symptom**: You see warnings like:
+
 ```
 [WARN] [CLOB] Order skipped (INSUFFICIENT_BALANCE_OR_ALLOWANCE): need=0.87 have=93002583.00 allowance=0.00
 ```
@@ -1110,17 +1153,20 @@ services:
 **Solution**: The bot now includes a workaround that trusts on-chain approval verification from preflight checks instead of the CLOB API response. This is **enabled by default**.
 
 To verify it's working, look for logs like:
+
 ```
 [Preflight][Approvals][USDC] ✅ spender=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E allowance=unlimited
 [CLOB][TrustMode] Bypassing CLOB allowance check - trusting on-chain approvals verified in preflight
 ```
 
 To disable this workaround (not recommended):
+
 ```bash
 TRUST_ONCHAIN_APPROVALS=false
 ```
 
 **Related Issues**:
+
 - [Polymarket clob-client #128](https://github.com/Polymarket/clob-client/issues/128) - "getBalanceAllowance returns 0"
 - [Polymarket py-clob-client #102](https://github.com/Polymarket/py-clob-client/issues/102) - "Allowance function says balance 0"
 - [Polymarket py-clob-client #109](https://github.com/Polymarket/py-clob-client/issues/109) - "Not Enough Balance / Allowance Error"
@@ -1150,38 +1196,38 @@ docker run --env-file .env polymarket-sniper-bot
 
 ### Required Environment Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `RPC_URL` | Polygon RPC endpoint (must support pending tx monitoring) | `https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID` |
-| `PRIVATE_KEY` | Your wallet private key | `your_private_key` |
-| `COLLATERAL_TOKEN_ADDRESS` | USDC / USDC.e contract | `0x2791...` |
-| `MODE` | `mempool`, `arb`, or `both` | `both` |
-| `ARB_PRESET` | Arbitrage preset name | `safe_small` |
-| `MONITOR_PRESET` | Monitor preset name | `balanced` |
-| `MONITOR_REQUIRE_CONFIRMED` | Require confirmed trades before acting | `true` |
-| `MIN_ORDER_USD` | Minimum order size before submission | `10` |
-| `ORDER_SUBMIT_MIN_INTERVAL_MS` | Min ms between submits | `20000` |
-| `ORDER_SUBMIT_MAX_PER_HOUR` | Max submits per hour | `20` |
-| `ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS` | Per-market cooldown seconds | `300` |
-| `CLOUDFLARE_COOLDOWN_SECONDS` | Pause submits after Cloudflare block | `3600` |
-| `TARGET_ADDRESSES` | (Monitor only) Comma-separated addresses to monitor | `0xabc...,0xdef...` |
-| `PUBLIC_KEY` | (Optional) Wallet address override; derived from `PRIVATE_KEY` when omitted | `your_wallet_address` |
-| `ARB_DEBUG_TOP_N` | (Arb only) Log top N pre-filter candidates each scan | `0` |
+| Variable                               | Description                                                                 | Example                                                |
+| -------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `RPC_URL`                              | Polygon RPC endpoint (must support pending tx monitoring)                   | `https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID` |
+| `PRIVATE_KEY`                          | Your wallet private key                                                     | `your_private_key`                                     |
+| `COLLATERAL_TOKEN_ADDRESS`             | USDC / USDC.e contract                                                      | `0x2791...`                                            |
+| `MODE`                                 | `mempool`, `arb`, or `both`                                                 | `both`                                                 |
+| `ARB_PRESET`                           | Arbitrage preset name                                                       | `safe_small`                                           |
+| `MONITOR_PRESET`                       | Monitor preset name                                                         | `balanced`                                             |
+| `MONITOR_REQUIRE_CONFIRMED`            | Require confirmed trades before acting                                      | `true`                                                 |
+| `MIN_ORDER_USD`                        | Minimum order size before submission                                        | `10`                                                   |
+| `ORDER_SUBMIT_MIN_INTERVAL_MS`         | Min ms between submits                                                      | `20000`                                                |
+| `ORDER_SUBMIT_MAX_PER_HOUR`            | Max submits per hour                                                        | `20`                                                   |
+| `ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS` | Per-market cooldown seconds                                                 | `300`                                                  |
+| `CLOUDFLARE_COOLDOWN_SECONDS`          | Pause submits after Cloudflare block                                        | `3600`                                                 |
+| `TARGET_ADDRESSES`                     | (Monitor only) Comma-separated addresses to monitor                         | `0xabc...,0xdef...`                                    |
+| `PUBLIC_KEY`                           | (Optional) Wallet address override; derived from `PRIVATE_KEY` when omitted | `your_wallet_address`                                  |
+| `ARB_DEBUG_TOP_N`                      | (Arb only) Log top N pre-filter candidates each scan                        | `0`                                                    |
 
 ### Relayer + approvals (recommended)
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `RELAYER_URL` | Polymarket relayer endpoint | `https://relayer-v2.polymarket.com/` |
-| `SIGNER_URL` | Remote signer endpoint in Docker network | `http://signer:8080/sign` |
-| `SIGNER_AUTH_TOKEN` | (Optional) Bearer token shared with signer | `my-token` |
-| `POLY_CTF_ADDRESS` | CTF ERC1155 contract | `0x4d97...` |
-| `POLY_CTF_EXCHANGE_ADDRESS` | CTF exchange spender | `0x4bFb...` |
-| `POLY_NEG_RISK_CTF_EXCHANGE_ADDRESS` | Neg-risk CTF exchange spender | `0xC5d...` |
-| `POLY_NEG_RISK_ADAPTER_ADDRESS` | Neg-risk adapter | `0xd91E...` |
-| `APPROVAL_MIN_USDC` | Minimum USDC approval threshold | `1000` |
-| `APPROVAL_MAX_UINT` | Approve `maxUint256` | `true` |
-| `APPROVALS_AUTO` | Auto-approve on startup | `true` |
+| Variable                             | Description                                | Example                              |
+| ------------------------------------ | ------------------------------------------ | ------------------------------------ |
+| `RELAYER_URL`                        | Polymarket relayer endpoint                | `https://relayer-v2.polymarket.com/` |
+| `SIGNER_URL`                         | Remote signer endpoint in Docker network   | `http://signer:8080/sign`            |
+| `SIGNER_AUTH_TOKEN`                  | (Optional) Bearer token shared with signer | `my-token`                           |
+| `POLY_CTF_ADDRESS`                   | CTF ERC1155 contract                       | `0x4d97...`                          |
+| `POLY_CTF_EXCHANGE_ADDRESS`          | CTF exchange spender                       | `0x4bFb...`                          |
+| `POLY_NEG_RISK_CTF_EXCHANGE_ADDRESS` | Neg-risk CTF exchange spender              | `0xC5d...`                           |
+| `POLY_NEG_RISK_ADAPTER_ADDRESS`      | Neg-risk adapter                           | `0xd91E...`                          |
+| `APPROVAL_MIN_USDC`                  | Minimum USDC approval threshold            | `1000`                               |
+| `APPROVAL_MAX_UINT`                  | Approve `maxUint256`                       | `true`                               |
+| `APPROVALS_AUTO`                     | Auto-approve on startup                    | `true`                               |
 
 ### WireGuard (optional)
 
@@ -1255,24 +1301,24 @@ Defaults: `ARB_PRESET=safe_small` and `MONITOR_PRESET=balanced`.
 
 **Arbitrage presets**
 
-| Name | What it does | Frequency | Risk |
-|------|---------------|-----------|------|
-| `off` | Disables arbitrage loop | N/A | None |
-| `safe_small` | Small sizing + conservative caps | 2s scan | Low |
-| `classic` | Balanced sizing and caps | 2s scan | Medium |
-| `micro` | Faster scans, lower edge threshold | 1.5s scan | Medium |
-| `quality` | Higher edge + liquidity filters | 2.5s scan | Low |
-| `late` | Faster scans, more spread tolerance | 1s scan | Medium |
+| Name         | What it does                        | Frequency | Risk   |
+| ------------ | ----------------------------------- | --------- | ------ |
+| `off`        | Disables arbitrage loop             | N/A       | None   |
+| `safe_small` | Small sizing + conservative caps    | 2s scan   | Low    |
+| `classic`    | Balanced sizing and caps            | 2s scan   | Medium |
+| `micro`      | Faster scans, lower edge threshold  | 1.5s scan | Medium |
+| `quality`    | Higher edge + liquidity filters     | 2.5s scan | Low    |
+| `late`       | Faster scans, more spread tolerance | 1s scan   | Medium |
 
 **Monitor presets**
 
-| Name | What it does | Frequency | Risk |
-|------|---------------|-----------|------|
-| `off` | Disables mempool monitor | N/A | None |
-| `conservative` | Higher minimum trade size | 2s poll | Low |
-| `balanced` | Default hybrid thresholds | 2s poll | Medium |
-| `active` | Lower minimum trade size | 1s poll | Higher |
-| `test` | Very low thresholds for testing | 2s poll | Highest |
+| Name           | What it does                    | Frequency | Risk    |
+| -------------- | ------------------------------- | --------- | ------- |
+| `off`          | Disables mempool monitor        | N/A       | None    |
+| `conservative` | Higher minimum trade size       | 2s poll   | Low     |
+| `balanced`     | Default hybrid thresholds       | 2s poll   | Medium  |
+| `active`       | Lower minimum trade size        | 1s poll   | Higher  |
+| `test`         | Very low thresholds for testing | 2s poll   | Highest |
 
 `MONITOR_REQUIRE_CONFIRMED` is `true` for `conservative`/`balanced` and `false` for `active`/`test`.
 
@@ -1281,6 +1327,7 @@ Defaults: `ARB_PRESET=safe_small` and `MONITOR_PRESET=balanced`.
 Presets are the default. Only a short list of overrides are allowed unless you explicitly enable unsafe overrides.
 
 **Arbitrage safe overrides**
+
 - `ARB_DRY_RUN`
 - `ARB_LIVE_TRADING`
 - `ARB_MAX_WALLET_EXPOSURE_USD`
@@ -1294,6 +1341,7 @@ Presets are the default. Only a short list of overrides are allowed unless you e
 - `ARB_DEBUG_TOP_N`
 
 **Monitor safe overrides**
+
 - `MIN_TRADE_SIZE_USD`
 - `TRADE_MULTIPLIER`
 - `FETCH_INTERVAL`
@@ -1335,21 +1383,21 @@ To identify successful traders to track:
 
 ## 📜 Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Development mode with TypeScript |
-| `npm run build` | Compile TypeScript to JavaScript |
-| `npm start` | Run compiled production build |
-| `npm run lint` | Run ESLint |
-| `npm run lint:fix` | Fix ESLint errors automatically |
-| `npm run format` | Format code with Prettier |
-| `npm run check-allowance` | Check token allowance |
-| `npm run verify-allowance` | Verify token allowance |
-| `npm run set-token-allowance` | Set token allowance |
-| `npm run manual-sell` | Manual sell command |
-| `npm run simulate` | Run trading simulations |
-| `npm run arbitrage` | Run the arbitrage engine |
-| `npm run test` | Run unit/integration tests |
+| Command                       | Description                      |
+| ----------------------------- | -------------------------------- |
+| `npm run dev`                 | Development mode with TypeScript |
+| `npm run build`               | Compile TypeScript to JavaScript |
+| `npm start`                   | Run compiled production build    |
+| `npm run lint`                | Run ESLint                       |
+| `npm run lint:fix`            | Fix ESLint errors automatically  |
+| `npm run format`              | Format code with Prettier        |
+| `npm run check-allowance`     | Check token allowance            |
+| `npm run verify-allowance`    | Verify token allowance           |
+| `npm run set-token-allowance` | Set token allowance              |
+| `npm run manual-sell`         | Manual sell command              |
+| `npm run simulate`            | Run trading simulations          |
+| `npm run arbitrage`           | Run the arbitrage engine         |
+| `npm run test`                | Run unit/integration tests       |
 
 ## 🩺 Troubleshooting Authentication
 
@@ -1360,6 +1408,7 @@ node diagnose-auth.js
 ```
 
 This will:
+
 - ✅ Check your environment variables
 - ✅ Verify wallet connection and balance
 - ✅ Test Polymarket API connectivity
@@ -1370,12 +1419,14 @@ This will:
 ### Common Issues
 
 **"Unauthorized/Invalid api key" Error**
+
 - **Cause**: Query parameter signature mismatch (fixed in latest version)
 - **Solution**: Pull latest changes and run `npm install` to apply the updated patch
 
 **"Could not create api key" Error**
+
 - **Cause**: Wallet has never traded on Polymarket
-- **Solution**: 
+- **Solution**:
   1. Visit https://polymarket.com
   2. Connect your wallet (the one from PRIVATE_KEY)
   3. Make at least ONE small trade (even $1)

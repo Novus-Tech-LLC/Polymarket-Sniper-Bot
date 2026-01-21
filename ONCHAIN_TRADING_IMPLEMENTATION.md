@@ -9,6 +9,7 @@ Successfully implemented a complete on-chain trading mode for the Polymarket Sni
 ### Current State
 
 **✅ Production-Ready Infrastructure**:
+
 - Complete configuration system with TRADE_MODE switching
 - Full contract ABI definitions
 - Balance and allowance verification
@@ -18,7 +19,7 @@ Successfully implemented a complete on-chain trading mode for the Polymarket Sni
 - CLI status command
 - Full documentation
 
-**⚠️ Additional Integration Needed**: 
+**⚠️ Additional Integration Needed**:
 The final step of actual order execution requires access to signed maker orders, which are not available in the public orderbook endpoint. The framework is complete and ready - only the order matching integration remains.
 
 **Note**: This is documented clearly in the code and README to set proper expectations.
@@ -169,14 +170,14 @@ Neg Risk Adapter:      0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296
 
 ### Key Benefits
 
-| Feature | Benefit |
-|---------|---------|
-| **No API Keys** | Only requires PRIVATE_KEY and RPC_URL |
-| **No Rate Limits** | Direct blockchain access, no CLOB API throttling |
-| **Simpler Auth** | No credential derivation or signature type detection |
-| **Transparent** | All trades visible on-chain via tx hashes |
-| **Reliable** | No dependency on CLOB API availability |
-| **Direct** | Eliminates middleware layer |
+| Feature            | Benefit                                              |
+| ------------------ | ---------------------------------------------------- |
+| **No API Keys**    | Only requires PRIVATE_KEY and RPC_URL                |
+| **No Rate Limits** | Direct blockchain access, no CLOB API throttling     |
+| **Simpler Auth**   | No credential derivation or signature type detection |
+| **Transparent**    | All trades visible on-chain via tx hashes            |
+| **Reliable**       | No dependency on CLOB API availability               |
+| **Direct**         | Eliminates middleware layer                          |
 
 ## Usage Examples
 
@@ -233,15 +234,16 @@ npm run build
 ## Testing Recommendations
 
 1. **Manual Testing**:
+
    ```bash
    # Set up environment
    cp .env.example .env
    # Edit .env with your PRIVATE_KEY and RPC_URL
    TRADE_MODE=onchain
-   
+
    # Check status
    npm run onchain:status
-   
+
    # Run bot (in dry-run mode first)
    npm start
    ```
@@ -269,7 +271,7 @@ The on-chain executor provides the complete framework and infrastructure but has
 
 To complete full on-chain order execution, one of these approaches is needed:
 
-1. **Maker Order API Access**: 
+1. **Maker Order API Access**:
    - Integrate with CLOB API's `/orders` endpoint to get signed maker orders
    - This still requires some CLOB API interaction but with minimal auth
 

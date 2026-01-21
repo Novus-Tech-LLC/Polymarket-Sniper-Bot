@@ -5,6 +5,7 @@
 ### Added - Minimal Authentication System
 
 #### New Files
+
 - **`src/clob/minimal-auth.ts`** - Ultra-simple authentication matching Python agents pattern
   - Single function `authenticateMinimal()` - no fallbacks, no retries, no complexity
   - One call to `createOrDeriveApiKey()` just like Python agents repo
@@ -46,6 +47,7 @@
   - Next steps
 
 #### New Commands (package.json)
+
 - `npm run auth:probe` - Run minimal auth probe (default, recommended)
 - `npm run auth:probe:minimal` - Explicit minimal auth probe
 - `npm run auth:probe:simple` - Run simple auth probe (existing)
@@ -55,29 +57,35 @@
 ### Changed
 
 #### Modified Files
+
 - **`package.json`** - Added new auth commands, maintains backwards compatibility
 
 ### Improved
 
 #### Authentication Flow
+
 - **Before**: 5 fallback attempts (A-E) with exponential backoff, signature type detection, L1/L2 address swapping
 - **After**: 1 attempt with `createOrDeriveApiKey()`, uses configured signature type, no address swapping
 
 #### Logging
+
 - **Before**: Verbose repeated logs, complex diagnostic trees, potential secret leakage
 - **After**: Single Auth Story JSON per run, minimal output, redacted secrets (last 4-6 chars only)
 
 #### Code Size
+
 - **Before**: ~3,500 lines across 5-6 files
 - **After**: ~330 lines in 1 core file (90% reduction)
 
 #### Reliability
+
 - **Before**: Custom fallback logic trying to be smarter than SDK
 - **After**: Lets SDK handle complexity, matches proven Python agents implementation
 
 ### Backwards Compatibility
 
 All existing code continues to work:
+
 - `src/clob/credential-derivation-v2.ts` - Complex fallback system (legacy, still functional)
 - `src/clob/auth-fallback.ts` - Hard-coded 5-attempt ladder (legacy, still functional)
 - `src/infrastructure/clob-client.factory.ts` - Complex factory (legacy, still functional)
@@ -96,6 +104,7 @@ These files are marked for future deprecation but remain available for gradual m
 ### Testing
 
 New testing capabilities:
+
 ```bash
 # Test minimal auth
 npm run auth:probe
@@ -113,22 +122,26 @@ npm run auth:probe:legacy
 ### Migration Path
 
 **Phase 1: Add Minimal Auth** ✅ **COMPLETED**
+
 - Created minimal auth module
 - Created minimal client factory
 - Added auth probe commands
 - Documented migration process
 
 **Phase 2: Validate** (NEXT)
+
 - Test with different wallet types (EOA, Safe, Proxy)
 - Compare outputs with legacy system
 - Verify Auth Story format
 
 **Phase 3: Migrate Main App** (FUTURE)
+
 - Update `src/app/main.ts` to use minimal factory
 - Test in production
 - Monitor for issues
 
 **Phase 4: Cleanup** (FUTURE)
+
 - Deprecate legacy auth files
 - Remove complex fallback system
 - Update all documentation
@@ -154,6 +167,7 @@ npm run auth:probe:legacy
 ### Deprecation Notices
 
 The following files are marked for future deprecation (no timeline yet):
+
 - `src/clob/credential-derivation-v2.ts`
 - `src/clob/auth-fallback.ts`
 - `src/clob/identity-resolver.ts`

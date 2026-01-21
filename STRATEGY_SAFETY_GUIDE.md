@@ -11,6 +11,7 @@
 **The strategy can buy MULTIPLE positions at once!**
 
 If the bot finds 5 opportunities at the same time:
+
 - With `ENDGAME_MAX_POSITION_USD=50`: **$250 total** (5 × $50)
 - With `ENDGAME_MAX_POSITION_USD=100`: **$500 total** (5 × $100)
 - With `ENDGAME_MAX_POSITION_USD=200`: **$1,000 total** (5 × $200) ⚠️
@@ -18,7 +19,9 @@ If the bot finds 5 opportunities at the same time:
 ### How to Stay Safe
 
 #### 1. Start Small
+
 **First-time users should start with $5-10 per position:**
+
 ```yaml
 ENDGAME_MAX_POSITION_USD: 5
 ```
@@ -35,6 +38,7 @@ Maximum possible exposure = ENDGAME_MAX_POSITION_USD × 10
 ```
 
 Examples:
+
 - $5/position → $50 max exposure ✅ Safe for testing
 - $10/position → $100 max exposure ✅ Conservative
 - $25/position → $250 max exposure ⚠️ Moderate risk
@@ -43,12 +47,14 @@ Examples:
 
 #### 3. Consider Your Wallet Balance
 
-**Rule of thumb:** 
+**Rule of thumb:**
+
 ```
 ENDGAME_MAX_POSITION_USD should be ≤ (Wallet Balance / 20)
 ```
 
 Examples:
+
 - $100 wallet → Max $5/position
 - $500 wallet → Max $25/position
 - $1,000 wallet → Max $50/position
@@ -58,20 +64,21 @@ Examples:
 
 The built-in presets have safe defaults:
 
-| Preset | ENDGAME_MAX_POSITION_USD | Est. Max Exposure |
-|--------|--------------------------|-------------------|
-| Conservative | $15 | ~$150 |
-| Balanced | $25 | ~$250 |
-| Aggressive | $50 | ~$500 |
+| Preset       | ENDGAME_MAX_POSITION_USD | Est. Max Exposure |
+| ------------ | ------------------------ | ----------------- |
+| Conservative | $15                      | ~$150             |
+| Balanced     | $25                      | ~$250             |
+| Aggressive   | $50                      | ~$500             |
 
 **Override if these are too high for your wallet!**
 
 ## Preset-Specific Safety
 
 ### Conservative Preset
+
 ```yaml
 STRATEGY_PRESET: conservative
-ENDGAME_MAX_POSITION_USD: 15  # Override if needed
+ENDGAME_MAX_POSITION_USD: 15 # Override if needed
 ```
 
 - Buys 98.5-99.5¢ positions (near-certain outcomes)
@@ -79,9 +86,10 @@ ENDGAME_MAX_POSITION_USD: 15  # Override if needed
 - **Recommended wallet:** $300+ minimum
 
 ### Balanced Preset
+
 ```yaml
 STRATEGY_PRESET: balanced
-ENDGAME_MAX_POSITION_USD: 25  # Override if needed
+ENDGAME_MAX_POSITION_USD: 25 # Override if needed
 ```
 
 - Buys 98.5-99.5¢ positions (near-certain outcomes)
@@ -89,9 +97,10 @@ ENDGAME_MAX_POSITION_USD: 25  # Override if needed
 - **Recommended wallet:** $500+ minimum
 
 ### Aggressive Preset
+
 ```yaml
 STRATEGY_PRESET: aggressive
-ENDGAME_MAX_POSITION_USD: 50  # Override if needed
+ENDGAME_MAX_POSITION_USD: 50 # Override if needed
 ```
 
 - Buys 85-95¢ positions (higher uncertainty)
@@ -117,13 +126,16 @@ The bot will use balanced's other settings (scan intervals, thresholds, etc.) bu
 ### Scenario: Aggressive preset with default $50/position
 
 **Hour 1:** Bot finds 3 opportunities at 90¢
+
 - Buys 3 positions × $50 = **$150 deployed**
 
 **Hour 2:** Bot finds 5 more opportunities at 87¢
+
 - Buys 5 positions × $50 = **$250 deployed**
 - **Total exposure: $400**
 
 **Hour 3:** 2 positions from Hour 1 appreciate to 95¢
+
 - Auto-sell triggers, frees up $100
 - But bot immediately finds 4 new opportunities
 - Buys 4 × $50 = **$200 deployed**
@@ -132,8 +144,9 @@ The bot will use balanced's other settings (scan intervals, thresholds, etc.) bu
 ### How to Prevent This
 
 1. **Lower the position size:**
+
    ```yaml
-   ENDGAME_MAX_POSITION_USD: 10  # Max $100-200 exposure instead of $500
+   ENDGAME_MAX_POSITION_USD: 10 # Max $100-200 exposure instead of $500
    ```
 
 2. **Use ARB_MAX_WALLET_EXPOSURE_USD** (if available) to set a global cap
@@ -145,29 +158,35 @@ The bot will use balanced's other settings (scan intervals, thresholds, etc.) bu
 ## Testing Safely
 
 ### Week 1: Micro Testing
+
 ```yaml
 STRATEGY_PRESET: conservative
 ENDGAME_MAX_POSITION_USD: 5
 LIVE_TRADING: I_UNDERSTAND_THE_RISKS
 ```
+
 - Maximum ~$50 exposure
 - Learn how strategies work
 - Verify P&L calculations
 
 ### Week 2-3: Small Scale
+
 ```yaml
 STRATEGY_PRESET: balanced
 ENDGAME_MAX_POSITION_USD: 10
 ```
+
 - Maximum ~$100 exposure
 - Test with real but limited capital
 - Monitor win rate and returns
 
 ### Week 4+: Production Scale
+
 ```yaml
-STRATEGY_PRESET: balanced  # or aggressive
-ENDGAME_MAX_POSITION_USD: 25  # or higher based on wallet
+STRATEGY_PRESET: balanced # or aggressive
+ENDGAME_MAX_POSITION_USD: 25 # or higher based on wallet
 ```
+
 - Only increase after confirming profitability
 - Never risk more than you can afford to lose
 
@@ -199,6 +218,7 @@ Restart the bot for changes to take effect.
 ## Questions?
 
 If you're unsure about position sizing:
+
 - **Too small:** Start with $5 and increase gradually
 - **Too big:** If you're nervous, it's too big - reduce it
 - **Just right:** You're comfortable if all positions lose (unlikely but possible)

@@ -20,22 +20,26 @@ Thank you for your interest in contributing to Polymarket Sniper Bot! This docum
 ### Development Setup
 
 1. **Fork the repository**
+
    ```bash
    # Click the "Fork" button on GitHub
    ```
 
 2. **Clone your fork** (replace `<your-github-username>` with your actual GitHub username)
+
    ```bash
    git clone https://github.com/<your-github-username>/Polymarket-Sniper-Bot.git
    cd Polymarket-Sniper-Bot
    ```
 
 3. **Add upstream remote**
+
    ```bash
    git remote add upstream https://github.com/telix5000/Polymarket-Sniper-Bot.git
    ```
 
 4. **Install dependencies**
+
    ```bash
    npm install
    ```
@@ -50,6 +54,7 @@ Thank you for your interest in contributing to Polymarket Sniper Bot! This docum
 ### Making Changes
 
 1. **Create a feature branch** from `main`
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -61,6 +66,7 @@ Thank you for your interest in contributing to Polymarket Sniper Bot! This docum
    - Update documentation as needed
 
 3. **Test your changes**
+
    ```bash
    npm run build
    npm run lint
@@ -85,6 +91,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
 - `chore:` - Maintenance tasks
 
 Examples:
+
 ```
 feat: add balance validation before trade execution
 fix: resolve mempool monitoring connection issues
@@ -116,12 +123,14 @@ npm run format
 ## Pull Request Process
 
 1. **Update your fork**
+
    ```bash
    git fetch upstream
    git rebase upstream/main
    ```
 
 2. **Push your changes**
+
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -196,4 +205,3 @@ By contributing, you agree that your contributions will be licensed under the Ap
 ---
 
 Thank you for contributing! 🎉
-

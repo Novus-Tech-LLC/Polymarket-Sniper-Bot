@@ -12,7 +12,7 @@
 
 ```
 Transaction Hash: 0x227352766de779f37861dcd4342b34b92fd2a4ddcebd29d40de9b8121d62147a
-Type: EIP-7702 Delegate Transaction  
+Type: EIP-7702 Delegate Transaction
 From: 0x9B9883152BfFeFB1cBE2A96FC0391537012ee5D1
 To: 0x9B9883152BfFeFB1cBE2A96FC0391537012ee5D1 (self)
 Delegate to: 0x63c0c19a...A07DAE32B
@@ -28,7 +28,7 @@ Timestamp: Jan-19-2026 05:18:32 AM UTC
 ### ✅ Things That ARE Working
 
 1. **Private key is valid** - Successfully signed the transaction
-2. **Wallet has POL for gas** - Transaction was funded  
+2. **Wallet has POL for gas** - Transaction was funded
 3. **Relayer/Builder access is working** - EIP-7702 delegation succeeded
 4. **Polygon network accepted the transaction** - 70535+ confirmations
 
@@ -48,19 +48,19 @@ The bot's GasGuard should block ALL on-chain transactions if CLOB API auth fails
 
 ### Credential System 1: Builder/Relayer (`POLY_BUILDER_*`)
 
-| Aspect | Value |
-|--------|-------|
-| **Purpose** | Gasless transactions, Safe wallet setup, EIP-7702 |
-| **Env vars** | `POLY_BUILDER_API_KEY`, `POLY_BUILDER_API_SECRET`, `POLY_BUILDER_API_PASSPHRASE` |
-| **Your status** | ✅ **WORKING** (the transaction proves this) |
+| Aspect          | Value                                                                            |
+| --------------- | -------------------------------------------------------------------------------- |
+| **Purpose**     | Gasless transactions, Safe wallet setup, EIP-7702                                |
+| **Env vars**    | `POLY_BUILDER_API_KEY`, `POLY_BUILDER_API_SECRET`, `POLY_BUILDER_API_PASSPHRASE` |
+| **Your status** | ✅ **WORKING** (the transaction proves this)                                     |
 
 ### Credential System 2: CLOB API (`POLYMARKET_API_*`)
 
-| Aspect | Value |
-|--------|-------|
-| **Purpose** | Order submission, balance checks, trading |
-| **Env vars** | `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE` |
-| **Your status** | ❓ **Reported as failing, but may be a false negative** |
+| Aspect          | Value                                                                      |
+| --------------- | -------------------------------------------------------------------------- |
+| **Purpose**     | Order submission, balance checks, trading                                  |
+| **Env vars**    | `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE` |
+| **Your status** | ❓ **Reported as failing, but may be a false negative**                    |
 
 ---
 
@@ -93,6 +93,7 @@ The CLOB auth check (`/balance-allowance`) might be incorrectly reporting failur
 - **Timing issue** - Credentials valid but check races with derivation
 
 **Evidence for this scenario:**
+
 - Builder credentials work (same derivation)
 - Transaction was submitted successfully
 
@@ -105,6 +106,7 @@ The relayer might authenticate differently than the CLOB client:
 - Builder credentials might be valid while CLOB credentials fail derivation
 
 **Evidence for this scenario:**
+
 - The transaction is an EIP-7702 delegation (relayer operation)
 - Different env vars for each system
 
@@ -131,6 +133,7 @@ LOG_LEVEL=debug npm run auth:diag
 ```
 
 This will show:
+
 - Which credentials are configured
 - Whether derivation succeeds
 - What the verification response is
@@ -145,10 +148,12 @@ grep -E "POLY_BUILDER|POLYMARKET_API" .env
 ```
 
 **If you have Builder credentials but NOT CLOB credentials:**
+
 - Builder transactions work (relayer)
 - CLOB transactions fail (need CLOB creds)
 
 **If you have BOTH:**
+
 - Both should work (investigate why CLOB fails)
 
 ### Step 3: Try Manual Verification
@@ -176,11 +181,13 @@ Since your relayer auth is working, you have these options:
 ### If You Just Want Wallet Setup
 
 Your current configuration works for:
+
 - ✅ Safe/Proxy wallet deployment
 - ✅ Token approvals via relayer
 - ✅ EIP-7702 delegations
 
 But NOT for:
+
 - ❌ Submitting buy/sell orders
 - ❌ Checking CLOB balances
 - ❌ Active trading
@@ -189,12 +196,12 @@ But NOT for:
 
 ## Summary
 
-| What | Status | Notes |
-|------|--------|-------|
-| Private Key | ✅ Valid | Transaction succeeded |
-| Builder Auth | ✅ Working | EIP-7702 executed |
-| Relayer | ✅ Working | Transaction submitted |
-| CLOB Auth | ❓ Unknown | Reported failing, but may be false negative |
-| Trading | ❓ Unknown | Depends on CLOB auth |
+| What         | Status     | Notes                                       |
+| ------------ | ---------- | ------------------------------------------- |
+| Private Key  | ✅ Valid   | Transaction succeeded                       |
+| Builder Auth | ✅ Working | EIP-7702 executed                           |
+| Relayer      | ✅ Working | Transaction submitted                       |
+| CLOB Auth    | ❓ Unknown | Reported failing, but may be false negative |
+| Trading      | ❓ Unknown | Depends on CLOB auth                        |
 
 **Bottom line:** Your transaction proves something IS working. The question is whether CLOB auth is actually failing or being incorrectly reported as failing. Run `npm run auth:diag` to investigate.
