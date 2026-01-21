@@ -83,7 +83,7 @@ export class TradeExecutorService {
       );
       if (sizing.wasCapped) {
         const capSource = sizing.cappedByEndgame
-          ? "ENDGAME_MAX_POSITION_USD"
+          ? "MAX_POSITION_USD"
           : "FRONTRUN_MAX_SIZE_USD";
         logger.info(
           `[Frontrun] Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (capped from ${calculatedSize.toFixed(2)} USD by ${capSource}=${sizing.maxSize})`,
@@ -198,10 +198,10 @@ export class TradeExecutorService {
     const calculatedSize = targetSize * multiplier;
 
     // Cap at max frontrun size if configured
-    // Also respect ENDGAME_MAX_POSITION_USD from environment as an additional cap
+    // Also respect MAX_POSITION_USD from environment as an additional cap
     const frontrunMax =
       env.frontrunMaxSizeUsd || DEFAULT_CONFIG.FRONTRUN_MAX_SIZE_USD;
-    const endgameMax = Number(process.env.ENDGAME_MAX_POSITION_USD);
+    const endgameMax = Number(process.env.MAX_POSITION_USD);
     const hasEndgameCap = Number.isFinite(endgameMax) && endgameMax > 0;
     const maxSize = hasEndgameCap
       ? Math.min(frontrunMax, endgameMax)

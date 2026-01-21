@@ -1164,7 +1164,7 @@ export function loadStrategyConfig(
     endgameSweepEnabled: preset.ENDGAME_SWEEP_ENABLED ?? false,
     endgameMinPrice: preset.ENDGAME_MIN_PRICE ?? 0.98,
     endgameMaxPrice: preset.ENDGAME_MAX_PRICE ?? 0.995,
-    endgameMaxPositionUsd: preset.ENDGAME_MAX_POSITION_USD ?? 25,
+    endgameMaxPositionUsd: preset.MAX_POSITION_USD ?? 25,
   };
 
   // Apply preset settings to environment for ARB and MONITOR config loaders

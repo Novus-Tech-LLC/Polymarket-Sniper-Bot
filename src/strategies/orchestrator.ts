@@ -82,7 +82,7 @@ export class StrategyOrchestrator {
       const maxPos = config.endgameSweepConfig.maxPositionUsd;
       if (maxPos > 50) {
         this.logger.warn(
-          `⚠️  ENDGAME_MAX_POSITION_USD is set to $${maxPos} - this is VERY HIGH and may deplete your wallet quickly!`,
+          `⚠️  MAX_POSITION_USD is set to $${maxPos} - this is VERY HIGH and may deplete your wallet quickly!`,
         );
       }
       this.logger.info(

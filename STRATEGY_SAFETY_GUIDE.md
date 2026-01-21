@@ -1,10 +1,10 @@
 # Strategy Safety Guide
 
-## ⚠️ CRITICAL: Understanding ENDGAME_MAX_POSITION_USD
+## ⚠️ CRITICAL: Understanding MAX_POSITION_USD
 
 ### What This Setting Controls
 
-`ENDGAME_MAX_POSITION_USD` controls the **maximum USD per individual position**, NOT your total exposure.
+`MAX_POSITION_USD` controls the **maximum USD per individual position**, NOT your total exposure.
 
 ### The Risk
 
@@ -12,9 +12,9 @@
 
 If the bot finds 5 opportunities at the same time:
 
-- With `ENDGAME_MAX_POSITION_USD=50`: **$250 total** (5 × $50)
-- With `ENDGAME_MAX_POSITION_USD=100`: **$500 total** (5 × $100)
-- With `ENDGAME_MAX_POSITION_USD=200`: **$1,000 total** (5 × $200) ⚠️
+- With `MAX_POSITION_USD=50`: **$250 total** (5 × $50)
+- With `MAX_POSITION_USD=100`: **$500 total** (5 × $100)
+- With `MAX_POSITION_USD=200`: **$1,000 total** (5 × $200) ⚠️
 
 ### How to Stay Safe
 
@@ -23,7 +23,7 @@ If the bot finds 5 opportunities at the same time:
 **First-time users should start with $5-10 per position:**
 
 ```yaml
-ENDGAME_MAX_POSITION_USD: 5
+MAX_POSITION_USD: 5
 ```
 
 This limits your exposure while you learn how the strategies work.
@@ -34,7 +34,7 @@ This limits your exposure while you learn how the strategies work.
 Assume the bot could find 10 opportunities simultaneously.
 
 ```
-Maximum possible exposure = ENDGAME_MAX_POSITION_USD × 10
+Maximum possible exposure = MAX_POSITION_USD × 10
 ```
 
 Examples:
@@ -50,7 +50,7 @@ Examples:
 **Rule of thumb:**
 
 ```
-ENDGAME_MAX_POSITION_USD should be ≤ (Wallet Balance / 20)
+MAX_POSITION_USD should be ≤ (Wallet Balance / 20)
 ```
 
 Examples:
@@ -64,7 +64,7 @@ Examples:
 
 The built-in presets have safe defaults:
 
-| Preset       | ENDGAME_MAX_POSITION_USD | Est. Max Exposure |
+| Preset       | MAX_POSITION_USD | Est. Max Exposure |
 | ------------ | ------------------------ | ----------------- |
 | Conservative | $15                      | ~$150             |
 | Balanced     | $25                      | ~$250             |
@@ -78,7 +78,7 @@ The built-in presets have safe defaults:
 
 ```yaml
 STRATEGY_PRESET: conservative
-ENDGAME_MAX_POSITION_USD: 15 # Override if needed
+MAX_POSITION_USD: 15 # Override if needed
 ```
 
 - Buys 98.5-99.5¢ positions (near-certain outcomes)
@@ -89,7 +89,7 @@ ENDGAME_MAX_POSITION_USD: 15 # Override if needed
 
 ```yaml
 STRATEGY_PRESET: balanced
-ENDGAME_MAX_POSITION_USD: 25 # Override if needed
+MAX_POSITION_USD: 25 # Override if needed
 ```
 
 - Buys 98.5-99.5¢ positions (near-certain outcomes)
@@ -100,7 +100,7 @@ ENDGAME_MAX_POSITION_USD: 25 # Override if needed
 
 ```yaml
 STRATEGY_PRESET: aggressive
-ENDGAME_MAX_POSITION_USD: 50 # Override if needed
+MAX_POSITION_USD: 50 # Override if needed
 ```
 
 - Buys 85-95¢ positions (higher uncertainty)
@@ -116,7 +116,7 @@ Even when using presets, you can override the position size:
 ```yaml
 # Use balanced preset but limit position size to $10
 STRATEGY_PRESET: balanced
-ENDGAME_MAX_POSITION_USD: 10
+MAX_POSITION_USD: 10
 ```
 
 The bot will use balanced's other settings (scan intervals, thresholds, etc.) but limit each position to $10.
@@ -146,7 +146,7 @@ The bot will use balanced's other settings (scan intervals, thresholds, etc.) bu
 1. **Lower the position size:**
 
    ```yaml
-   ENDGAME_MAX_POSITION_USD: 10 # Max $100-200 exposure instead of $500
+   MAX_POSITION_USD: 10 # Max $100-200 exposure instead of $500
    ```
 
 2. **Use ARB_MAX_WALLET_EXPOSURE_USD** (if available) to set a global cap
@@ -161,7 +161,7 @@ The bot will use balanced's other settings (scan intervals, thresholds, etc.) bu
 
 ```yaml
 STRATEGY_PRESET: conservative
-ENDGAME_MAX_POSITION_USD: 5
+MAX_POSITION_USD: 5
 LIVE_TRADING: I_UNDERSTAND_THE_RISKS
 ```
 
@@ -173,7 +173,7 @@ LIVE_TRADING: I_UNDERSTAND_THE_RISKS
 
 ```yaml
 STRATEGY_PRESET: balanced
-ENDGAME_MAX_POSITION_USD: 10
+MAX_POSITION_USD: 10
 ```
 
 - Maximum ~$100 exposure
@@ -184,7 +184,7 @@ ENDGAME_MAX_POSITION_USD: 10
 
 ```yaml
 STRATEGY_PRESET: balanced # or aggressive
-ENDGAME_MAX_POSITION_USD: 25 # or higher based on wallet
+MAX_POSITION_USD: 25 # or higher based on wallet
 ```
 
 - Only increase after confirming profitability

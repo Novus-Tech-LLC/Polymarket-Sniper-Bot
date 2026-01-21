@@ -92,13 +92,12 @@ describe("PositionTracker Settlement Price Logic", () => {
     const outcomes = ["YES", "yes", "Yes"];
 
     for (const outcome of outcomes) {
-      const normalized = outcome.toUpperCase();
-      const isYesOrNo = normalized === "YES" || normalized === "NO";
+      // Multi-outcome markets preserve the actual case, but binary markets are commonly uppercase
+      const isValid = outcome && typeof outcome === 'string' && outcome.trim() !== '';
       assert.ok(
-        isYesOrNo,
-        `${outcome} should be recognized as YES/NO outcome`,
+        isValid,
+        `${outcome} should be recognized as valid outcome`,
       );
-      assert.strictEqual(normalized, "YES", `${outcome} should normalize to YES`);
     }
   });
 
@@ -106,13 +105,12 @@ describe("PositionTracker Settlement Price Logic", () => {
     const outcomes = ["NO", "no", "No"];
 
     for (const outcome of outcomes) {
-      const normalized = outcome.toUpperCase();
-      const isYesOrNo = normalized === "YES" || normalized === "NO";
+      // Multi-outcome markets preserve the actual case, but binary markets are commonly uppercase
+      const isValid = outcome && typeof outcome === 'string' && outcome.trim() !== '';
       assert.ok(
-        isYesOrNo,
-        `${outcome} should be recognized as YES/NO outcome`,
+        isValid,
+        `${outcome} should be recognized as valid outcome`,
       );
-      assert.strictEqual(normalized, "NO", `${outcome} should normalize to NO`);
     }
   });
 });
@@ -199,13 +197,12 @@ describe("PositionTracker Caching Logic", () => {
 });
 
 describe("PositionTracker Side Validation", () => {
-  test("Unknown sides should be rejected", () => {
-    // Simulates the new behavior of rejecting unknown sides
-    const testSides = ["UNKNOWN", "MAYBE", "", undefined, null, "Y", "N"];
+  test("Empty or invalid sides should be rejected", () => {
+    // Simulates the new behavior of rejecting empty or invalid sides
+    const testSides = ["", undefined, null];
 
     for (const side of testSides) {
-      const normalized = side?.toString().toUpperCase();
-      const isValid = normalized === "YES" || normalized === "NO";
+      const isValid = side && typeof side === 'string' && side.trim() !== '';
 
       assert.ok(
         !isValid,
@@ -214,18 +211,133 @@ describe("PositionTracker Side Validation", () => {
     }
   });
 
-  test("Valid sides should be accepted", () => {
-    const testSides = ["YES", "yes", "Yes", "NO", "no", "No"];
-
-    for (const side of testSides) {
-      const normalized = side.toUpperCase();
-      const isValid = normalized === "YES" || normalized === "NO";
+  test("Valid string outcomes should be accepted and preserve case", () => {
+    // Test binary market outcomes (case variations)
+    const testCases = [
+      { input: "YES", expected: "YES" },
+      { input: "yes", expected: "yes" },  // Verify NOT normalized to "YES"
+      { input: "Yes", expected: "Yes" },  // Verify NOT normalized to "YES"
+      { input: "NO", expected: "NO" },
+      { input: "no", expected: "no" },    // Verify NOT normalized to "NO"
+      { input: "No", expected: "No" },    // Verify NOT normalized to "NO"
+    ];
+    
+    for (const { input, expected } of testCases) {
+      const isValid = input && typeof input === 'string' && input.trim() !== '';
+      const processed = input.trim(); // Simulates the actual processing in position-tracker
 
       assert.ok(
         isValid,
-        `"${side}" should be accepted as valid side`,
+        `"${input}" should be accepted as valid side`,
+      );
+      
+      // Verify case is preserved (not normalized to uppercase)
+      assert.strictEqual(
+        processed,
+        expected,
+        `Case should be preserved: "${input}" should remain "${expected}", not normalized to uppercase`,
       );
     }
+  });
+
+  test("Valid multi-outcome market sides should be accepted and preserve case", () => {
+    const testCases = [
+      { input: "Medjedovic", expected: "Medjedovic" },  // Not "MEDJEDOVIC"
+      { input: "Under", expected: "Under" },            // Not "UNDER"
+      { input: "FC Bayern München", expected: "FC Bayern München" },  // Preserves special chars
+      { input: "LNG Esports", expected: "LNG Esports" },
+      { input: "Over", expected: "Over" },              // Not "OVER"
+      { input: "Norrie", expected: "Norrie" },          // Not "NORRIE"
+    ];
+
+    for (const { input, expected } of testCases) {
+      const isValid = input && typeof input === 'string' && input.trim() !== '';
+      const processed = input.trim(); // Simulates the actual processing in position-tracker
+
+      assert.ok(
+        isValid,
+        `"${input}" should be accepted as valid multi-outcome side`,
+      );
+      
+      // Verify case and special characters are preserved
+      assert.strictEqual(
+        processed,
+        expected,
+        `Original value should be preserved: "${input}" should remain "${expected}"`,
+      );
+    }
+  });
+});
+
+describe("PositionTracker Multi-Outcome Market Support", () => {
+  test("Settlement price calculation - winning multi-outcome position", () => {
+    // Simulate a winning position in a multi-outcome market
+    const positionSide = "Medjedovic";
+    const winningOutcome = "Medjedovic";
+    const settlementPrice = positionSide === winningOutcome ? 1.0 : 0.0;
+
+    assert.strictEqual(
+      settlementPrice,
+      1.0,
+      "Winning multi-outcome position should settle at 1.0",
+    );
+  });
+
+  test("Settlement price calculation - losing multi-outcome position", () => {
+    // Simulate a losing position in a multi-outcome market
+    const positionSide = "Medjedovic";
+    const winningOutcome = "Other Player";
+    const settlementPrice = positionSide === winningOutcome ? 1.0 : 0.0;
+
+    assert.strictEqual(
+      settlementPrice,
+      0.0,
+      "Losing multi-outcome position should settle at 0.0",
+    );
+  });
+
+  test("P&L calculation - winning multi-outcome position", () => {
+    // Position bought at 0.25 in a 4-outcome market, won
+    const entryPrice = 0.25;
+    const settlementPrice = 1.0;
+    const size = 100;
+
+    const pnlUsd = (settlementPrice - entryPrice) * size;
+    const pnlPct = ((settlementPrice - entryPrice) / entryPrice) * 100;
+
+    assert.strictEqual(pnlUsd, 75, "P&L should be $75");
+    assert.strictEqual(pnlPct, 300, "P&L should be 300%");
+  });
+
+  test("P&L calculation - losing multi-outcome position", () => {
+    // Position bought at 0.25 in a 4-outcome market, lost
+    const entryPrice = 0.25;
+    const settlementPrice = 0.0;
+    const size = 100;
+
+    const pnlUsd = (settlementPrice - entryPrice) * size;
+    const pnlPct = ((settlementPrice - entryPrice) / entryPrice) * 100;
+
+    assert.strictEqual(pnlUsd, -25, "P&L should be -$25");
+    assert.strictEqual(pnlPct, -100, "P&L should be -100%");
+  });
+
+  test("Outcome comparison is case-sensitive", () => {
+    // Multi-outcome market outcomes should match exactly (case-sensitive)
+    const positionSide = "Medjedovic";
+    const winningOutcome1 = "Medjedovic";
+    const winningOutcome2 = "medjedovic";
+
+    assert.strictEqual(
+      positionSide === winningOutcome1,
+      true,
+      "Exact match should succeed",
+    );
+    assert.strictEqual(
+      positionSide === winningOutcome2,
+      false,
+      "Case-different match should fail",
+    );
   });
 });
 

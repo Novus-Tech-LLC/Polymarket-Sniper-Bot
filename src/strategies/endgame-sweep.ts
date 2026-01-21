@@ -368,15 +368,6 @@ export class EndgameSweepStrategy {
       // Calculate USD size for order
       const sizeUsd = positionSize * bestAsk;
 
-      // Validate minimum order size
-      const minOrderUsd = 10;
-      if (sizeUsd < minOrderUsd) {
-        this.logger.warn(
-          `[EndgameSweep] Position too small: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,
-        );
-        return;
-      }
-
       // Check LIVE_TRADING is enabled (supports both ARB_LIVE_TRADING and LIVE_TRADING)
       const liveTradingEnabled = isLiveTradingEnabled();
       if (!liveTradingEnabled) {

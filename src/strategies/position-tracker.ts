@@ -6,7 +6,7 @@ import { POLYMARKET_API } from "../constants/polymarket.constants";
 export interface Position {
   marketId: string;
   tokenId: string;
-  side: "YES" | "NO";
+  side: string; // Outcome name (e.g., "YES", "NO" for binary markets, or "Medjedovic", "Under" for multi-outcome markets)
   size: number;
   entryPrice: number;
   currentPrice: number;
@@ -37,7 +37,7 @@ export class PositionTracker {
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
   private missingOrderbooks = new Set<string>(); // Cache tokenIds with no orderbook to avoid repeated API calls
-  private marketOutcomeCache: Map<string, "YES" | "NO" | null> = new Map(); // Cache market outcomes to avoid redundant API calls
+  private marketOutcomeCache: Map<string, string | null> = new Map(); // Cache market outcomes to avoid redundant API calls
 
   // API timeout constant for external API calls
   private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
@@ -257,19 +257,19 @@ export class PositionTracker {
                 return null;
               }
 
-              // Determine position side early (needed for both redeemable and active positions)
+              // Determine position side/outcome early (needed for both redeemable and active positions)
               const sideValue = apiPos.outcome ?? apiPos.side;
-              const sideUpperCase = sideValue?.toUpperCase();
               
-              if (sideUpperCase !== "YES" && sideUpperCase !== "NO") {
-                // Unknown side/outcome - skip this position to avoid incorrect P&L calculation
-                const reason = `Unknown side/outcome value "${sideValue}" for tokenId ${tokenId}`;
+              if (!sideValue || typeof sideValue !== 'string' || sideValue.trim() === '') {
+                // Missing or invalid outcome - skip this position
+                const reason = `Missing or invalid side/outcome value for tokenId ${tokenId}`;
                 skippedPositions.push({ reason, data: apiPos });
                 this.logger.warn(`[PositionTracker] ${reason}`);
                 return null;
               }
               
-              const side: "YES" | "NO" = sideUpperCase;
+              // Store the actual outcome value (supports both binary YES/NO and multi-outcome markets)
+              const side: string = sideValue.trim();
 
               // Skip orderbook fetch for resolved/closed markets (no orderbook available)
               let currentPrice: number;
@@ -474,12 +474,14 @@ export class PositionTracker {
 
   /**
    * Fetch market resolution/outcome data from Gamma API.
-   * Returns the winning outcome side ("YES" or "NO") or null if the outcome
+   * Returns the winning outcome (e.g., "YES", "NO", "Medjedovic", "Under") or null if the outcome
    * cannot be determined (e.g. market unresolved, API/network error, or malformed response).
+   * 
+   * Supports both binary markets (YES/NO) and multi-outcome markets.
    */
   private async fetchMarketOutcome(
     marketId: string,
-  ): Promise<"YES" | "NO" | null> {
+  ): Promise<string | null> {
     try {
       const { httpGet } = await import("../utils/fetch-data.util");
       const { POLYMARKET_API } =
@@ -523,26 +525,26 @@ export class PositionTracker {
         market.winningOutcome ??
         market.winning_outcome;
 
-      if (winningOutcome) {
-        const normalized = winningOutcome.trim().toUpperCase();
-        if (normalized === "YES" || normalized === "NO") {
+      if (winningOutcome && typeof winningOutcome === 'string') {
+        const trimmed = winningOutcome.trim();
+        if (trimmed) {
           this.logger.debug(
-            `[PositionTracker] Market ${marketId} resolved with outcome: ${normalized}`,
+            `[PositionTracker] Market ${marketId} resolved with outcome: ${trimmed}`,
           );
-          return normalized as "YES" | "NO";
+          return trimmed;
         }
       }
 
-      // Check tokens for winner flag
+      // Check tokens for winner flag (supports multi-outcome markets)
       if (market.tokens && Array.isArray(market.tokens)) {
         for (const token of market.tokens) {
           if (token.winner === true && token.outcome) {
-            const normalized = token.outcome.trim().toUpperCase();
-            if (normalized === "YES" || normalized === "NO") {
+            const trimmed = token.outcome.trim();
+            if (trimmed) {
               this.logger.debug(
-                `[PositionTracker] Market ${marketId} resolved with winning token: ${normalized}`,
+                `[PositionTracker] Market ${marketId} resolved with winning token: ${trimmed}`,
               );
-              return normalized as "YES" | "NO";
+              return trimmed;
             }
           }
         }
