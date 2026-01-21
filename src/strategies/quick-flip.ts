@@ -9,6 +9,7 @@ export interface QuickFlipConfig {
   targetPct: number; // Sell at this gain percentage (e.g., 5 = 5%)
   stopLossPct: number; // Sell at this loss percentage (e.g., 3 = -3%)
   minHoldSeconds: number; // Minimum time to hold position before selling
+  minOrderUsd: number; // Minimum order size in USD (from MIN_ORDER_USD env)
 }
 
 export interface QuickFlipStrategyConfig {
@@ -187,7 +188,7 @@ export class QuickFlipStrategy {
 
       // Validate minimum order size for regular sells only
       // Stop-loss sells bypass this check to prevent being stuck in losing positions
-      const minOrderUsd = 10; // From DEFAULT_CONFIG
+      const minOrderUsd = this.config.minOrderUsd;
       if (!isStopLoss && sizeUsd < minOrderUsd) {
         this.logger.warn(
           `[QuickFlip] ⚠️ Position too small to sell: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,

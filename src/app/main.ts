@@ -93,11 +93,13 @@ async function main(): Promise<void> {
         targetPct: strategyConfig.quickFlipTargetPct,
         stopLossPct: strategyConfig.quickFlipStopLossPct,
         minHoldSeconds: strategyConfig.quickFlipMinHoldSeconds,
+        minOrderUsd: strategyConfig.minOrderUsd,
       },
       autoSellConfig: {
         enabled: strategyConfig.autoSellEnabled,
         threshold: strategyConfig.autoSellThreshold,
         minHoldSeconds: strategyConfig.autoSellMinHoldSeconds,
+        minOrderUsd: strategyConfig.minOrderUsd,
       },
       endgameSweepConfig: {
         enabled: strategyConfig.endgameSweepEnabled,

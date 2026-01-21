@@ -1107,6 +1107,7 @@ export type StrategyConfig = {
   endgameMinPrice: number;
   endgameMaxPrice: number;
   endgameMaxPositionUsd: number;
+  minOrderUsd: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
   monitorConfig?: MonitorRuntimeConfig;
@@ -1165,6 +1166,11 @@ export function loadStrategyConfig(
     endgameMinPrice: preset.ENDGAME_MIN_PRICE ?? 0.98,
     endgameMaxPrice: preset.ENDGAME_MAX_PRICE ?? 0.995,
     endgameMaxPositionUsd: preset.MAX_POSITION_USD ?? 25,
+    // MIN_ORDER_USD: respect env override > preset > default
+    minOrderUsd:
+      parseNumber(readEnv("MIN_ORDER_USD", overrides) ?? "") ??
+      ("MIN_ORDER_USD" in preset ? (preset as { MIN_ORDER_USD: number }).MIN_ORDER_USD : undefined) ??
+      DEFAULT_CONFIG.MIN_ORDER_USD,
   };
 
   // Apply preset settings to environment for ARB and MONITOR config loaders

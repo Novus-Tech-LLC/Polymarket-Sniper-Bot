@@ -7,6 +7,7 @@ export interface AutoSellConfig {
   enabled: boolean;
   threshold: number; // Price threshold to auto-sell (e.g., 0.99 = 99¢)
   minHoldSeconds: number; // Minimum time to hold before auto-selling (avoids conflict with endgame sweep)
+  minOrderUsd: number; // Minimum order size in USD (from MIN_ORDER_USD env)
 }
 
 export interface AutoSellStrategyConfig {
@@ -164,7 +165,7 @@ export class AutoSellStrategy {
       const sizeUsd = size * bestBid;
 
       // Validate minimum order size
-      const minOrderUsd = 10;
+      const minOrderUsd = this.config.minOrderUsd;
       if (sizeUsd < minOrderUsd) {
         this.logger.warn(
           `[AutoSell] Position too small: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,
