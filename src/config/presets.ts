@@ -154,8 +154,136 @@ export const MONITOR_PRESETS = {
   },
 } as const;
 
+export const STRATEGY_PRESETS = {
+  off: {
+    STRATEGY_ENABLED: false,
+  },
+  conservative: {
+    STRATEGY_ENABLED: true,
+    // Combines ARB + MONITOR settings
+    ARB_ENABLED: true,
+    MONITOR_ENABLED: true,
+    // Quick Flip settings
+    QUICK_FLIP_ENABLED: true,
+    QUICK_FLIP_TARGET_PCT: 7,        // Higher target, fewer trades
+    QUICK_FLIP_STOP_LOSS_PCT: 2,
+    QUICK_FLIP_MIN_HOLD_SECONDS: 60,
+    // Auto-sell settings
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.995,      // 99.5¢
+    // Endgame sweep settings
+    ENDGAME_SWEEP_ENABLED: true,
+    ENDGAME_MIN_PRICE: 0.985,        // 98.5¢
+    ENDGAME_MAX_PRICE: 0.995,
+    // Rate limits
+    ORDER_SUBMIT_MAX_PER_HOUR: 30,
+    ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
+    // Existing ARB settings (from safe_small)
+    ARB_SCAN_INTERVAL_MS: 2000,
+    ARB_MIN_EDGE_BPS: 120,
+    ARB_MAX_SPREAD_BPS: 300,
+    ARB_TRADE_BASE_USD: 3,
+    ARB_MAX_POSITION_USD: 15,
+    ARB_MAX_WALLET_EXPOSURE_USD: 50,
+    // Existing Monitor settings (from balanced)
+    FETCH_INTERVAL: 2,
+    MIN_TRADE_SIZE_USD: 50,
+    TRADE_MULTIPLIER: 0.15,
+    MONITOR_REQUIRE_CONFIRMED: true,
+  },
+  balanced: {
+    STRATEGY_ENABLED: true,
+    // Combines ARB + MONITOR settings
+    ARB_ENABLED: true,
+    MONITOR_ENABLED: true,
+    // Quick Flip settings
+    QUICK_FLIP_ENABLED: true,
+    QUICK_FLIP_TARGET_PCT: 5,        // 5% gain target
+    QUICK_FLIP_STOP_LOSS_PCT: 3,     // 3% stop loss
+    QUICK_FLIP_MIN_HOLD_SECONDS: 30,
+    // Auto-sell settings
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.99,       // 99¢
+    // Endgame sweep settings
+    ENDGAME_SWEEP_ENABLED: true,
+    ENDGAME_MIN_PRICE: 0.98,         // 98¢
+    ENDGAME_MAX_PRICE: 0.995,        // 99.5¢
+    // Rate limits (higher for more trades)
+    ORDER_SUBMIT_MAX_PER_HOUR: 60,
+    ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
+    ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 60,
+    // Existing ARB settings (from micro, optimized)
+    ARB_SCAN_INTERVAL_MS: 1500,
+    ARB_MIN_EDGE_BPS: 50,
+    ARB_MIN_PROFIT_USD: 0.05,
+    ARB_MIN_LIQUIDITY_USD: 3000,
+    ARB_MAX_SPREAD_BPS: 10000,       // Very permissive
+    ARB_TRADE_BASE_USD: 5,
+    ARB_SIZE_SCALING: "sqrt",
+    ARB_SLIPPAGE_BPS: 50,
+    ARB_FEE_BPS: 10,
+    ARB_MAX_POSITION_USD: 25,
+    ARB_MAX_WALLET_EXPOSURE_USD: 150,
+    ARB_MAX_TRADES_PER_HOUR: 60,
+    ARB_MARKET_COOLDOWN_SECONDS: 120,
+    ARB_MAX_CONSECUTIVE_FAILURES: 3,
+    ARB_MAX_CONCURRENT_TRADES: 2,
+    ARB_STARTUP_COOLDOWN_SECONDS: 30,
+    ARB_DEBUG_TOP_N: 10,
+    // Existing Monitor settings (from active, optimized)
+    FETCH_INTERVAL: 1,
+    MIN_TRADE_SIZE_USD: 1,           // Low minimum to catch more
+    MIN_ORDER_USD: 1,
+    TRADE_MULTIPLIER: 0.15,
+    TRADE_AGGREGATION_ENABLED: true,
+    TRADE_AGGREGATION_WINDOW_SECONDS: 10,
+    FRONTRUN_SIZE_MULTIPLIER: 0.05,
+    GAS_PRICE_MULTIPLIER: 1.05,
+    MONITOR_REQUIRE_CONFIRMED: false,
+  },
+  aggressive: {
+    STRATEGY_ENABLED: true,
+    ARB_ENABLED: true,
+    MONITOR_ENABLED: true,
+    // Quick Flip settings (tighter targets)
+    QUICK_FLIP_ENABLED: true,
+    QUICK_FLIP_TARGET_PCT: 3,        // Lower target, more trades
+    QUICK_FLIP_STOP_LOSS_PCT: 2,
+    QUICK_FLIP_MIN_HOLD_SECONDS: 15,
+    // Auto-sell settings
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.985,      // 98.5¢ (sell earlier)
+    // Endgame sweep settings (wider range)
+    ENDGAME_SWEEP_ENABLED: true,
+    ENDGAME_MIN_PRICE: 0.97,         // 97¢
+    ENDGAME_MAX_PRICE: 0.995,
+    // Rate limits (maximum)
+    ORDER_SUBMIT_MAX_PER_HOUR: 120,
+    ORDER_SUBMIT_MIN_INTERVAL_MS: 3000,
+    ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 30,
+    // ARB settings (aggressive)
+    ARB_SCAN_INTERVAL_MS: 1000,
+    ARB_MIN_EDGE_BPS: 30,
+    ARB_MAX_SPREAD_BPS: 15000,
+    ARB_TRADE_BASE_USD: 5,
+    ARB_MAX_POSITION_USD: 50,
+    ARB_MAX_WALLET_EXPOSURE_USD: 250,
+    ARB_MAX_TRADES_PER_HOUR: 120,
+    ARB_MARKET_COOLDOWN_SECONDS: 60,
+    ARB_MAX_CONCURRENT_TRADES: 3,
+    ARB_STARTUP_COOLDOWN_SECONDS: 15,
+    // Monitor settings (aggressive)
+    FETCH_INTERVAL: 1,
+    MIN_TRADE_SIZE_USD: 1,
+    MIN_ORDER_USD: 1,
+    MONITOR_REQUIRE_CONFIRMED: false,
+  },
+} as const;
+
 export type ArbPresetName = keyof typeof ARB_PRESETS;
 export type MonitorPresetName = keyof typeof MONITOR_PRESETS;
+export type StrategyPresetName = keyof typeof STRATEGY_PRESETS;
 
 export const DEFAULT_ARB_PRESET: ArbPresetName = "safe_small";
 export const DEFAULT_MONITOR_PRESET: MonitorPresetName = "balanced";
+export const DEFAULT_STRATEGY_PRESET: StrategyPresetName = "off";

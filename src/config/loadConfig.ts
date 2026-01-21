@@ -8,7 +8,10 @@ import {
   ARB_PRESETS,
   DEFAULT_ARB_PRESET,
   DEFAULT_MONITOR_PRESET,
+  DEFAULT_STRATEGY_PRESET,
   MONITOR_PRESETS,
+  STRATEGY_PRESETS,
+  type StrategyPresetName,
 } from "./presets";
 
 export type TradeMode = "clob" | "onchain";
@@ -1073,4 +1076,119 @@ export function parseCliOverrides(argv: string[]): Record<string, string> {
     }
   }
   return overrides;
+}
+
+/**
+ * Strategy configuration type for unified presets
+ */
+export type StrategyConfig = {
+  presetName: string;
+  enabled: boolean;
+  arbEnabled: boolean;
+  monitorEnabled: boolean;
+  quickFlipEnabled: boolean;
+  quickFlipTargetPct: number;
+  quickFlipStopLossPct: number;
+  quickFlipMinHoldSeconds: number;
+  autoSellEnabled: boolean;
+  autoSellThreshold: number;
+  endgameSweepEnabled: boolean;
+  endgameMinPrice: number;
+  endgameMaxPrice: number;
+  // Combined settings from ARB and MONITOR
+  arbConfig?: ArbRuntimeConfig;
+  monitorConfig?: MonitorRuntimeConfig;
+};
+
+/**
+ * Load unified strategy configuration from STRATEGY_PRESET
+ * Falls back to individual ARB_PRESET and MONITOR_PRESET if not set
+ * Supports LIVE_TRADING as alias for ARB_LIVE_TRADING
+ */
+export function loadStrategyConfig(
+  overrides?: Record<string, string>
+): StrategyConfig | null {
+  const strategyPresetName = readEnv("STRATEGY_PRESET", overrides);
+
+  // If no STRATEGY_PRESET is set, return null (use individual presets)
+  if (!strategyPresetName) {
+    return null;
+  }
+
+  // Validate preset name
+  if (!(strategyPresetName in STRATEGY_PRESETS)) {
+    throw new Error(
+      `Invalid STRATEGY_PRESET="${strategyPresetName}". Valid values: ${Object.keys(STRATEGY_PRESETS).join(", ")}`
+    );
+  }
+
+  const presetName = strategyPresetName as StrategyPresetName;
+  const preset = STRATEGY_PRESETS[presetName];
+
+  // Support LIVE_TRADING as alias for ARB_LIVE_TRADING
+  const liveTradingValue = readEnv("LIVE_TRADING", overrides);
+  if (liveTradingValue) {
+    // Set ARB_LIVE_TRADING from LIVE_TRADING if provided
+    if (overrides) {
+      overrides.ARB_LIVE_TRADING = liveTradingValue;
+    } else {
+      process.env.ARB_LIVE_TRADING = liveTradingValue;
+    }
+  }
+
+  // Build strategy config
+  const config: StrategyConfig = {
+    presetName,
+    enabled: preset.STRATEGY_ENABLED ?? false,
+    arbEnabled: preset.ARB_ENABLED ?? false,
+    monitorEnabled: preset.MONITOR_ENABLED ?? false,
+    quickFlipEnabled: preset.QUICK_FLIP_ENABLED ?? false,
+    quickFlipTargetPct: preset.QUICK_FLIP_TARGET_PCT ?? 5,
+    quickFlipStopLossPct: preset.QUICK_FLIP_STOP_LOSS_PCT ?? 3,
+    quickFlipMinHoldSeconds: preset.QUICK_FLIP_MIN_HOLD_SECONDS ?? 30,
+    autoSellEnabled: preset.AUTO_SELL_ENABLED ?? false,
+    autoSellThreshold: preset.AUTO_SELL_THRESHOLD ?? 0.99,
+    endgameSweepEnabled: preset.ENDGAME_SWEEP_ENABLED ?? false,
+    endgameMinPrice: preset.ENDGAME_MIN_PRICE ?? 0.98,
+    endgameMaxPrice: preset.ENDGAME_MAX_PRICE ?? 0.995,
+  };
+
+  // Apply preset settings to environment for ARB and MONITOR config loaders
+  const tempEnv: Record<string, string> = {};
+  
+  // Map preset values to env vars
+  for (const [key, value] of Object.entries(preset)) {
+    if (value !== undefined && value !== null) {
+      tempEnv[key] = String(value);
+    }
+  }
+
+  // Merge temp env with overrides
+  const mergedOverrides = { ...tempEnv, ...overrides };
+
+  // Load ARB config if enabled
+  if (config.arbEnabled) {
+    try {
+      config.arbConfig = loadArbConfig(mergedOverrides);
+    } catch (err) {
+      console.error("[StrategyConfig] Failed to load ARB config", err);
+      throw err;
+    }
+  }
+
+  // Load MONITOR config if enabled
+  if (config.monitorEnabled) {
+    try {
+      config.monitorConfig = loadMonitorConfig(mergedOverrides);
+    } catch (err) {
+      console.error("[StrategyConfig] Failed to load MONITOR config", err);
+      throw err;
+    }
+  }
+
+  console.info(
+    `[StrategyConfig] Loaded unified preset: ${presetName} (ARB=${config.arbEnabled}, MONITOR=${config.monitorEnabled})`
+  );
+
+  return config;
 }
