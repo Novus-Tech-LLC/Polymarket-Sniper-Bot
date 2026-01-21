@@ -75,13 +75,10 @@ export class PositionTracker {
     this.isRefreshing = true;
 
     try {
-      // Get current positions from CLOB API
-      // Note: This is a placeholder - actual implementation would use
-      // ClobClient methods to fetch positions
+      // Get current positions from Data API and enrich with current market prices
       this.logger.debug("[PositionTracker] Refreshing positions");
       
-      // For now, we'll use a mock implementation
-      // In production, this would call actual Polymarket API endpoints
+      // Fetch and process positions with current market data
       const positions = await this.fetchPositionsFromAPI();
       
       // Track which positions existed before this refresh
@@ -160,46 +157,136 @@ export class PositionTracker {
 
   /**
    * Fetch positions from Polymarket API
-   * This is a placeholder for actual API integration
+   * Fetches user positions from Data API and enriches with current prices
    */
   private async fetchPositionsFromAPI(): Promise<Position[]> {
-    // TODO: Implement actual Polymarket API integration
-    // This is a placeholder that needs to be replaced with real API calls
-    
-    // In production, this would:
-    // 1. Call ClobClient method to get user's current positions
-    //    const apiPositions = await this.client.getPositions();
-    //    // Or alternative endpoint:
-    //    // const apiPositions = await this.client.getBalances();
-    // 
-    // 2. For each position, fetch current market data to calculate P&L
-    //    const positions: Position[] = [];
-    //    for (const apiPosition of apiPositions) {
-    //      // Get current market price
-    //      const orderbook = await this.client.getOrderbook(apiPosition.marketId);
-    //      const currentPrice = (orderbook.bids[0].price + orderbook.asks[0].price) / 2;
-    //      
-    //      // Calculate P&L
-    //      const pnlUsd = (currentPrice - apiPosition.entryPrice) * apiPosition.size;
-    //      const pnlPct = ((currentPrice - apiPosition.entryPrice) / apiPosition.entryPrice) * 100;
-    //      
-    //      positions.push({
-    //        marketId: apiPosition.marketId,
-    //        tokenId: apiPosition.tokenId,
-    //        side: apiPosition.side,
-    //        size: apiPosition.size,
-    //        entryPrice: apiPosition.entryPrice,
-    //        currentPrice: currentPrice,
-    //        pnlPct: pnlPct,
-    //        pnlUsd: pnlUsd,
-    //      });
-    //    }
-    //    return positions;
-    // 
-    // 3. Handle API errors with exponential backoff retry
-    // 4. Cache results briefly to avoid rate limiting
-    
-    return [];
+    try {
+      // Import required utilities
+      const { httpGet } = await import("../utils/fetch-data.util");
+      const { POLYMARKET_API } = await import("../constants/polymarket.constants");
+      const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
+      
+      // Get wallet address from client
+      const walletAddress = resolveSignerAddress(this.client);
+      
+      // Fetch positions from Data API
+      interface ApiPosition {
+        id?: string;
+        market?: string;
+        asset_id?: string;
+        token_id?: string;
+        side?: string;
+        size?: string | number;
+        initial_cost?: string | number;
+        initial_average_price?: string | number;
+      }
+      
+      const apiPositions = await httpGet<ApiPosition[]>(
+        POLYMARKET_API.POSITIONS_ENDPOINT(walletAddress),
+        { timeout: 10000 }
+      );
+      
+      if (!apiPositions || apiPositions.length === 0) {
+        this.logger.debug("[PositionTracker] No positions found");
+        return [];
+      }
+      
+      this.logger.debug(
+        `[PositionTracker] Fetched ${apiPositions.length} positions from API`
+      );
+      
+      // Enrich positions with current prices and calculate P&L
+      const positions: Position[] = [];
+      const maxConcurrent = 5; // Rate limit concurrent orderbook fetches
+      
+      for (let i = 0; i < apiPositions.length; i += maxConcurrent) {
+        const batch = apiPositions.slice(i, i + maxConcurrent);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (apiPos) => {
+            try {
+              const tokenId = apiPos.token_id ?? apiPos.asset_id;
+              const marketId = apiPos.market ?? apiPos.id;
+              
+              if (!tokenId || !marketId) {
+                this.logger.debug("[PositionTracker] Skipping position with missing tokenId or marketId");
+                return null;
+              }
+              
+              const size = typeof apiPos.size === "string" ? parseFloat(apiPos.size) : (apiPos.size ?? 0);
+              const entryPrice = typeof apiPos.initial_average_price === "string" 
+                ? parseFloat(apiPos.initial_average_price) 
+                : (apiPos.initial_average_price ?? 0);
+              
+              if (size <= 0 || entryPrice <= 0) {
+                return null;
+              }
+              
+              // Get current orderbook to calculate mid-market price
+              const orderbook = await this.client.getOrderBook(tokenId);
+              
+              if (!orderbook.bids?.[0] || !orderbook.asks?.[0]) {
+                this.logger.debug(`[PositionTracker] No orderbook data for ${tokenId}`);
+                return null;
+              }
+              
+              const bestBid = parseFloat(orderbook.bids[0].price);
+              const bestAsk = parseFloat(orderbook.asks[0].price);
+              const currentPrice = (bestBid + bestAsk) / 2;
+              
+              // Calculate P&L
+              const pnlUsd = (currentPrice - entryPrice) * size;
+              const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+              
+              const side = apiPos.side?.toUpperCase() === "YES" || apiPos.side?.toUpperCase() === "NO" 
+                ? (apiPos.side.toUpperCase() as "YES" | "NO")
+                : "YES"; // Default to YES if unknown
+              
+              return {
+                marketId,
+                tokenId,
+                side,
+                size,
+                entryPrice,
+                currentPrice,
+                pnlPct,
+                pnlUsd,
+              };
+            } catch (err) {
+              this.logger.debug(
+                `[PositionTracker] Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`
+              );
+              return null;
+            }
+          })
+        );
+        
+        // Collect successful results
+        for (const result of batchResults) {
+          if (result.status === "fulfilled" && result.value) {
+            positions.push(result.value);
+          }
+        }
+        
+        // Small delay between batches to avoid rate limiting
+        if (i + maxConcurrent < apiPositions.length) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+      
+      this.logger.debug(
+        `[PositionTracker] Successfully enriched ${positions.length}/${apiPositions.length} positions`
+      );
+      
+      return positions;
+    } catch (err) {
+      this.logger.error(
+        `[PositionTracker] Failed to fetch positions from API: ${err instanceof Error ? err.message : String(err)}`,
+        err as Error
+      );
+      
+      // Return empty array on error - caller handles retry logic
+      return [];
+    }
   }
 
   /**

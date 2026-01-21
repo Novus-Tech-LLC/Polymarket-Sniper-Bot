@@ -1,4 +1,5 @@
 import type { ClobClient } from "@polymarket/clob-client";
+import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker } from "./position-tracker";
 
@@ -111,52 +112,103 @@ export class AutoSellStrategy {
   }
 
   /**
-   * Sell a position
-   * This is a placeholder for actual selling logic
+   * Sell a position using postOrder utility
+   * Executes market sell order at best bid for quick capital recovery
    */
   private async sellPosition(
     marketId: string,
     tokenId: string,
     size: number
   ): Promise<void> {
-    this.logger.debug(
-      `[AutoSell] Would sell ${size} of ${tokenId} in market ${marketId}`
-    );
-    
-    // TODO: Implement actual CLOB sell order creation
-    // This is a placeholder that needs to be replaced with real order submission
-    
-    // In production, this would:
-    // 1. Get current best bid price from orderbook
-    //    const orderbook = await this.client.getOrderbook(marketId);
-    //    const bestBid = orderbook.bids[0];
-    // 
-    // 2. Create a market sell order to exit quickly at current price
-    //    // Use market order or aggressive limit order for immediate execution
-    //    const order = {
-    //      tokenId: tokenId,
-    //      side: 'SELL',
-    //      type: 'MARKET', // Or LIMIT at slightly below bid
-    //      size: size,
-    //      price: bestBid.price * 0.998, // Accept small slippage for speed
-    //      feeRateBps: 0,
-    //    };
-    // 
-    // 3. Sign the sell order
-    //    const signedOrder = await this.client.createOrder(order);
-    // 
-    // 4. Submit order to CLOB API
-    //    const result = await this.client.postOrder(signedOrder);
-    // 
-    // 5. Wait for fill confirmation (shorter timeout since this is urgent)
-    //    const filled = await this.client.waitForOrderFill(result.orderId, 15000);
-    // 
-    // 6. Log the sale and capital freed
-    //    if (filled) {
-    //      this.logger.info(
-    //        `[AutoSell] ✓ Sold ${size.toFixed(2)} shares, freed $${size.toFixed(2)} capital`
-    //      );
-    //    }
+    try {
+      // Import postOrder utility
+      const { postOrder } = await import("../utils/post-order.util");
+      
+      // Get current orderbook to check liquidity and best bid
+      const orderbook = await this.client.getOrderBook(tokenId);
+      
+      if (!orderbook.bids || orderbook.bids.length === 0) {
+        throw new Error(`No bids available for token ${tokenId} - market may be closed or resolved`);
+      }
+      
+      const bestBid = parseFloat(orderbook.bids[0].price);
+      const bestBidSize = parseFloat(orderbook.bids[0].size);
+      
+      this.logger.debug(
+        `[AutoSell] Best bid: ${(bestBid * 100).toFixed(1)}¢ (size: ${bestBidSize.toFixed(2)})`
+      );
+      
+      // Check liquidity
+      const totalBidLiquidity = orderbook.bids
+        .slice(0, 5) // Top 5 levels for auto-sell
+        .reduce((sum, level) => sum + parseFloat(level.size), 0);
+      
+      if (totalBidLiquidity < size * 0.3) {
+        this.logger.warn(
+          `[AutoSell] Low liquidity: attempting to sell ${size.toFixed(2)} but only ${totalBidLiquidity.toFixed(2)} available`
+        );
+      }
+      
+      // Calculate sell value
+      const sizeUsd = size * bestBid;
+      
+      // Validate minimum order size
+      const minOrderUsd = 10;
+      if (sizeUsd < minOrderUsd) {
+        this.logger.warn(
+          `[AutoSell] Position too small: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`
+        );
+        return;
+      }
+      
+      // Extract wallet if available
+      const wallet = (this.client as { wallet?: Wallet }).wallet;
+      
+      // Calculate expected loss per share
+      const lossPerShare = 1.0 - bestBid;
+      const totalLoss = lossPerShare * size;
+      
+      this.logger.info(
+        `[AutoSell] Executing sell: ${size.toFixed(2)} shares at ~${(bestBid * 100).toFixed(1)}¢ (loss: $${totalLoss.toFixed(2)})`
+      );
+      
+      // Execute sell order - use aggressive pricing for fast fill
+      const result = await postOrder({
+        client: this.client,
+        wallet,
+        marketId,
+        tokenId,
+        outcome: "YES", // Direction doesn't matter for sells
+        side: "SELL",
+        sizeUsd,
+        maxAcceptablePrice: bestBid * 0.90, // Accept up to 10% slippage for urgent exit
+        logger: this.logger,
+        priority: false,
+      });
+      
+      if (result.status === "submitted") {
+        const freedCapital = size * bestBid;
+        this.logger.info(
+          `[AutoSell] ✓ Sold ${size.toFixed(2)} shares, freed $${freedCapital.toFixed(2)} capital`
+        );
+      } else if (result.status === "skipped") {
+        this.logger.warn(
+          `[AutoSell] Sell order skipped: ${result.reason ?? "unknown reason"}`
+        );
+      } else {
+        this.logger.error(
+          `[AutoSell] Sell order failed: ${result.reason ?? "unknown reason"}`
+        );
+        throw new Error(`Sell order failed: ${result.reason ?? "unknown"}`);
+      }
+      
+    } catch (err) {
+      // Re-throw error for caller to handle
+      this.logger.error(
+        `[AutoSell] Failed to sell position: ${err instanceof Error ? err.message : String(err)}`
+      );
+      throw err;
+    }
   }
 
   /**

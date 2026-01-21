@@ -1,4 +1,5 @@
 import type { ClobClient } from "@polymarket/clob-client";
+import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker } from "./position-tracker";
 
@@ -105,7 +106,7 @@ export class QuickFlipStrategy {
 
   /**
    * Check if position should be sold based on hold time
-   * Gets entry time from position tracker (not on first call)
+   * Records entry time on first detection, checks hold time on subsequent calls
    */
   private shouldSell(marketId: string, tokenId: string): boolean {
     const key = `${marketId}-${tokenId}`;
@@ -125,56 +126,102 @@ export class QuickFlipStrategy {
   }
 
   /**
-   * Sell a position
-   * This is a placeholder for actual selling logic
+   * Sell a position using postOrder utility
+   * Executes market sell order at best bid price
    */
   private async sellPosition(
     marketId: string,
     tokenId: string,
     size: number
   ): Promise<void> {
-    this.logger.debug(
-      `[QuickFlip] Would sell ${size} of ${tokenId} in market ${marketId}`
-    );
-    
-    // TODO: Implement actual CLOB sell order creation
-    // This is a placeholder that needs to be replaced with real order submission
-    
-    // In production, this would:
-    // 1. Get current best bid price from orderbook
-    //    const orderbook = await this.client.getOrderbook(marketId);
-    //    const bestBid = orderbook.bids[0];
-    // 
-    // 2. Create a sell order slightly below best bid for quick fill
-    //    const sellPrice = bestBid.price * 0.999; // Slight discount for immediate fill
-    //    const order = {
-    //      tokenId: tokenId,
-    //      side: 'SELL',
-    //      type: 'LIMIT',
-    //      price: sellPrice,
-    //      size: size,
-    //      feeRateBps: 0,
-    //    };
-    // 
-    // 3. Sign the sell order
-    //    const signedOrder = await this.client.createOrder(order);
-    // 
-    // 4. Submit order to CLOB
-    //    const result = await this.client.postOrder(signedOrder);
-    // 
-    // 5. Wait for fill confirmation (with timeout)
-    //    const filled = await this.client.waitForOrderFill(result.orderId, 30000);
-    // 
-    // 6. Log the sale result
-    //    if (filled) {
-    //      this.logger.info(
-    //        `[QuickFlip] ✓ Sold ${size.toFixed(2)} shares at ${(sellPrice * 100).toFixed(1)}¢`
-    //      );
-    //    }
-    
-    // Remove from entry times after selling
-    const key = `${marketId}-${tokenId}`;
-    this.positionEntryTimes.delete(key);
+    try {
+      // Import postOrder utility
+      const { postOrder } = await import("../utils/post-order.util");
+      
+      // Get current orderbook to check liquidity and best bid
+      const orderbook = await this.client.getOrderBook(tokenId);
+      
+      if (!orderbook.bids || orderbook.bids.length === 0) {
+        throw new Error(`No bids available for token ${tokenId} - cannot sell`);
+      }
+      
+      const bestBid = parseFloat(orderbook.bids[0].price);
+      const bestBidSize = parseFloat(orderbook.bids[0].size);
+      
+      this.logger.debug(
+        `[QuickFlip] Best bid: ${(bestBid * 100).toFixed(1)}¢ (size: ${bestBidSize.toFixed(2)})`
+      );
+      
+      // Check if there's sufficient liquidity
+      const totalBidLiquidity = orderbook.bids
+        .slice(0, 3) // Top 3 levels
+        .reduce((sum, level) => sum + parseFloat(level.size), 0);
+      
+      if (totalBidLiquidity < size * 0.5) {
+        this.logger.warn(
+          `[QuickFlip] Low liquidity warning: attempting to sell ${size.toFixed(2)} but only ${totalBidLiquidity.toFixed(2)} available in top 3 levels`
+        );
+      }
+      
+      // Calculate sell value (size * best bid price)
+      const sizeUsd = size * bestBid;
+      
+      // Validate minimum order size
+      const minOrderUsd = 10; // From DEFAULT_CONFIG
+      if (sizeUsd < minOrderUsd) {
+        this.logger.warn(
+          `[QuickFlip] Position too small to sell: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`
+        );
+        return;
+      }
+      
+      // Extract wallet if available (for compatibility with postOrder)
+      const wallet = (this.client as { wallet?: Wallet }).wallet;
+      
+      this.logger.info(
+        `[QuickFlip] Executing sell: ${size.toFixed(2)} shares at ~${(bestBid * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)})`
+      );
+      
+      // Execute sell order using postOrder utility
+      const result = await postOrder({
+        client: this.client,
+        wallet,
+        marketId,
+        tokenId,
+        outcome: "YES", // Direction doesn't matter for sells, we're selling tokens we own
+        side: "SELL",
+        sizeUsd, // Size in USD terms
+        maxAcceptablePrice: bestBid * 0.95, // Accept up to 5% slippage
+        logger: this.logger,
+        priority: false, // Not a frontrun trade
+      });
+      
+      if (result.status === "submitted") {
+        this.logger.info(
+          `[QuickFlip] ✓ Sold ${size.toFixed(2)} shares at ~${(bestBid * 100).toFixed(1)}¢`
+        );
+      } else if (result.status === "skipped") {
+        this.logger.warn(
+          `[QuickFlip] Sell order skipped: ${result.reason ?? "unknown reason"}`
+        );
+      } else {
+        this.logger.error(
+          `[QuickFlip] Sell order failed: ${result.reason ?? "unknown reason"}`
+        );
+        throw new Error(`Sell order failed: ${result.reason ?? "unknown"}`);
+      }
+      
+    } catch (err) {
+      // Re-throw error for caller to handle
+      this.logger.error(
+        `[QuickFlip] Failed to sell position: ${err instanceof Error ? err.message : String(err)}`
+      );
+      throw err;
+    } finally {
+      // Always remove from entry times after attempt (success or failure)
+      const key = `${marketId}-${tokenId}`;
+      this.positionEntryTimes.delete(key);
+    }
   }
 
   /**

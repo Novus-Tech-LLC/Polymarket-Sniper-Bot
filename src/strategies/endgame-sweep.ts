@@ -1,4 +1,5 @@
 import type { ClobClient } from "@polymarket/clob-client";
+import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import { MAX_LIQUIDITY_USAGE_PCT } from "./constants";
 
@@ -99,53 +100,173 @@ export class EndgameSweepStrategy {
 
   /**
    * Scan for endgame opportunities
-   * Returns markets with prices in the target range
+   * Fetches markets from Gamma API and filters by price range
    */
   private async scanForEndgameOpportunities(): Promise<Market[]> {
     this.logger.debug(
       `[EndgameSweep] Scanning for positions between ${(this.config.minPrice * 100).toFixed(1)}¢ and ${(this.config.maxPrice * 100).toFixed(1)}¢`
     );
 
-    // TODO: Implement actual Polymarket API integration
-    // This is a placeholder that needs to be replaced with real API calls
-    
-    // In production, this would:
-    // 1. Call client.getMarkets() or equivalent endpoint to fetch all active markets
-    // 2. For each market, get current orderbook to check best ask/bid prices
-    // 3. Filter markets where:
-    //    - price is between minPrice and maxPrice (e.g., 0.98 - 0.995)
-    //    - liquidity is sufficient (at least maxPositionUsd / price shares available)
-    //    - market is still active and hasn't resolved yet
-    //    - market has reasonable volume to ensure liquidity
-    // 4. Sort results by expected profit (1.0 - price) descending
-    // 5. Return top N opportunities
-    //
-    // Example structure (when implemented):
-    // const markets = await this.client.getMarkets({ active: true });
-    // const opportunities: Market[] = [];
-    // for (const market of markets) {
-    //   const orderbook = await this.client.getOrderbook(market.id);
-    //   const bestAsk = orderbook.asks[0];
-    //   if (bestAsk.price >= this.config.minPrice && 
-    //       bestAsk.price <= this.config.maxPrice &&
-    //       bestAsk.size * bestAsk.price >= this.config.maxPositionUsd) {
-    //     opportunities.push({
-    //       id: market.id,
-    //       tokenId: market.tokenId,
-    //       side: market.side,
-    //       price: bestAsk.price,
-    //       liquidity: bestAsk.size
-    //     });
-    //   }
-    // }
-    // return opportunities.sort((a, b) => (1 - a.price) - (1 - b.price)).slice(0, 10);
-
-    return [];
+    try {
+      // Import utilities
+      const { httpGet } = await import("../utils/fetch-data.util");
+      const { POLYMARKET_API } = await import("../constants/polymarket.constants");
+      
+      // Interface for Gamma API market response
+      interface GammaMarket {
+        condition_id?: string;
+        id?: string;
+        question?: string;
+        tokens?: Array<{
+          token_id?: string;
+          outcome?: string;
+          price?: string | number;
+        }>;
+        active?: boolean;
+        closed?: boolean;
+        archived?: boolean;
+        accepting_orders?: boolean;
+        enable_order_book?: boolean;
+      }
+      
+      // Fetch active markets from Gamma API
+      // Note: Gamma API returns paginated results, we'll fetch first page
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets?limit=100&active=true&closed=false`;
+      
+      this.logger.debug(`[EndgameSweep] Fetching markets from ${url}`);
+      
+      const response = await httpGet<GammaMarket[]>(url, { timeout: 15000 });
+      
+      if (!response || response.length === 0) {
+        this.logger.debug("[EndgameSweep] No active markets found");
+        return [];
+      }
+      
+      this.logger.debug(`[EndgameSweep] Fetched ${response.length} markets from Gamma API`);
+      
+      // Filter and map markets to opportunities
+      const opportunities: Market[] = [];
+      const maxConcurrent = 3; // Rate limit orderbook fetches
+      
+      for (let i = 0; i < response.length; i += maxConcurrent) {
+        const batch = response.slice(i, i + maxConcurrent);
+        
+        const batchResults = await Promise.allSettled(
+          batch.map(async (market) => {
+            try {
+              // Skip if market is closed or not accepting orders
+              if (market.closed || market.archived || !market.accepting_orders || !market.enable_order_book) {
+                return null;
+              }
+              
+              const marketId = market.condition_id ?? market.id;
+              if (!marketId || !market.tokens || market.tokens.length === 0) {
+                return null;
+              }
+              
+              // Check each outcome token
+              const marketOpportunities: Market[] = [];
+              
+              for (const token of market.tokens) {
+                const tokenId = token.token_id;
+                if (!tokenId) continue;
+                
+                try {
+                  // Fetch current orderbook for accurate pricing
+                  const orderbook = await this.client.getOrderBook(tokenId);
+                  
+                  if (!orderbook.asks || orderbook.asks.length === 0) {
+                    continue; // No liquidity
+                  }
+                  
+                  const bestAsk = parseFloat(orderbook.asks[0].price);
+                  const bestAskSize = parseFloat(orderbook.asks[0].size);
+                  
+                  // Check if price is in target range
+                  if (bestAsk >= this.config.minPrice && bestAsk <= this.config.maxPrice) {
+                    // Calculate total liquidity in target range
+                    const totalLiquidity = orderbook.asks
+                      .filter(level => {
+                        const price = parseFloat(level.price);
+                        return price >= this.config.minPrice && price <= this.config.maxPrice;
+                      })
+                      .reduce((sum, level) => sum + parseFloat(level.size), 0);
+                    
+                    // Only consider if there's sufficient liquidity
+                    const minLiquidity = this.config.maxPositionUsd / bestAsk;
+                    if (totalLiquidity >= minLiquidity * 0.5) {
+                      const side = token.outcome?.toUpperCase() === "YES" || token.outcome?.toUpperCase() === "NO"
+                        ? (token.outcome.toUpperCase() as "YES" | "NO")
+                        : "YES";
+                      
+                      marketOpportunities.push({
+                        id: marketId,
+                        tokenId,
+                        side,
+                        price: bestAsk,
+                        liquidity: totalLiquidity,
+                      });
+                    }
+                  }
+                } catch (err) {
+                  // Skip this token on error (might be resolved or have no orderbook)
+                  this.logger.debug(
+                    `[EndgameSweep] Failed to fetch orderbook for token ${tokenId}: ${err instanceof Error ? err.message : String(err)}`
+                  );
+                }
+              }
+              
+              return marketOpportunities;
+            } catch (err) {
+              this.logger.debug(
+                `[EndgameSweep] Failed to process market: ${err instanceof Error ? err.message : String(err)}`
+              );
+              return null;
+            }
+          })
+        );
+        
+        // Collect results
+        for (const result of batchResults) {
+          if (result.status === "fulfilled" && result.value) {
+            opportunities.push(...result.value);
+          }
+        }
+        
+        // Small delay between batches
+        if (i + maxConcurrent < response.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      // Sort by expected profit (1 - price) descending
+      opportunities.sort((a, b) => (1 - a.price) - (1 - b.price));
+      
+      this.logger.debug(
+        `[EndgameSweep] Found ${opportunities.length} opportunities in target price range`
+      );
+      
+      // Log top 5 opportunities
+      if (opportunities.length > 0) {
+        const top5 = opportunities.slice(0, 5);
+        this.logger.info(
+          `[EndgameSweep] Top opportunities: ${top5.map(o => `${(o.price * 100).toFixed(1)}¢ (${((1 - o.price) * 100).toFixed(2)}% profit)`).join(", ")}`
+        );
+      }
+      
+      return opportunities;
+    } catch (err) {
+      this.logger.error(
+        `[EndgameSweep] Failed to scan for opportunities: ${err instanceof Error ? err.message : String(err)}`,
+        err as Error
+      );
+      return [];
+    }
   }
 
   /**
-   * Buy a position
-   * This is a placeholder for actual buying logic
+   * Buy a position using postOrder utility
+   * Executes market buy order at best ask price
    */
   private async buyPosition(market: Market): Promise<void> {
     // Validate market price before calculations
@@ -170,45 +291,101 @@ export class EndgameSweepStrategy {
       return;
     }
 
-    this.logger.debug(
-      `[EndgameSweep] Would buy ${positionSize.toFixed(2)} of ${market.tokenId} at ${(market.price * 100).toFixed(1)}¢`
-    );
-
-    // TODO: Implement actual CLOB order creation
-    // This is a placeholder that needs to be replaced with real order submission
-    
-    // In production, this would:
-    // 1. Get current best ask price from orderbook
-    //    const orderbook = await this.client.getOrderbook(market.id);
-    //    const bestAsk = orderbook.asks[0];
-    // 
-    // 2. Create a market buy order (or limit order at ask price for better fill)
-    //    const order = {
-    //      tokenId: market.tokenId,
-    //      side: 'BUY',
-    //      type: 'LIMIT',
-    //      price: bestAsk.price,
-    //      size: positionSize,
-    //      feeRateBps: 0, // Or get from client config
-    //    };
-    // 
-    // 3. Sign the order with wallet credentials
-    //    const signedOrder = await this.client.createOrder(order);
-    // 
-    // 4. Submit order to CLOB API
-    //    const result = await this.client.postOrder(signedOrder);
-    // 
-    // 5. Poll for order status or wait for fill
-    //    const filled = await this.client.waitForOrderFill(result.orderId, 30000);
-    // 
-    // 6. Log successful purchase with details
-    //    if (filled) {
-    //      const expectedProfit = (1.0 - market.price) * positionSize;
-    //      this.logger.info(
-    //        `[EndgameSweep] ✓ Bought ${positionSize.toFixed(2)} at ${(market.price * 100).toFixed(1)}¢ ` +
-    //        `(expected profit: $${expectedProfit.toFixed(2)})`
-    //      );
-    //    }
+    try {
+      // Import postOrder utility
+      const { postOrder } = await import("../utils/post-order.util");
+      
+      // Get fresh orderbook for current pricing
+      const orderbook = await this.client.getOrderBook(market.tokenId);
+      
+      if (!orderbook.asks || orderbook.asks.length === 0) {
+        throw new Error(`No asks available for token ${market.tokenId} - market may have closed`);
+      }
+      
+      const bestAsk = parseFloat(orderbook.asks[0].price);
+      const bestAskSize = parseFloat(orderbook.asks[0].size);
+      
+      // Re-validate price is still in range (may have changed)
+      if (bestAsk < this.config.minPrice || bestAsk > this.config.maxPrice) {
+        this.logger.warn(
+          `[EndgameSweep] Price moved out of range: ${(bestAsk * 100).toFixed(1)}¢ (was ${(market.price * 100).toFixed(1)}¢)`
+        );
+        return;
+      }
+      
+      this.logger.debug(
+        `[EndgameSweep] Best ask: ${(bestAsk * 100).toFixed(1)}¢ (size: ${bestAskSize.toFixed(2)})`
+      );
+      
+      // Calculate USD size for order
+      const sizeUsd = positionSize * bestAsk;
+      
+      // Validate minimum order size
+      const minOrderUsd = 10;
+      if (sizeUsd < minOrderUsd) {
+        this.logger.warn(
+          `[EndgameSweep] Position too small: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`
+        );
+        return;
+      }
+      
+      // Check LIVE_TRADING is enabled
+      const liveTradingEnabled = process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+      if (!liveTradingEnabled) {
+        this.logger.warn(
+          `[EndgameSweep] Would buy ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)}) - LIVE TRADING DISABLED`
+        );
+        return;
+      }
+      
+      // Extract wallet if available
+      const wallet = (this.client as { wallet?: Wallet }).wallet;
+      
+      // Calculate expected profit
+      const expectedProfit = (1.0 - bestAsk) * positionSize;
+      const expectedProfitPct = ((1.0 - bestAsk) / bestAsk) * 100;
+      
+      this.logger.info(
+        `[EndgameSweep] Executing buy: ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)}, expected profit: $${expectedProfit.toFixed(2)} / ${expectedProfitPct.toFixed(2)}%)`
+      );
+      
+      // Execute buy order
+      const result = await postOrder({
+        client: this.client,
+        wallet,
+        marketId: market.id,
+        tokenId: market.tokenId,
+        outcome: market.side,
+        side: "BUY",
+        sizeUsd,
+        maxAcceptablePrice: bestAsk * 1.02, // Accept up to 2% slippage for endgame positions
+        logger: this.logger,
+        priority: false,
+      });
+      
+      if (result.status === "submitted") {
+        this.logger.info(
+          `[EndgameSweep] ✓ Bought ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ (expected profit: $${expectedProfit.toFixed(2)})`
+        );
+      } else if (result.status === "skipped") {
+        this.logger.warn(
+          `[EndgameSweep] Buy order skipped: ${result.reason ?? "unknown reason"}`
+        );
+        throw new Error(`Buy order skipped: ${result.reason ?? "unknown"}`);
+      } else {
+        this.logger.error(
+          `[EndgameSweep] Buy order failed: ${result.reason ?? "unknown reason"}`
+        );
+        throw new Error(`Buy order failed: ${result.reason ?? "unknown"}`);
+      }
+      
+    } catch (err) {
+      // Re-throw error for caller to handle
+      this.logger.error(
+        `[EndgameSweep] Failed to buy position: ${err instanceof Error ? err.message : String(err)}`
+      );
+      throw err;
+    }
   }
 
   /**
