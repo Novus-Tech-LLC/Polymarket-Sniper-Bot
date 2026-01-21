@@ -748,18 +748,13 @@ export const ensureTradingReady = async (
 
   // Store on-chain approval verification state on the client for use during trading
   // This allows the trading flow to trust on-chain approvals when CLOB API returns incorrect allowance=0
-  (
-    params.client as ClobClient & {
-      relayerContext?: ReturnType<typeof createRelayerContext>;
-      onchainApprovalsVerified?: boolean;
-    }
-  ).relayerContext = relayer;
+  type ClobClientExtended = ClobClient & {
+    relayerContext?: ReturnType<typeof createRelayerContext>;
+    onchainApprovalsVerified?: boolean;
+  };
   
-  (
-    params.client as ClobClient & {
-      onchainApprovalsVerified?: boolean;
-    }
-  ).onchainApprovalsVerified = approvalsOk;
+  (params.client as ClobClientExtended).relayerContext = relayer;
+  (params.client as ClobClientExtended).onchainApprovalsVerified = approvalsOk;
 
   return { detectOnly, authOk, approvalsOk, geoblockPassed };
 };

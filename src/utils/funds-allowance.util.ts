@@ -402,10 +402,11 @@ export const checkFundsAndAllowance = async (
   //      https://github.com/Polymarket/py-clob-client/issues/102
   //      https://github.com/Polymarket/py-clob-client/issues/109
   // When TRUST_ONCHAIN_APPROVALS=true and preflight verified approvals, skip CLOB allowance check
-  const trustOnchainApprovals = 
+  const trustOnchainApprovals =
     process.env.TRUST_ONCHAIN_APPROVALS?.toLowerCase() !== "false"; // Default: true (CLOB is broken)
-  const onchainApprovalsVerified = 
-    (params.client as { onchainApprovalsVerified?: boolean }).onchainApprovalsVerified ?? false;
+  const onchainApprovalsVerified =
+    (params.client as { onchainApprovalsVerified?: boolean })
+      .onchainApprovalsVerified ?? false;
 
   if (trustOnchainApprovals && onchainApprovalsVerified) {
     params.logger.info(
@@ -481,7 +482,8 @@ export const checkFundsAndAllowance = async (
         params.logger.info(
           `[CLOB][TrustMode] Proceeding with trade despite CLOB allowance=0 (known bug). Balance sufficient and on-chain approvals verified. need=${formatUsd(requiredUsd)} have=${formatUsd(insufficientSnapshot.balanceUsd)} allowance=${formatUsd(insufficientSnapshot.allowanceUsd)}`,
         );
-        // Continue to ERC1155 approval check below
+        // In trust mode, skip the error return and continue with ERC1155 approval checks
+        // The code will fall through to the approvedForAll check below (line 607)
       } else {
         // Need to refresh if this is the first check
         await refreshAndRetry();
