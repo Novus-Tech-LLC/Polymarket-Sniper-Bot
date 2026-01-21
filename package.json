@@ -79,7 +79,7 @@
   "dependencies": {
     "@polymarket/builder-relayer-client": "^0.0.8",
     "@polymarket/builder-signing-sdk": "^0.0.8",
-    "@polymarket/clob-client": "^5.2.1",
+    "@polymarket/clob-client": "4.22.8",
     "axios": "^1.13.2",
     "chalk": "^5.6.2",
     "dotenv": "^17.2.3",
