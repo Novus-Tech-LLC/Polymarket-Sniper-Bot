@@ -36,6 +36,7 @@ export interface AuthAttempt {
   errorCode?: string; // Error code (e.g., "WRONG_KEY_TYPE")
   errorTextShort?: string; // Truncated error message
   success: boolean;
+  severity?: "FATAL" | "NON_FATAL" | "TRANSIENT"; // Preflight failure severity
 }
 
 /**
