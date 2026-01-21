@@ -1,7 +1,11 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
-import { MAX_LIQUIDITY_USAGE_PCT } from "./constants";
+import {
+  MAX_LIQUIDITY_USAGE_PCT,
+  calculateNetProfit,
+  isProfitableAfterFees,
+} from "./constants";
 
 export interface EndgameSweepConfig {
   enabled: boolean;
@@ -68,12 +72,20 @@ export class EndgameSweepStrategy {
         continue;
       }
 
-      // Calculate expected profit
-      const expectedProfit = (1.0 - market.price) / market.price;
-      const expectedProfitPct = expectedProfit * 100;
+      // Calculate expected profit (gross and net)
+      const expectedGrossProfitPct = ((1.0 - market.price) / market.price) * 100;
+      const expectedNetProfitPct = calculateNetProfit(expectedGrossProfitPct);
+
+      // Skip if not profitable after fees (minimum 0.5% net profit)
+      if (!isProfitableAfterFees(expectedGrossProfitPct, 0.5)) {
+        this.logger.debug(
+          `[EndgameSweep] Skipping ${market.id} at ${(market.price * 100).toFixed(1)}¢ - insufficient margin (${expectedNetProfitPct.toFixed(2)}% net after fees)`
+        );
+        continue;
+      }
 
       this.logger.info(
-        `[EndgameSweep] Opportunity: ${market.id} at ${(market.price * 100).toFixed(1)}¢ (expected ${expectedProfitPct.toFixed(2)}% profit)`
+        `[EndgameSweep] Opportunity: ${market.id} at ${(market.price * 100).toFixed(1)}¢ (gross ${expectedGrossProfitPct.toFixed(2)}%, net ${expectedNetProfitPct.toFixed(2)}% after fees)`
       );
 
       try {

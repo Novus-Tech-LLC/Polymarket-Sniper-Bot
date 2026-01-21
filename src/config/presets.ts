@@ -222,7 +222,7 @@ export const STRATEGY_PRESETS = {
     AUTO_SELL_MIN_HOLD_SECONDS: 120, // Hold at least 2 minutes before auto-selling
     // Endgame sweep settings
     ENDGAME_SWEEP_ENABLED: true,
-    ENDGAME_MIN_PRICE: 0.98,         // 98¢
+    ENDGAME_MIN_PRICE: 0.985,        // 98.5¢ (ensures 1.3% net profit minimum after 0.2% fees)
     ENDGAME_MAX_PRICE: 0.995,        // 99.5¢ (auto-sell threshold is higher)
     ENDGAME_MAX_POSITION_USD: 25,    // Balanced position sizing
     // Rate limits (higher for more trades)

@@ -2,6 +2,7 @@ import type { ClobClient } from "@polymarket/clob-client";
 import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker } from "./position-tracker";
+import { calculateNetProfit } from "./constants";
 
 export interface QuickFlipConfig {
   enabled: boolean;
@@ -58,8 +59,9 @@ export class QuickFlipStrategy {
     
     for (const position of targetPositions) {
       if (this.shouldSell(position.marketId, position.tokenId)) {
+        const netProfitPct = calculateNetProfit(position.pnlPct);
         this.logger.info(
-          `[QuickFlip] Selling position at +${position.pnlPct.toFixed(2)}% gain: ${position.marketId}`
+          `[QuickFlip] Selling position at +${position.pnlPct.toFixed(2)}% gross (+${netProfitPct.toFixed(2)}% net after fees): ${position.marketId}`
         );
         
         try {
@@ -81,8 +83,9 @@ export class QuickFlipStrategy {
     
     for (const position of stopLossPositions) {
       if (this.shouldSell(position.marketId, position.tokenId)) {
+        const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
         this.logger.warn(
-          `[QuickFlip] Stop-loss triggered at ${position.pnlPct.toFixed(2)}%: ${position.marketId}`
+          `[QuickFlip] Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`
         );
         
         try {

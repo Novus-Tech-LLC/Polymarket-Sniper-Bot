@@ -90,11 +90,14 @@ export class AutoSellStrategy {
         this.soldPositions.add(positionKey);
         soldCount++;
         
-        // Log the trade-off
+        // Log the capital recovery trade-off (includes 0.2% fees)
         const lossPerShare = 1.0 - position.currentPrice;
-        const totalLoss = lossPerShare * position.size;
+        const totalLossFromPrice = lossPerShare * position.size;
+        const feeCost = position.size * 0.002; // 0.2% round-trip fees
+        const totalCost = totalLossFromPrice + feeCost;
+        
         this.logger.info(
-          `[AutoSell] Freed up $${position.size.toFixed(2)} (loss: $${totalLoss.toFixed(2)})`
+          `[AutoSell] Freed $${position.size.toFixed(2)} capital (cost: $${totalLossFromPrice.toFixed(2)} + $${feeCost.toFixed(2)} fees = $${totalCost.toFixed(2)} total, ${((totalCost / position.size) * 100).toFixed(2)}% of position)`
         );
       } catch (err) {
         this.logger.error(
