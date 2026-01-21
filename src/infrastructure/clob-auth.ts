@@ -17,6 +17,13 @@ export async function initializeApiCreds(
     return cachedCreds;
   }
 
+  // Check if credentials are already on the client instance
+  const clientCreds = (client as ClobClient & { creds?: ApiKeyCreds }).creds;
+  if (clientCreds) {
+    cachedCreds = clientCreds; // Cache them for future use
+    return clientCreds;
+  }
+
   throw new Error(
     "[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.",
   );
@@ -26,6 +33,14 @@ export async function refreshApiCreds(
   client: ClobClient,
 ): Promise<ApiKeyCreds> {
   if (!cachedCreds) {
+    // Check if credentials are already on the client instance
+    const clientCreds = (client as ClobClient & { creds?: ApiKeyCreds }).creds;
+    if (clientCreds) {
+      cachedCreds = clientCreds; // Cache them for future use
+      applyClientCreds(client, cachedCreds);
+      return cachedCreds;
+    }
+
     throw new Error(
       "[CLOB] Missing API credentials. Provide POLYMARKET_API_KEY/POLY_API_KEY/CLOB_API_KEY, POLYMARKET_API_SECRET/POLY_SECRET/CLOB_API_SECRET, and POLYMARKET_API_PASSPHRASE/POLY_PASSPHRASE/CLOB_API_PASSPHRASE.",
     );
