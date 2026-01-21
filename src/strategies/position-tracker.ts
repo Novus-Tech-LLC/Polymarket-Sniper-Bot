@@ -223,9 +223,6 @@ export class PositionTracker {
                 const reason = `Missing required fields - tokenId: ${tokenId || "MISSING"}, marketId: ${marketId || "MISSING"}`;
                 skippedPositions.push({ reason, data: apiPos });
                 this.logger.warn(`[PositionTracker] ${reason}`);
-                this.logger.warn(
-                  `[PositionTracker] Raw API data: ${JSON.stringify(apiPos)}`,
-                );
                 return null;
               }
 
@@ -284,9 +281,6 @@ export class PositionTracker {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;
               skippedPositions.push({ reason, data: apiPos });
               this.logger.warn(`[PositionTracker] ${reason}`);
-              this.logger.warn(
-                `[PositionTracker] Raw API data: ${JSON.stringify(apiPos)}`,
-              );
               return null;
             }
           }),
