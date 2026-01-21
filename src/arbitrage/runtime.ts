@@ -15,6 +15,7 @@ import {
 } from "../utils/clob-credentials.util";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
+import { isLiveTradingEnabled } from "../utils/live-trading.util";
 import type { ClobClient } from "@polymarket/clob-client";
 import type { Wallet } from "ethers";
 
@@ -112,9 +113,8 @@ export async function startArbitrageEngine(
     config.detectOnly = tradingReady.detectOnly;
   }
 
-  // Check if ARB_LIVE_TRADING is set
-  const liveTradingEnabled =
-    process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+  // Check if live trading is enabled (supports both ARB_LIVE_TRADING and LIVE_TRADING)
+  const liveTradingEnabled = isLiveTradingEnabled();
 
   // Log prominent trading status banner for ARB mode
   if (config.detectOnly) {

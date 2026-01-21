@@ -21,6 +21,7 @@ import {
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
 import { StrategyOrchestrator } from "../strategies/orchestrator";
+import { isLiveTradingEnabled } from "../utils/live-trading.util";
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
@@ -131,9 +132,8 @@ async function main(): Promise<void> {
     mempoolEnv.clobCredsComplete = true;
     mempoolEnv.detectOnly = tradingReady.detectOnly;
 
-    // Check if ARB_LIVE_TRADING is set
-    const liveTradingEnabled =
-      process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+    // Check if live trading is enabled (supports both ARB_LIVE_TRADING and LIVE_TRADING)
+    const liveTradingEnabled = isLiveTradingEnabled();
 
     // Log balances at startup
     try {

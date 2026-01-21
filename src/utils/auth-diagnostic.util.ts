@@ -339,8 +339,8 @@ export function getContextAwareWarnings(params: {
   }
 
   if (!params.liveTradingEnabled && warnings.length === 0) {
-    // Only mention ARB_LIVE_TRADING if it's the only blocker
-    warnings.push("ARB_LIVE_TRADING not set to 'I_UNDERSTAND_THE_RISKS'");
+    // Only mention live trading flag if it's the only blocker
+    warnings.push("LIVE_TRADING (or ARB_LIVE_TRADING) not set to 'I_UNDERSTAND_THE_RISKS'");
   }
 
   return warnings;
