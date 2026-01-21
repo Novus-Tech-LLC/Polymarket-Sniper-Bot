@@ -29,6 +29,7 @@ export interface AuthAttempt {
 ```
 
 **Rationale**: Makes severity a first-class diagnostic dimension, enabling:
+
 - Easier log filtering (`WHERE severity = "FATAL"`)
 - Programmatic analysis of auth failures
 - Better observability in monitoring tools
@@ -55,6 +56,7 @@ const createAuthAttempt = (
 ```
 
 Updated all three severity branches to pass severity:
+
 - `severity: "FATAL"` for 401/403 errors
 - `severity: "NON_FATAL"` for param/funds errors
 - `severity: "TRANSIENT"` for network/500+ errors
@@ -89,15 +91,15 @@ test("classifyPreflightSeverity marks 429 rate limit as TRANSIENT", () => {
 
 ### ⚠️ Edge Cases Handled
 
-| Status | Scenario | Classification | Safe? | Fixed? |
-|--------|----------|----------------|-------|--------|
-| 401/403 | Auth failure | FATAL → blocks | ✅ Yes | N/A |
-| 429 | Rate limit | TRANSIENT → allows | ✅ Yes | ✅ Fixed |
-| 500+ | Server error | TRANSIENT → allows | ✅ Yes | N/A |
-| 400 | Bad params (valid auth) | NON_FATAL → allows | ✅ Yes | N/A |
-| Network | ECONNRESET, ETIMEDOUT | TRANSIENT → allows | ✅ Yes | N/A |
-| 404 | Not found | NON_FATAL → allows | ⚠️ Log warning | 💡 Future |
-| 422 | Validation error | NON_FATAL → allows | ✅ Yes | N/A |
+| Status  | Scenario                | Classification     | Safe?          | Fixed?    |
+| ------- | ----------------------- | ------------------ | -------------- | --------- |
+| 401/403 | Auth failure            | FATAL → blocks     | ✅ Yes         | N/A       |
+| 429     | Rate limit              | TRANSIENT → allows | ✅ Yes         | ✅ Fixed  |
+| 500+    | Server error            | TRANSIENT → allows | ✅ Yes         | N/A       |
+| 400     | Bad params (valid auth) | NON_FATAL → allows | ✅ Yes         | N/A       |
+| Network | ECONNRESET, ETIMEDOUT   | TRANSIENT → allows | ✅ Yes         | N/A       |
+| 404     | Not found               | NON_FATAL → allows | ⚠️ Log warning | 💡 Future |
+| 422     | Validation error        | NON_FATAL → allows | ✅ Yes         | N/A       |
 
 ---
 
@@ -168,6 +170,7 @@ Other/Unknown       → NON_FATAL     → ✅ YES (safe default)
 ```
 
 **Benefits**:
+
 - Clear visibility into why trading was allowed despite error
 - Easier to debug rate limiting issues
 - Programmatic filtering by severity level
@@ -201,7 +204,7 @@ Other/Unknown       → NON_FATAL     → ✅ YES (safe default)
 if (params.status === 404) {
   params.logger.error(
     "[CLOB][Preflight] 404 Not Found - check CLOB_HOST and API version. " +
-    `Current host: ${process.env.CLOB_HOST || "https://clob.polymarket.com"}`
+      `Current host: ${process.env.CLOB_HOST || "https://clob.polymarket.com"}`,
   );
 }
 ```
@@ -248,8 +251,8 @@ if (params.status === 404) {
 SELECT * FROM logs WHERE severity = "FATAL" AND category = "PREFLIGHT"
 
 -- Count transient errors by status code
-SELECT httpStatus, COUNT(*) FROM logs 
-WHERE severity = "TRANSIENT" 
+SELECT httpStatus, COUNT(*) FROM logs
+WHERE severity = "TRANSIENT"
 GROUP BY httpStatus
 
 -- Find rate limiting incidents
@@ -263,6 +266,7 @@ SELECT * FROM logs WHERE httpStatus = 429
 ✅ **All critical issues resolved**
 
 The severity-based classification system is now **production-ready** with:
+
 1. Correct handling of all major HTTP status codes
 2. Proper rate limit handling with exponential backoff
 3. Rich diagnostic information in Auth Story
@@ -275,6 +279,7 @@ The severity-based classification system is now **production-ready** with:
 ---
 
 **Files Changed**:
+
 - `src/clob/diagnostics.ts` (added 429 handling)
 - `src/clob/auth-story.ts` (added severity field)
 - `src/polymarket/preflight.ts` (updated to pass severity)

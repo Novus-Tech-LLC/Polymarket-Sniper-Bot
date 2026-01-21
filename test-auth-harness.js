@@ -2,13 +2,13 @@
 
 /**
  * Enhanced Authentication Test Harness
- * 
+ *
  * This CLI script provides comprehensive authentication testing for Polymarket CLOB.
  * It tests the complete authentication flow with deterministic staging and detailed diagnostics.
- * 
+ *
  * NOTE: This is intentionally a single-file script for ease of deployment and use.
  * It can be run standalone without building the TypeScript codebase.
- * 
+ *
  * Features:
  * - Deterministic wallet mode selection (EOA vs Safe/Proxy)
  * - Separate L1 and L2 authentication testing
@@ -16,10 +16,10 @@
  * - On-chain trade history verification (optional)
  * - Container-friendly operation
  * - Clear pass/fail indicators at each stage
- * 
+ *
  * Usage:
  *   node test-auth-harness.js [options]
- * 
+ *
  * Options:
  *   --private-key <key>    Private key (or set PRIVATE_KEY env var)
  *   --funder <address>     Funder/proxy address for Safe/Proxy mode
@@ -44,8 +44,13 @@ function parseArgs() {
   const options = {
     privateKey: process.env.PRIVATE_KEY,
     rpcUrl: process.env.RPC_URL || "https://polygon-rpc.com",
-    funder: process.env.POLYMARKET_PROXY_ADDRESS || process.env.CLOB_FUNDER_ADDRESS,
-    signatureType: parseInt(process.env.POLYMARKET_SIGNATURE_TYPE || process.env.CLOB_SIGNATURE_TYPE || "0"),
+    funder:
+      process.env.POLYMARKET_PROXY_ADDRESS || process.env.CLOB_FUNDER_ADDRESS,
+    signatureType: parseInt(
+      process.env.POLYMARKET_SIGNATURE_TYPE ||
+        process.env.CLOB_SIGNATURE_TYPE ||
+        "0",
+    ),
     checkHistory: false,
     verbose: false,
   };
@@ -152,23 +157,49 @@ function determineWalletMode(options) {
 
   if (signatureType === SignatureType.POLY_GNOSIS_SAFE) {
     if (!funder) {
-      log("⚠️  WARNING: signatureType=2 (Safe) but no funder address configured", "yellow");
+      log(
+        "⚠️  WARNING: signatureType=2 (Safe) but no funder address configured",
+        "yellow",
+      );
       log("   Falling back to EOA mode", "yellow");
-      return { mode: "eoa", sigType: SignatureType.EOA, description: "EOA (default)" };
+      return {
+        mode: "eoa",
+        sigType: SignatureType.EOA,
+        description: "EOA (default)",
+      };
     }
-    return { mode: "safe", sigType: SignatureType.POLY_GNOSIS_SAFE, description: "Gnosis Safe" };
+    return {
+      mode: "safe",
+      sigType: SignatureType.POLY_GNOSIS_SAFE,
+      description: "Gnosis Safe",
+    };
   }
 
   if (signatureType === SignatureType.POLY_PROXY) {
     if (!funder) {
-      log("⚠️  WARNING: signatureType=1 (Proxy) but no funder address configured", "yellow");
+      log(
+        "⚠️  WARNING: signatureType=1 (Proxy) but no funder address configured",
+        "yellow",
+      );
       log("   Falling back to EOA mode", "yellow");
-      return { mode: "eoa", sigType: SignatureType.EOA, description: "EOA (default)" };
+      return {
+        mode: "eoa",
+        sigType: SignatureType.EOA,
+        description: "EOA (default)",
+      };
     }
-    return { mode: "proxy", sigType: SignatureType.POLY_PROXY, description: "Polymarket Proxy" };
+    return {
+      mode: "proxy",
+      sigType: SignatureType.POLY_PROXY,
+      description: "Polymarket Proxy",
+    };
   }
 
-  return { mode: "eoa", sigType: SignatureType.EOA, description: "EOA (standard wallet)" };
+  return {
+    mode: "eoa",
+    sigType: SignatureType.EOA,
+    description: "EOA (standard wallet)",
+  };
 }
 
 // Test L1 Authentication (derive/create API keys)
@@ -195,7 +226,10 @@ async function testL1Authentication(wallet, walletMode, options) {
     // Try deriveApiKey first
     log("\n  → Attempting deriveApiKey()...", "blue");
     logVerbose("L1 endpoint: GET /auth/derive-api-key", options);
-    logVerbose("Expected headers: POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_NONCE", options);
+    logVerbose(
+      "Expected headers: POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_NONCE",
+      options,
+    );
 
     let creds;
     try {
@@ -204,29 +238,54 @@ async function testL1Authentication(wallet, walletMode, options) {
       if (creds && creds.key && creds.secret && creds.passphrase) {
         log("  ✅ L1 AUTH OK - deriveApiKey succeeded", "green");
         if (options.verbose) {
-          log(`     API Key: ${creds.key.slice(0, 8)}...${creds.key.slice(-8)}`, "green");
+          log(
+            `     API Key: ${creds.key.slice(0, 8)}...${creds.key.slice(-8)}`,
+            "green",
+          );
         } else {
           log("     API Key: [REDACTED - use --verbose to show]", "green");
         }
         return { success: true, creds, method: "derive" };
       } else {
-        log("  ❌ L1 AUTH FAIL - deriveApiKey returned incomplete credentials", "red");
-        return { success: false, error: "Incomplete credentials from deriveApiKey" };
+        log(
+          "  ❌ L1 AUTH FAIL - deriveApiKey returned incomplete credentials",
+          "red",
+        );
+        return {
+          success: false,
+          error: "Incomplete credentials from deriveApiKey",
+        };
       }
     } catch (deriveError) {
       const status = deriveError.response?.status;
-      const message = deriveError.message || deriveError.response?.data || String(deriveError);
+      const message =
+        deriveError.message ||
+        deriveError.response?.data ||
+        String(deriveError);
 
       logVerbose(`deriveApiKey error: ${message}`, options);
 
       // Check for specific error types
-      if (status === 401 && message.toLowerCase().includes("invalid l1 request headers")) {
+      if (
+        status === 401 &&
+        message.toLowerCase().includes("invalid l1 request headers")
+      ) {
         log("  ❌ L1 AUTH FAIL - Invalid L1 Request headers", "red");
-        log("     This means the L1 authentication signature is incorrect", "yellow");
+        log(
+          "     This means the L1 authentication signature is incorrect",
+          "yellow",
+        );
         log("     Possible causes:", "yellow");
-        log("       - Wrong address used for L1 auth (signer vs effective)", "yellow");
+        log(
+          "       - Wrong address used for L1 auth (signer vs effective)",
+          "yellow",
+        );
         log("       - Incorrect signature type for this wallet", "yellow");
-        return { success: false, error: "Invalid L1 Request headers", stage: "L1" };
+        return {
+          success: false,
+          error: "Invalid L1 Request headers",
+          stage: "L1",
+        };
       }
 
       // Try createApiKey as fallback
@@ -239,31 +298,61 @@ async function testL1Authentication(wallet, walletMode, options) {
         if (creds && creds.key && creds.secret && creds.passphrase) {
           log("  ✅ L1 AUTH OK - createApiKey succeeded", "green");
           if (options.verbose) {
-            log(`     API Key: ${creds.key.slice(0, 8)}...${creds.key.slice(-8)}`, "green");
+            log(
+              `     API Key: ${creds.key.slice(0, 8)}...${creds.key.slice(-8)}`,
+              "green",
+            );
           } else {
             log("     API Key: [REDACTED - use --verbose to show]", "green");
           }
           return { success: true, creds, method: "create" };
         } else {
-          log("  ❌ L1 AUTH FAIL - createApiKey returned incomplete credentials", "red");
-          return { success: false, error: "Incomplete credentials from createApiKey" };
+          log(
+            "  ❌ L1 AUTH FAIL - createApiKey returned incomplete credentials",
+            "red",
+          );
+          return {
+            success: false,
+            error: "Incomplete credentials from createApiKey",
+          };
         }
       } catch (createError) {
         const createStatus = createError.response?.status;
-        const createMessage = createError.message || createError.response?.data || String(createError);
+        const createMessage =
+          createError.message ||
+          createError.response?.data ||
+          String(createError);
 
         logVerbose(`createApiKey error: ${createMessage}`, options);
 
-        if (createStatus === 400 && createMessage.toLowerCase().includes("could not create api key")) {
+        if (
+          createStatus === 400 &&
+          createMessage.toLowerCase().includes("could not create api key")
+        ) {
           log("  ❌ L1 AUTH FAIL - Could not create API key", "red");
           log("     This wallet has never traded on Polymarket", "yellow");
-          log(`     Action required: Visit ${POLYMARKET_WEBSITE_URL} and make at least one trade`, "yellow");
-          return { success: false, error: "Wallet never traded", stage: "L1", requiresTrade: true };
+          log(
+            `     Action required: Visit ${POLYMARKET_WEBSITE_URL} and make at least one trade`,
+            "yellow",
+          );
+          return {
+            success: false,
+            error: "Wallet never traded",
+            stage: "L1",
+            requiresTrade: true,
+          };
         }
 
-        if (createStatus === 401 && createMessage.toLowerCase().includes("invalid l1 request headers")) {
+        if (
+          createStatus === 401 &&
+          createMessage.toLowerCase().includes("invalid l1 request headers")
+        ) {
           log("  ❌ L1 AUTH FAIL - Invalid L1 Request headers", "red");
-          return { success: false, error: "Invalid L1 Request headers", stage: "L1" };
+          return {
+            success: false,
+            error: "Invalid L1 Request headers",
+            stage: "L1",
+          };
         }
 
         log("  ❌ L1 AUTH FAIL - createApiKey error", "red");
@@ -283,8 +372,14 @@ async function testL2Authentication(wallet, creds, walletMode, options) {
   section("STAGE 2: L2 Authentication (Balance-Allowance Verification)");
 
   log("Testing credentials with /balance-allowance endpoint...", "blue");
-  logVerbose("L2 endpoint: GET /balance-allowance?asset_type=COLLATERAL&signature_type=X", options);
-  logVerbose("Expected headers: POLY_ADDRESS, POLY_SIGNATURE (HMAC), POLY_TIMESTAMP, POLY_API_KEY, POLY_PASSPHRASE", options);
+  logVerbose(
+    "L2 endpoint: GET /balance-allowance?asset_type=COLLATERAL&signature_type=X",
+    options,
+  );
+  logVerbose(
+    "Expected headers: POLY_ADDRESS, POLY_SIGNATURE (HMAC), POLY_TIMESTAMP, POLY_API_KEY, POLY_PASSPHRASE",
+    options,
+  );
 
   try {
     const client = new ClobClient(
@@ -296,7 +391,10 @@ async function testL2Authentication(wallet, creds, walletMode, options) {
       options.funder,
     );
 
-    log(`\n  → Testing signature type ${walletMode.sigType} (${walletMode.description})...`, "blue");
+    log(
+      `\n  → Testing signature type ${walletMode.sigType} (${walletMode.description})...`,
+      "blue",
+    );
 
     const response = await client.getBalanceAllowance({
       asset_type: AssetType.COLLATERAL,
@@ -311,7 +409,11 @@ async function testL2Authentication(wallet, creds, walletMode, options) {
       log("       - API credentials are expired or invalid", "yellow");
       log("       - Wrong signature type for L2 requests", "yellow");
       log("       - HMAC signature mismatch", "yellow");
-      return { success: false, error: response.error || "Unauthorized", stage: "L2" };
+      return {
+        success: false,
+        error: response.error || "Unauthorized",
+        stage: "L2",
+      };
     }
 
     log("  ✅ L2 AUTH OK - Balance-allowance check succeeded", "green");
@@ -326,7 +428,10 @@ async function testL2Authentication(wallet, creds, walletMode, options) {
     if (status === 401 || status === 403) {
       log("  ❌ L2 AUTH FAIL - Unauthorized/Invalid api key", "red");
       log(`     Status: ${status}`, "red");
-      log("     This suggests the API credentials or L2 signature is incorrect", "yellow");
+      log(
+        "     This suggests the API credentials or L2 signature is incorrect",
+        "yellow",
+      );
       return { success: false, error: "Unauthorized", stage: "L2" };
     }
 
@@ -382,15 +487,27 @@ async function runAuthTests() {
   // Validate required options
   if (!options.privateKey) {
     log("❌ ERROR: PRIVATE_KEY is required", "red");
-    log("   Set via --private-key flag or PRIVATE_KEY environment variable", "yellow");
+    log(
+      "   Set via --private-key flag or PRIVATE_KEY environment variable",
+      "yellow",
+    );
     process.exit(1);
   }
 
   // Header
   console.log("\n");
-  log("╔═══════════════════════════════════════════════════════════════╗", "bold");
-  log("║      Polymarket Authentication Test Harness                   ║", "bold");
-  log("╚═══════════════════════════════════════════════════════════════╝", "bold");
+  log(
+    "╔═══════════════════════════════════════════════════════════════╗",
+    "bold",
+  );
+  log(
+    "║      Polymarket Authentication Test Harness                   ║",
+    "bold",
+  );
+  log(
+    "╚═══════════════════════════════════════════════════════════════╝",
+    "bold",
+  );
 
   const provider = new providers.JsonRpcProvider(options.rpcUrl);
   const wallet = new Wallet(options.privateKey, provider);
@@ -440,15 +557,26 @@ async function runAuthTests() {
   log(`\nCredentials obtained via: ${l1Result.method}`, "green");
 
   // Stage 2: L2 Authentication
-  const l2Result = await testL2Authentication(wallet, l1Result.creds, walletMode, options);
+  const l2Result = await testL2Authentication(
+    wallet,
+    l1Result.creds,
+    walletMode,
+    options,
+  );
 
   if (!l2Result.success) {
     header("❌ FINAL RESULT: FAILURE", "RESULT");
     log("Failed at: L2 Authentication", "red");
     log(`Error: ${l2Result.error}`, "red");
     log("\n📋 TROUBLESHOOTING:", "yellow");
-    log("1. L1 auth succeeded but L2 failed - credentials may be corrupted", "yellow");
-    log("2. Try clearing cache: rm -f /data/clob-creds.json ./data/clob-creds.json", "yellow");
+    log(
+      "1. L1 auth succeeded but L2 failed - credentials may be corrupted",
+      "yellow",
+    );
+    log(
+      "2. Try clearing cache: rm -f /data/clob-creds.json ./data/clob-creds.json",
+      "yellow",
+    );
     log("3. Try different signature type for L2 requests", "yellow");
     log("4. Check if API is having issues", "yellow");
     process.exit(1);
@@ -466,7 +594,10 @@ async function runAuthTests() {
   log("\nYou can now start the bot with confidence!", "green");
 
   // Save credentials tip
-  log("\n💡 TIP: Credentials can be cached in /data/clob-creds.json for reuse", "cyan");
+  log(
+    "\n💡 TIP: Credentials can be cached in /data/clob-creds.json for reuse",
+    "cyan",
+  );
 
   process.exit(0);
 }

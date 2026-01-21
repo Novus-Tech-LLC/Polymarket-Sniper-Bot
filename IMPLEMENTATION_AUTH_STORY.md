@@ -7,6 +7,7 @@ This PR implements a comprehensive **structured logging and diagnostic system** 
 ## Problem Statement (Before)
 
 ### Issues with Old Logging:
+
 1. **Noisy, Repeated Logs**: Identity information dumped 20+ times per run
 2. **No Secret Protection**: Risk of logging full private keys, API secrets
 3. **No Correlation**: Difficult to trace a single auth attempt through logs
@@ -14,6 +15,7 @@ This PR implements a comprehensive **structured logging and diagnostic system** 
 5. **No Actionable Summary**: Users couldn't quickly see root cause of 401 errors
 
 ### Example of Old Output:
+
 ```
 [INFO] Identity resolved: EOA mode
 [INFO] Signer address: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb
@@ -29,6 +31,7 @@ This PR implements a comprehensive **structured logging and diagnostic system** 
 ## Solution (After)
 
 ### Features of New System:
+
 1. **One Run => One Summary**: Each preflight produces ONE Auth Story JSON block
 2. **Secret Redaction**: Automatic removal of private keys, secrets, passphrases
 3. **Correlation IDs**: `runId`, `reqId`, `attemptId` for tracing
@@ -36,6 +39,7 @@ This PR implements a comprehensive **structured logging and diagnostic system** 
 5. **Root-Cause Analysis**: Clear diagnostic output with fix suggestions
 
 ### Example of New Output:
+
 ```json
 {
   "timestamp": "2025-01-19T12:34:56.789Z",
@@ -93,6 +97,7 @@ Root-cause analysis:
 ### 1. Structured Logger (`src/utils/structured-logger.ts`)
 
 **Key Features:**
+
 - **JSON or Pretty Format**: `LOG_FORMAT=json|pretty`
 - **Log Levels**: `LOG_LEVEL=error|warn|info|debug`
 - **Automatic Secret Redaction**: Intercepts and redacts sensitive data
@@ -100,6 +105,7 @@ Root-cause analysis:
 - **Correlation IDs**: Every log has `runId`, optional `reqId`, `attemptId`
 
 **Redaction Rules:**
+
 - `privateKey` → `[REDACTED len=64]`
 - `apiKey` → `***abc123` (last 6 chars)
 - `secret` → `ab12...xy89 [len=88]` (first/last 4)
@@ -107,21 +113,23 @@ Root-cause analysis:
 - `signature` → `hash:a1b2c3d4` (SHA256 prefix)
 
 **Usage:**
+
 ```typescript
-import { getLogger } from '../utils/structured-logger';
+import { getLogger } from "../utils/structured-logger";
 
 const logger = getLogger();
-logger.info('Starting auth', { category: 'STARTUP' });
-logger.error('Auth failed', { 
-  category: 'PREFLIGHT',
+logger.info("Starting auth", { category: "STARTUP" });
+logger.error("Auth failed", {
+  category: "PREFLIGHT",
   httpStatus: 401,
-  errorCode: 'HMAC_MISMATCH'
+  errorCode: "HMAC_MISMATCH",
 });
 ```
 
 ### 2. Auth Story (`src/clob/auth-story.ts`)
 
 **Comprehensive Auth Summary:**
+
 ```typescript
 export interface AuthStory {
   runId: string;
@@ -142,12 +150,14 @@ export interface AuthStory {
 ```
 
 **State Transition Detection:**
+
 - Auth Story summary prints ONLY on state transitions:
   - First process start (always)
   - Auth state change: `authOk` false→true or true→false
 - Prevents spam while ensuring users see critical changes immediately
 
 **Usage in Preflight:**
+
 ```typescript
 // Initialize at START
 const authStory = initAuthStory({ runId, signerAddress, clobHost, chainId });
@@ -156,11 +166,15 @@ const authStory = initAuthStory({ runId, signerAddress, clobHost, chainId });
 authStory.setIdentity({ orderIdentity, l1AuthIdentity });
 
 // Add attempts as they occur
-authStory.addAttempt({ attemptId: 'A', httpStatus: 200, success: true });
-authStory.addAttempt({ attemptId: 'B', httpStatus: 401, success: false });
+authStory.addAttempt({ attemptId: "A", httpStatus: 200, success: true });
+authStory.addAttempt({ attemptId: "B", httpStatus: 401, success: false });
 
 // Set final result ONCE
-authStory.setFinalResult({ authOk: false, readyToTrade: false, reason: 'AUTH_FAILED' });
+authStory.setFinalResult({
+  authOk: false,
+  readyToTrade: false,
+  reason: "AUTH_FAILED",
+});
 
 // Print summary ONCE at end
 authStory.printSummary();
@@ -169,12 +183,14 @@ authStory.printSummary();
 ### 3. Auth Probe (`scripts/auth-probe-minimal.ts`)
 
 **Standalone Diagnostic Tool:**
+
 - Runs ONE auth attempt (derive + verify)
 - Produces ONE Auth Story summary
 - Exits with code 0 (success) or 1 (failure)
 - CI-friendly
 
 **Features:**
+
 - Root-cause analysis for common failure modes:
   - 401: HMAC mismatch, wrong signature type, wallet mismatch
   - 400: Wallet not activated (never traded on Polymarket)
@@ -183,6 +199,7 @@ authStory.printSummary();
 - HTTP request/response tracing
 
 **Usage:**
+
 ```bash
 # Run auth probe
 npm run auth:probe
@@ -200,6 +217,7 @@ npm run auth:probe | tee auth-probe.log
 ### 4. Secret Leakage Prevention
 
 **ESLint Rules (`eslint.config.mjs`):**
+
 ```javascript
 // Block console.log in auth files
 {
@@ -225,6 +243,7 @@ npm run auth:probe | tee auth-probe.log
 ```
 
 **Secret Check Script (`scripts/check-no-secrets.sh`):**
+
 ```bash
 # Check for secret leakage patterns
 npm run check:secrets
@@ -234,6 +253,7 @@ npm run lint:secrets
 ```
 
 **Patterns Detected:**
+
 1. Direct secret logging: `console.log(privateKey)`
 2. Credential object logging: `console.log(creds)`
 3. String interpolation: `` `Key: ${privateKey}` ``
@@ -242,6 +262,7 @@ npm run lint:secrets
 ### 5. Preflight Integration (`src/polymarket/preflight.ts`)
 
 **Changes:**
+
 1. Initialize Auth Story at start of `ensureTradingReady()`
 2. Set identity ONCE (no repeated dumps)
 3. Add attempts for each auth check
@@ -251,6 +272,7 @@ npm run lint:secrets
 
 **Key Insight:**
 The preflight now distinguishes between:
+
 - **CLOB API Authentication** (off-chain): Can submit orders to Polymarket API
 - **Wallet Setup** (on-chain): Safe/Proxy deployment and approvals
 
@@ -259,11 +281,13 @@ If CLOB API auth fails, on-chain transactions are BLOCKED to prevent gas waste.
 ## File Changes
 
 ### New Files
+
 1. **`docs/AUTH_LOGGING_GUIDE.md`** - Developer guide for structured logging
 2. **`AUTH_STORY_EXAMPLE.md`** - Example Auth Story outputs (success/failure cases)
 3. **`scripts/check-no-secrets.sh`** - Secret leakage detection script
 
 ### Modified Files
+
 1. **`eslint.config.mjs`** - Added no-console rules for auth files, secret detection
 2. **`package.json`** - Added `check:secrets` and `lint:secrets` scripts
 3. **`src/utils/structured-logger.ts`** - Already had deduplication/redaction (verified)
@@ -274,6 +298,7 @@ If CLOB API auth fails, on-chain transactions are BLOCKED to prevent gas waste.
 ## Verification
 
 ### 1. Secret Check
+
 ```bash
 $ npm run check:secrets
 =========================================
@@ -289,6 +314,7 @@ Checking for potential secret leakage...
 ```
 
 ### 2. ESLint Check
+
 ```bash
 $ npm run lint
 # Warnings in scripts/ (not core auth files) - safe to ignore
@@ -296,6 +322,7 @@ $ npm run lint
 ```
 
 ### 3. Auth Probe (Manual Test)
+
 ```bash
 $ LOG_FORMAT=pretty npm run auth:probe
 [INFO] [STARTUP] Starting auth probe
@@ -320,26 +347,28 @@ AUTH STORY SUMMARY
 ✅ **Root-Cause Clarity**: Users see exactly what went wrong and how to fix it  
 ✅ **No Repeated Identity Dumps**: Identity logged ONCE in Auth Story summary  
 ✅ **ESLint Enforcement**: Blocks console.log in auth files, warns about secret logging  
-✅ **Secret Check Script**: Automated detection of secret leakage patterns  
+✅ **Secret Check Script**: Automated detection of secret leakage patterns
 
 ## Migration Guide
 
 ### For Developers
 
 **Before:**
+
 ```typescript
-console.log('[INFO] Starting auth');
-console.error('[ERROR] Auth failed', error);
+console.log("[INFO] Starting auth");
+console.error("[ERROR] Auth failed", error);
 console.log(`Signer: ${signerAddress}`);
 ```
 
 **After:**
+
 ```typescript
-import { getLogger } from '../utils/structured-logger';
+import { getLogger } from "../utils/structured-logger";
 
 const logger = getLogger();
-logger.info('Starting auth', { category: 'STARTUP' });
-logger.error('Auth failed', { category: 'PREFLIGHT', error: error.message });
+logger.info("Starting auth", { category: "STARTUP" });
+logger.error("Auth failed", { category: "PREFLIGHT", error: error.message });
 // Identity goes in Auth Story, not logs
 authStory.setIdentity({ orderIdentity, l1AuthIdentity });
 ```
@@ -347,11 +376,13 @@ authStory.setIdentity({ orderIdentity, l1AuthIdentity });
 ### For Users
 
 **Before:**
+
 - Read through 1000+ lines of logs to find root cause
 - Repeated identity information makes logs unreadable
 - No clear summary of what went wrong
 
 **After:**
+
 - Read ONE Auth Story summary block at the end
 - Clear root-cause analysis with fix suggestions
 - Exit code 0/1 for automation
@@ -359,11 +390,13 @@ authStory.setIdentity({ orderIdentity, l1AuthIdentity });
 ## Testing
 
 ### Unit Tests
+
 ```bash
 npm test -- tests/arbitrage/auth-story.test.ts
 ```
 
 ### Integration Tests
+
 ```bash
 # Test with mock credentials
 PRIVATE_KEY=0x1234... npm run auth:probe
@@ -372,6 +405,7 @@ PRIVATE_KEY=0x1234... npm run auth:probe
 ```
 
 ### CI/CD
+
 ```bash
 # Add to .github/workflows/ci.yml
 - name: Check for secret leakage
@@ -387,16 +421,19 @@ PRIVATE_KEY=0x1234... npm run auth:probe
 ## Performance Impact
 
 ### Before:
+
 - 1000+ log lines per auth run
 - Repeated identity dumps consume CPU/memory
 - Large log files (10+ MB for 24h run)
 
 ### After:
+
 - ~50 log lines per auth run (95% reduction)
 - Deduplication saves CPU/memory
 - Small log files (1-2 MB for 24h run)
 
 ### Deduplication Savings:
+
 - Typical run: 200+ identical messages suppressed
 - Counter at DEBUG level: `(suppressed 15 identical log messages)`
 
@@ -417,6 +454,7 @@ PRIVATE_KEY=0x1234... npm run auth:probe
 ## Conclusion
 
 This implementation provides a **production-ready auth diagnostic system** that:
+
 - Eliminates noisy logs
 - Protects secrets automatically
 - Provides actionable diagnostics

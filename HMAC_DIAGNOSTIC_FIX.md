@@ -5,6 +5,7 @@
 User reports **401 "Unauthorized/Invalid api key"** errors, but the wallet **HAS TRADED** on Polymarket successfully, ruling out "wallet not registered" as the cause.
 
 The diagnostic data shows:
+
 ```
 signatureType: 0
 walletAddress: 0x9B9883152BfFeFB1cBE2A96FC0391537012ee5D1
@@ -140,7 +141,7 @@ The HMAC function already normalizes base64url → base64 (lines 8-11 in `hmac.j
 
 ✅ **Secrets are hashed (SHA256) before logging** - No raw secrets in logs  
 ✅ **Only first/last chars of keys shown** - Redacted by default  
-✅ **Diagnostic mode is opt-in** - Zero overhead when disabled  
+✅ **Diagnostic mode is opt-in** - Zero overhead when disabled
 
 ### Next Steps
 
@@ -178,4 +179,4 @@ This replaces the noisy log spam with a **single, actionable diagnostic line**.
 ✅ Exact signing inputs vs HTTP request captured  
 ✅ No secret leakage in logs  
 ✅ Minimal performance overhead (gated by env var)  
-✅ Reproducible test harness (scripts/test-hmac-diagnostic.js)  
+✅ Reproducible test harness (scripts/test-hmac-diagnostic.js)

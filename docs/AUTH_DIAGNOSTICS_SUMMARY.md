@@ -7,6 +7,7 @@ This PR adds comprehensive authentication diagnostics to help users identify and
 ## Before This Change
 
 When auth failed, users would see:
+
 ```
 ⚠️  TRADING DISABLED - Running in DETECT-ONLY mode
 
@@ -17,6 +18,7 @@ Common causes:
 ```
 
 **Problems:**
+
 - Generic list shown for ALL auth failures
 - "ARB_LIVE_TRADING not set" shown even when it WAS set correctly
 - No indication of the actual problem
@@ -25,13 +27,14 @@ Common causes:
 ## After This Change
 
 When auth fails, users see:
+
 ```
 =================================================================
 🔍 AUTHENTICATION FAILURE DIAGNOSTIC
 =================================================================
 Cause: WALLET_NOT_ACTIVATED (confidence: high)
 
-Derived credential creation failed with "Could not create api key". 
+Derived credential creation failed with "Could not create api key".
 This occurs when the wallet has never traded on Polymarket.
 
 Recommended Actions:
@@ -49,6 +52,7 @@ Active blockers:
 ```
 
 **Benefits:**
+
 - Specific cause identified with confidence level
 - Actual blockers shown (not generic list)
 - "ARB_LIVE_TRADING not set" only shown when it's the actual problem
@@ -59,15 +63,17 @@ Active blockers:
 The system can identify 6 different auth failure causes:
 
 ### 1. WRONG_KEY_TYPE (high confidence)
+
 **When:** User-provided keys fail with 401 "Invalid api key"
 
 **Likely cause:** Using Builder API keys as CLOB API keys
 
 **Example output:**
+
 ```
 Cause: WRONG_KEY_TYPE (confidence: high)
 
-User-provided API credentials are invalid. Most common cause: 
+User-provided API credentials are invalid. Most common cause:
 using Builder API keys instead of CLOB API keys.
 
 Recommended Actions:
@@ -77,15 +83,17 @@ Recommended Actions:
 ```
 
 ### 2. WALLET_NOT_ACTIVATED (high confidence)
+
 **When:** Derive enabled but fails with 400 "Could not create api key"
 
 **Likely cause:** Wallet has never traded on Polymarket
 
 **Example output:**
+
 ```
 Cause: WALLET_NOT_ACTIVATED (confidence: high)
 
-Derived credential creation failed with "Could not create api key". 
+Derived credential creation failed with "Could not create api key".
 This occurs when the wallet has never traded on Polymarket.
 
 Recommended Actions:
@@ -96,15 +104,17 @@ Recommended Actions:
 ```
 
 ### 3. EXPIRED_CREDENTIALS (medium confidence)
+
 **When:** User-provided keys fail with 401 "Unauthorized"
 
 **Likely cause:** Keys are expired, revoked, or regenerated
 
 **Example output:**
+
 ```
 Cause: EXPIRED_CREDENTIALS (confidence: medium)
 
-User-provided API credentials failed verification. They may be expired, 
+User-provided API credentials failed verification. They may be expired,
 revoked, or bound to a different wallet.
 
 Recommended Actions:
@@ -114,15 +124,17 @@ Recommended Actions:
 ```
 
 ### 4. DERIVE_FAILED (high confidence)
+
 **When:** Derive creates credentials but they fail verification
 
 **Likely cause:** Server-side issues or wallet configuration problems
 
 **Example output:**
+
 ```
 Cause: DERIVE_FAILED (confidence: high)
 
-API credentials were derived but failed verification. This may indicate 
+API credentials were derived but failed verification. This may indicate
 server-side issues or wallet configuration problems.
 
 Recommended Actions:
@@ -132,15 +144,17 @@ Recommended Actions:
 ```
 
 ### 5. WRONG_WALLET_BINDING (medium confidence)
+
 **When:** Both user keys AND derived credentials fail
 
 **Likely cause:** Keys are bound to a different wallet than PRIVATE_KEY
 
 **Example output:**
+
 ```
 Cause: WRONG_WALLET_BINDING (confidence: medium)
 
-Both user-provided credentials AND derived credentials failed. The keys 
+Both user-provided credentials AND derived credentials failed. The keys
 may be bound to a different wallet than PRIVATE_KEY.
 
 Recommended Actions:
@@ -150,11 +164,13 @@ Recommended Actions:
 ```
 
 ### 6. NETWORK_ERROR (high confidence)
+
 **When:** Error messages contain network/timeout/connection keywords
 
 **Likely cause:** Cannot reach Polymarket API or RPC endpoint
 
 **Example output:**
+
 ```
 Cause: NETWORK_ERROR (confidence: high)
 
@@ -172,24 +188,28 @@ Recommended Actions:
 The warning system now shows only the actual blockers:
 
 ### Example 1: Only auth fails
+
 ```
 Active blockers:
   1. Invalid or missing CLOB API credentials (see diagnostic above)
 ```
 
 ### Example 2: Only approvals missing
+
 ```
 Active blockers:
   1. Required on-chain approvals are not satisfied
 ```
 
 ### Example 3: Only ARB_LIVE_TRADING not set
+
 ```
 Active blockers:
   1. ARB_LIVE_TRADING not set to 'I_UNDERSTAND_THE_RISKS'
 ```
 
 ### Example 4: Multiple blockers
+
 ```
 Active blockers:
   1. Invalid or missing CLOB API credentials (see diagnostic above)
@@ -211,6 +231,7 @@ Active blockers:
 ### For Developers
 
 The diagnostic system is automatic and runs whenever:
+
 - Auth preflight fails
 - Credentials cannot be verified
 - Derive attempts fail
@@ -220,11 +241,13 @@ No configuration needed - it works out of the box.
 ### Advanced Diagnostics
 
 Enable comprehensive testing of all auth configurations:
+
 ```bash
 CLOB_PREFLIGHT_MATRIX=true
 ```
 
 This will test:
+
 - Multiple signature types (EOA, POLY_PROXY)
 - Different secret encodings (base64, base64url, raw)
 - Different signature encodings
@@ -233,6 +256,7 @@ This will test:
 ## Testing
 
 Run the test suite to verify diagnostics:
+
 ```bash
 npm test tests/arbitrage/auth-diagnostic.test.ts
 ```
@@ -266,6 +290,7 @@ All 13 diagnostic tests should pass.
 ## Future Enhancements
 
 Potential improvements for future PRs:
+
 - Add diagnostic for signature type mismatches
 - Detect production vs testnet environment issues
 - Add interactive troubleshooter CLI command

@@ -52,7 +52,7 @@ Instead of guessing the root cause, I implemented **surgical diagnostic tooling*
 Wraps the official `@polymarket/clob-client` HMAC signing function:
 
 ```typescript
-export function installHmacSignatureOverride(logger?)
+export function installHmacSignatureOverride(logger?);
 ```
 
 - Monkey-patches `buildPolyHmacSignature`
@@ -65,7 +65,7 @@ export function installHmacSignatureOverride(logger?)
 Axios interceptor for correlation:
 
 ```typescript
-export function installHmacDiagnosticInterceptor(axiosInstance, logger?)
+export function installHmacDiagnosticInterceptor(axiosInstance, logger?);
 ```
 
 - **Request interceptor**: Compares signed path vs actual path
@@ -170,6 +170,7 @@ node scripts/test-hmac-diagnostic.js
 ### 2. Analyze Output (5 minutes)
 
 Look for:
+
 - `[WARN] [HmacDiag] MISMATCH DETECTED` - Confirms path/method mismatch
 - JSON diagnostic on 401 - Shows exact discrepancy
 - `pathMatch: false` - Query param ordering issue
@@ -179,10 +180,13 @@ Look for:
 Based on diagnostic output:
 
 #### If Path Mismatch:
+
 Extend the patch to canonicalize query params for **all** L2 auth endpoints, not just `getBalanceAllowance`.
 
 #### If Signature Type Wrong:
+
 Set these environment variables:
+
 ```bash
 export POLYMARKET_SIGNATURE_TYPE=2
 export POLYMARKET_PROXY_ADDRESS="your_polymarket_proxy_address"
@@ -191,6 +195,7 @@ export POLYMARKET_PROXY_ADDRESS="your_polymarket_proxy_address"
 Find proxy address at: polymarket.com → Profile → Deposit address
 
 #### If Other Issue:
+
 The diagnostic will show it - send output to me for targeted fix.
 
 ### 4. Verify Fix (5 minutes)
@@ -203,11 +208,12 @@ Run diagnostic again - should see `✓ Success! Balance retrieved.`
 ✅ **Only first/last 4-8 chars of keys shown**  
 ✅ **Diagnostic mode is opt-in (disabled by default)**  
 ✅ **No raw credentials in output**  
-✅ **Zero overhead when disabled**  
+✅ **Zero overhead when disabled**
 
 ## Files Changed
 
 ### New Files:
+
 - `src/utils/hmac-diagnostic-interceptor.ts` - HTTP request correlation
 - `src/utils/hmac-signature-override.ts` - HMAC signing wrapper
 - `scripts/test-hmac-diagnostic.js` - Standalone test harness
@@ -215,6 +221,7 @@ Run diagnostic again - should see `✓ Success! Balance retrieved.`
 - `NEXT_STEPS_401_FIX.md` - User-facing guide
 
 ### Modified Files:
+
 - `src/infrastructure/clob-client.factory.ts` - Diagnostic integration
 - `README.md` - Added troubleshooting section
 
@@ -225,7 +232,7 @@ Run diagnostic again - should see `✓ Success! Balance retrieved.`
 ✅ No secret leakage in logs  
 ✅ Standalone test script created  
 ✅ Comprehensive documentation provided  
-✅ README updated with troubleshooting steps  
+✅ README updated with troubleshooting steps
 
 ## Expected Timeline to Resolution
 
@@ -248,6 +255,7 @@ Run diagnostic again - should see `✓ Success! Balance retrieved.`
 ## What Makes This Different
 
 Previous diagnostics showed:
+
 - ✅ Credentials exist
 - ✅ Wallet address is correct
 - ✅ Secret is base64-encoded

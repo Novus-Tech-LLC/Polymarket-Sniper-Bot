@@ -5,6 +5,7 @@ This guide helps you diagnose and fix authentication issues when `auth_ok=false`
 ## Understanding the Error
 
 When the bot shows:
+
 ```
 [Preflight] READY_TO_TRADE=false reason=CHECKS_FAILED
 [Preflight][Summary] ... auth_ok=false ...
@@ -17,6 +18,7 @@ The bot will now display a **detailed diagnostic** explaining exactly what went 
 ### Scenario 1: "Using Builder API keys instead of CLOB API keys"
 
 **Symptoms:**
+
 - User-provided credentials fail with 401 "Invalid api key"
 - Diagnostic shows: `WRONG_KEY_TYPE` (high confidence)
 
@@ -35,6 +37,7 @@ You're using **Builder API credentials** (`POLY_BUILDER_API_KEY`) as CLOB creden
   - Reference: https://docs.polymarket.com/developers/CLOB/authentication
 
 **Solution:**
+
 1. Remove any `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE` from your `.env`
 2. Set `CLOB_DERIVE_CREDS=true` to automatically derive CLOB credentials
 3. Ensure `PRIVATE_KEY` is set correctly
@@ -45,6 +48,7 @@ You're using **Builder API credentials** (`POLY_BUILDER_API_KEY`) as CLOB creden
 ### Scenario 2: "Wallet has never traded on Polymarket"
 
 **Symptoms:**
+
 - Derive mode enabled but fails with 400 "Could not create api key"
 - Diagnostic shows: `WALLET_NOT_ACTIVATED` (high confidence)
 
@@ -52,6 +56,7 @@ You're using **Builder API credentials** (`POLY_BUILDER_API_KEY`) as CLOB creden
 Polymarket's API cannot create credentials for wallets that have never interacted with the platform. This is a one-time requirement.
 
 **Solution:**
+
 1. Visit https://polymarket.com
 2. Connect the wallet that matches your `PRIVATE_KEY`
 3. Make **at least one small trade** on any market (even $1)
@@ -66,23 +71,27 @@ The Polymarket API needs to register your wallet address in their system before 
 ### Scenario 3: "API keys expired or revoked"
 
 **Symptoms:**
+
 - User-provided credentials fail with 401 "Unauthorized"
 - Diagnostic shows: `EXPIRED_CREDENTIALS` (medium confidence)
 
 **Cause:**
 Your CLOB API keys may be:
+
 - Expired
 - Revoked
 - Cached but no longer valid
 
 **Solution:**
 Clear the credential cache and let the bot regenerate:
+
 1. Delete cached credentials: `rm -f /data/clob-creds.json`
 2. Ensure `CLOB_DERIVE_CREDS=true` is set in `.env`
 3. Remove any manual `POLYMARKET_API_KEY/SECRET/PASSPHRASE` from `.env`
 4. Restart the bot - it will automatically create new credentials
 
 **Why this works:**
+
 - CLOB API credentials can only be created/derived programmatically (no web UI exists)
 - The bot automatically creates them using L1 authentication (signing with your private key)
 - See: https://docs.polymarket.com/developers/CLOB/authentication
@@ -92,6 +101,7 @@ Clear the credential cache and let the bot regenerate:
 ### Scenario 4: "Wrong wallet binding"
 
 **Symptoms:**
+
 - Both user-provided AND derived credentials fail
 - Diagnostic shows: `WRONG_WALLET_BINDING` (medium confidence)
 
@@ -99,6 +109,7 @@ Clear the credential cache and let the bot regenerate:
 The API keys in your `.env` file are bound to a different wallet address than the one derived from your `PRIVATE_KEY`.
 
 **Solution:**
+
 1. Verify your `PRIVATE_KEY` is correct
 2. If you set `PUBLIC_KEY`, make sure it matches the address derived from `PRIVATE_KEY`
 3. Either:
@@ -106,6 +117,7 @@ The API keys in your `.env` file are bound to a different wallet address than th
    - **Option B**: Generate new CLOB keys for this specific wallet at CLOB_DERIVE_CREDS=true (there is no web UI to manually generate CLOB API keys)
 
 **To check your wallet address:**
+
 ```bash
 # Run the bot with any command and check the logs:
 [Preflight] signer=0x... effective_trading_address=0x...
@@ -116,17 +128,20 @@ The API keys in your `.env` file are bound to a different wallet address than th
 ### Scenario 5: "Derived credentials failed verification"
 
 **Symptoms:**
+
 - Derive mode enabled
 - Credentials created but fail verification
 - Diagnostic shows: `DERIVE_FAILED` (high confidence)
 
 **Cause:**
 The server created API credentials but they don't work. This can happen due to:
+
 - Server-side synchronization issues
 - Corrupted cached credentials
 - Wallet permission problems
 
 **Solution:**
+
 1. Clear the credential cache:
    ```bash
    rm -f /data/clob-creds.json
@@ -142,6 +157,7 @@ The server created API credentials but they don't work. This can happen due to:
 ### Scenario 6: "Network connectivity issues"
 
 **Symptoms:**
+
 - Auth failures with network-related error messages
 - Diagnostic shows: `NETWORK_ERROR` (high confidence)
 
@@ -149,6 +165,7 @@ The server created API credentials but they don't work. This can happen due to:
 Cannot reach Polymarket API or RPC endpoint
 
 **Solution:**
+
 1. Check your internet connection
 2. Verify `RPC_URL` is accessible:
    ```bash
@@ -168,6 +185,7 @@ Cannot reach Polymarket API or RPC endpoint
 The bot now provides **context-aware warnings** that only show the actual problems, not generic advice.
 
 ### Example 1: Only auth is the problem
+
 ```
 ⚠️  TRADING DISABLED - Running in DETECT-ONLY mode
 Active blockers:
@@ -175,6 +193,7 @@ Active blockers:
 ```
 
 ### Example 2: Multiple blockers
+
 ```
 ⚠️  TRADING DISABLED - Running in DETECT-ONLY mode
 Active blockers:
@@ -183,6 +202,7 @@ Active blockers:
 ```
 
 ### Example 3: Only ARB_LIVE_TRADING is the blocker
+
 ```
 ⚠️  TRADING DISABLED - Running in DETECT-ONLY mode
 Active blockers:
@@ -203,7 +223,7 @@ When authentication fails, you'll see output like this:
 =================================================================
 Cause: WALLET_NOT_ACTIVATED (confidence: high)
 
-Derived credential creation failed with "Could not create api key". 
+Derived credential creation failed with "Could not create api key".
 This occurs when the wallet has never traded on Polymarket.
 
 Recommended Actions:
@@ -222,6 +242,7 @@ Recommended Actions:
 ### CLOB Authentication (Required for Trading)
 
 **Mode A: Explicit Keys**
+
 ```bash
 POLYMARKET_API_KEY=your_clob_api_key
 POLYMARKET_API_SECRET=your_clob_api_secret
@@ -229,12 +250,14 @@ POLYMARKET_API_PASSPHRASE=your_clob_passphrase
 ```
 
 **Mode B: Derived Keys (Recommended)**
+
 ```bash
 CLOB_DERIVE_CREDS=true
 # Remove POLYMARKET_API_KEY/SECRET/PASSPHRASE when using derived mode
 ```
 
 ### Builder API (Optional, for Gasless Approvals)
+
 ```bash
 POLY_BUILDER_API_KEY=your_builder_key
 POLY_BUILDER_API_SECRET=your_builder_secret
@@ -242,6 +265,7 @@ POLY_BUILDER_API_PASSPHRASE=your_builder_passphrase
 ```
 
 ### Live Trading Gate
+
 ```bash
 ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 ```
@@ -253,11 +277,13 @@ ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 ### Enable comprehensive auth matrix testing
 
 Set this to test all possible auth configurations:
+
 ```bash
 CLOB_PREFLIGHT_MATRIX=true
 ```
 
 This will test:
+
 - Multiple signature types (EOA, POLY_PROXY)
 - Different secret encodings (base64, base64url, raw)
 - Different signature encodings

@@ -3,7 +3,7 @@
   "packageVersion": "@polymarket/clob-client@4.22.8",
   "previousVersion": "@polymarket/clob-client@5.2.1",
   "downgradeObjective": "Fix 401 authentication errors",
-  
+
   "testResults": {
     "auth:diag": {
       "status": "SUCCESS",
@@ -33,7 +33,7 @@
       },
       "notes": "✅ All checks passed - authentication working correctly"
     },
-    
+
     "clob:probe": {
       "status": "PARTIAL_SUCCESS_WITH_REAL_KEY_NEEDED",
       "httpStatus": 401,
@@ -63,7 +63,7 @@
       "notes": "❌ Expected failure with test key. Self-checks passed: queryInPath ✅, funderIsNull ✅, sigTypeIsZero ✅"
     }
   },
-  
+
   "diagnosticSummary": {
     "downgradeStatus": "SUCCESSFUL",
     "authFlowStatus": "OPERATIONAL",
@@ -82,9 +82,9 @@
       "✅ No code changes needed - v4.22.8 fixes are working"
     ]
   },
-  
+
   "authStoryOneLineSummary": "Run A: auth:diag => 200 OK | Run B: clob:probe => 401 (test key) | Both runs: EOA mode, sigType=0, apiKey=...1055 | Downgrade to v4.22.8 successful",
-  
+
   "verdict": {
     "downgradeSuccessful": true,
     "authenticationFixed": true,

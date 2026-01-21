@@ -7,6 +7,7 @@ Successfully implemented a comprehensive **Auth Story diagnostic system** that t
 ## What Was Delivered
 
 ### 1. Documentation (5 files)
+
 - ✅ **`docs/AUTH_LOGGING_GUIDE.md`** - Comprehensive developer guide (430 lines)
 - ✅ **`AUTH_STORY_EXAMPLE.md`** - Example outputs for success/failure cases (292 lines)
 - ✅ **`AUTH_STORY_QUICKREF.md`** - Quick reference guide (267 lines)
@@ -14,11 +15,13 @@ Successfully implemented a comprehensive **Auth Story diagnostic system** that t
 - ✅ **`DELIVERY_SUMMARY.md`** - This file
 
 ### 2. Code Changes (3 files)
+
 - ✅ **`eslint.config.mjs`** - Added no-console rules and secret detection
 - ✅ **`package.json`** - Added `check:secrets` and `lint:secrets` scripts
 - ✅ **`scripts/check-no-secrets.sh`** - Secret leakage detection script (91 lines)
 
 ### 3. Verification
+
 - ✅ Secret check: All checks pass, no leakage detected
 - ✅ ESLint: Auth files have no console.log violations
 - ✅ Code review: All feedback addressed
@@ -27,6 +30,7 @@ Successfully implemented a comprehensive **Auth Story diagnostic system** that t
 ## Key Features Implemented
 
 ### 1. One Run => One Summary ✅
+
 **Before:** 1000+ lines of repeated identity dumps  
 **After:** ONE Auth Story JSON block at the end
 
@@ -44,7 +48,9 @@ Final Result: ❌ (with root-cause analysis)
 ```
 
 ### 2. Secret Redaction ✅
+
 Automatic removal of sensitive data:
+
 - `privateKey` → `[REDACTED len=64]`
 - `apiKey` → `***abc123` (last 6 chars only)
 - `secret` → `ab12...xy89 [len=88]` (first/last 4)
@@ -52,23 +58,29 @@ Automatic removal of sensitive data:
 - `signature` → `hash:a1b2c3d4` (SHA256 prefix)
 
 ### 3. Correlation IDs ✅
+
 Every log includes:
+
 - `runId`: Unique per preflight run (`run_1737287696_a1b2c3`)
 - `reqId`: Unique per HTTP request (`req_1737287696_abc`)
 - `attemptId`: Letter per auth attempt (`A`, `B`, `C`, `D`, `E`)
 
 ### 4. Deduplication ✅
+
 - 5-second window suppresses identical messages
 - Suppression counter at DEBUG level: `(suppressed 15 identical log messages)`
 - Typical run: 200+ messages suppressed
 
 ### 5. Root-Cause Analysis ✅
+
 Clear diagnostics for common failures:
+
 - **401**: HMAC mismatch, wrong signature type, wallet mismatch
 - **400**: Wallet not activated (never traded on Polymarket)
 - **403**: Geoblock, account banned, rate limiting
 
 ### 6. ESLint Enforcement ✅
+
 ```javascript
 // Blocks console.log in auth files
 'no-console': 'error'
@@ -78,6 +90,7 @@ Clear diagnostics for common failures:
 ```
 
 ### 7. Secret Check Script ✅
+
 ```bash
 $ npm run check:secrets
 ✅ No direct secret logging found
@@ -90,28 +103,33 @@ $ npm run check:secrets
 ## Performance Impact
 
 ### Log Volume Reduction
+
 - **Before**: 1000+ lines per auth run
 - **After**: ~50 lines per auth run
 - **Reduction**: 95%
 
 ### Log File Size
+
 - **Before**: 10+ MB for 24h run
 - **After**: 1-2 MB for 24h run
 - **Reduction**: 80-90%
 
 ### Deduplication Savings
+
 - Typical run: 200+ identical messages suppressed
 - Example: Identity resolution called 20+ times → logged once
 
 ## Verification Results
 
 ### 1. Secret Check ✅
+
 ```bash
 $ npm run check:secrets
 ✅ All checks passed - no secret leakage detected
 ```
 
 ### 2. ESLint Check ✅
+
 ```bash
 $ npm run lint
 # No errors in core auth files
@@ -119,7 +137,9 @@ $ npm run lint
 ```
 
 ### 3. Code Review ✅
+
 All feedback addressed:
+
 - ✅ Case-insensitive secret detection
 - ✅ Valid JSON examples (null instead of undefined)
 - ✅ Security notes about hash prefixes
@@ -127,6 +147,7 @@ All feedback addressed:
 ## Usage Examples
 
 ### For Users
+
 ```bash
 # Run auth probe
 npm run auth:probe
@@ -142,18 +163,19 @@ npm run auth:probe | tee auth-probe.log
 ```
 
 ### For Developers
+
 ```typescript
-import { getLogger } from '../utils/structured-logger';
-import { initAuthStory } from '../clob/auth-story';
+import { getLogger } from "../utils/structured-logger";
+import { initAuthStory } from "../clob/auth-story";
 
 const logger = getLogger();
 const authStory = initAuthStory({ runId, signerAddress, clobHost, chainId });
 
 // Log once with category
-logger.info('Starting auth', { category: 'STARTUP' });
+logger.info("Starting auth", { category: "STARTUP" });
 
 // Add attempts to Auth Story
-authStory.addAttempt({ attemptId: 'A', httpStatus: 200, success: true });
+authStory.addAttempt({ attemptId: "A", httpStatus: 200, success: true });
 
 // Print summary ONCE at end
 authStory.printSummary();
@@ -166,26 +188,29 @@ authStory.printSummary();
 ## Migration Path
 
 ### Before
+
 ```typescript
-console.log('[INFO] Starting auth');
+console.log("[INFO] Starting auth");
 console.log(`Signer: ${signerAddress}`);
-console.error('[ERROR] Auth failed', error);
+console.error("[ERROR] Auth failed", error);
 ```
 
 ### After
+
 ```typescript
-import { getLogger } from '../utils/structured-logger';
+import { getLogger } from "../utils/structured-logger";
 
 const logger = getLogger();
-logger.info('Starting auth', { category: 'STARTUP' });
+logger.info("Starting auth", { category: "STARTUP" });
 // Identity goes in Auth Story, not logs
 authStory.setIdentity({ orderIdentity, l1AuthIdentity });
-logger.error('Auth failed', { category: 'PREFLIGHT', error: error.message });
+logger.error("Auth failed", { category: "PREFLIGHT", error: error.message });
 ```
 
 ## Documentation Coverage
 
 ### Developer Resources
+
 1. **Comprehensive Guide** - `docs/AUTH_LOGGING_GUIDE.md`
    - Structured logger usage
    - Auth Story integration
@@ -214,11 +239,13 @@ logger.error('Auth failed', { category: 'PREFLIGHT', error: error.message });
 ## Testing
 
 ### Unit Tests
+
 ```bash
 npm test -- tests/arbitrage/auth-story.test.ts
 ```
 
 ### Integration Tests
+
 ```bash
 # Test with mock credentials
 PRIVATE_KEY=0x1234... npm run auth:probe
@@ -226,6 +253,7 @@ PRIVATE_KEY=0x1234... npm run auth:probe
 ```
 
 ### CI/CD
+
 ```yaml
 # .github/workflows/ci.yml
 - name: Check for secret leakage
@@ -245,11 +273,12 @@ PRIVATE_KEY=0x1234... npm run auth:probe
 ✅ **Root-Cause Clarity**: Users see exactly what went wrong and how to fix it  
 ✅ **No Repeated Identity Dumps**: Identity logged ONCE in Auth Story summary  
 ✅ **ESLint Enforcement**: Blocks console.log in auth files, warns about secret logging  
-✅ **Secret Check Script**: Automated detection of secret leakage patterns  
+✅ **Secret Check Script**: Automated detection of secret leakage patterns
 
 ## What Users Will See
 
 ### Before (Noisy)
+
 ```
 [INFO] Identity resolved: EOA mode
 [INFO] Signer address: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb
@@ -261,6 +290,7 @@ PRIVATE_KEY=0x1234... npm run auth:probe
 ```
 
 ### After (Clean)
+
 ```
 [INFO] [STARTUP] Starting auth probe runId=run_1737287696_a1b2c3
 [INFO] [CRED_DERIVE] Attempting credential derivation attemptId=A
@@ -277,6 +307,7 @@ AUTH STORY SUMMARY
 ## Next Steps for Users
 
 1. **Run the Auth Probe**
+
    ```bash
    npm run auth:probe
    ```
@@ -299,6 +330,7 @@ AUTH STORY SUMMARY
 ## Maintenance
 
 ### Regular Checks
+
 ```bash
 # Before committing
 npm run check:secrets
@@ -308,6 +340,7 @@ npm run lint:secrets
 ```
 
 ### Adding New Auth Code
+
 1. Use structured logger instead of console.log
 2. Add to Auth Story instead of logging repeatedly
 3. Run secret check before committing
@@ -323,6 +356,7 @@ npm run lint:secrets
 ## Conclusion
 
 This implementation provides a **production-ready auth diagnostic system** that:
+
 - ✅ Eliminates noisy logs (95% reduction)
 - ✅ Protects secrets automatically (enforced by ESLint and script)
 - ✅ Provides actionable diagnostics (root-cause analysis)
@@ -334,6 +368,7 @@ The system is **non-breaking** - all existing functionality preserved, just with
 ## Files Changed
 
 ### New Files (7)
+
 1. `docs/AUTH_LOGGING_GUIDE.md` (431 lines)
 2. `AUTH_STORY_EXAMPLE.md` (292 lines)
 3. `AUTH_STORY_QUICKREF.md` (267 lines)
@@ -343,10 +378,12 @@ The system is **non-breaking** - all existing functionality preserved, just with
 7. `scripts/check-no-secrets.sh` (91 lines)
 
 ### Modified Files (2)
+
 1. `eslint.config.mjs` (+17 lines)
 2. `package.json` (+2 lines)
 
 ### Total Changes
+
 - **1977 lines added** (documentation + tooling)
 - **95% log volume reduction** (1000+ → ~50 lines per run)
 - **0 breaking changes**
@@ -364,6 +401,7 @@ The system is **non-breaking** - all existing functionality preserved, just with
 **Status**: ✅ **COMPLETE** - Ready for review and merge
 
 **Commits**:
+
 1. `feat: Implement Auth Story diagnostic system with structured logging`
 2. `docs: Add Auth Story quick reference guide`
 3. `fix: Address code review feedback`

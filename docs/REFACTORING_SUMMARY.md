@@ -7,9 +7,11 @@ Successfully refactored CLOB authentication from a complex 100+ iteration system
 ## What Was Created
 
 ### 1. Core Minimal Auth Module
+
 **File**: `src/clob/minimal-auth.ts` (~330 lines)
 
 **Key Features**:
+
 - Single function `authenticateMinimal()` that matches Python agents pattern
 - One call to `createOrDeriveApiKey()` - no fallbacks, no retries
 - Returns structured `AuthStory` JSON summary
@@ -17,6 +19,7 @@ Successfully refactored CLOB authentication from a complex 100+ iteration system
 - No complex identity resolution or signature type detection
 
 **API**:
+
 ```typescript
 const result = await authenticateMinimal({
   privateKey: process.env.PRIVATE_KEY!,
@@ -33,11 +36,13 @@ if (result.success) {
 ```
 
 ### 2. Minimal Client Factory
+
 **File**: `src/infrastructure/minimal-client-factory.ts` (~140 lines)
 
 **Purpose**: Drop-in replacement for complex `clob-client.factory.ts`
 
 **API**:
+
 ```typescript
 const client = await createMinimalPolymarketClient({
   rpcUrl: "https://polygon-rpc.com",
@@ -48,9 +53,11 @@ const client = await createMinimalPolymarketClient({
 ```
 
 ### 3. Auth Probe Command
+
 **File**: `scripts/minimal_auth_probe.ts` (~65 lines)
 
 **Usage**:
+
 ```bash
 npm run auth:probe
 # or with debug logging
@@ -58,6 +65,7 @@ LOG_LEVEL=debug npm run auth:probe
 ```
 
 **Output**: Single Auth Story JSON showing:
+
 - Run ID, timestamp, duration
 - Signer address, signature type
 - Credentials obtained/verified status
@@ -65,9 +73,11 @@ LOG_LEVEL=debug npm run auth:probe
 - Exit code 0 (success) or 1 (failure)
 
 ### 4. Migration Documentation
+
 **File**: `docs/MINIMAL_AUTH.md` (~400 lines)
 
 Complete guide covering:
+
 - Philosophy and approach
 - Comparison: Complex vs Minimal
 - Usage examples
@@ -78,6 +88,7 @@ Complete guide covering:
 ## Package.json Updates
 
 Added new commands:
+
 ```json
 {
   "auth:probe": "ts-node scripts/minimal_auth_probe.ts",
@@ -90,6 +101,7 @@ Added new commands:
 ## Code Metrics
 
 ### Before (Complex System)
+
 - **Total lines**: ~3,500
 - **Files**: 5-6 auth-related modules
 - **Attempts**: 5 (fallback ladder A-E)
@@ -99,6 +111,7 @@ Added new commands:
 - **Logging**: Verbose, repeated, spam
 
 ### After (Minimal System)
+
 - **Total lines**: ~330
 - **Files**: 1 core module
 - **Attempts**: 1 (single call)
@@ -108,6 +121,7 @@ Added new commands:
 - **Logging**: Single Auth Story JSON
 
 ### Reduction
+
 - **90% less code** (3,500 → 330 lines)
 - **80% fewer files** (5-6 → 1 core module)
 - **80% fewer attempts** (5 → 1)
@@ -176,6 +190,7 @@ These files are marked for future deprecation but remain functional.
 ## Migration Path
 
 ### Phase 1: Add Minimal Auth ✅ COMPLETED
+
 - Created `minimal-auth.ts`
 - Created `minimal-client-factory.ts`
 - Created `minimal_auth_probe.ts`
@@ -183,7 +198,9 @@ These files are marked for future deprecation but remain functional.
 - Created migration docs
 
 ### Phase 2: Validate (NEXT)
+
 Test with different wallet types:
+
 ```bash
 # EOA wallet
 POLYMARKET_SIGNATURE_TYPE=0 npm run auth:probe
@@ -196,12 +213,14 @@ POLYMARKET_SIGNATURE_TYPE=1 POLYMARKET_PROXY_ADDRESS=0x... npm run auth:probe
 ```
 
 ### Phase 3: Migrate Main App (FUTURE)
+
 1. Update `src/app/main.ts` to import `createMinimalPolymarketClient`
 2. Change client creation call
 3. Test in production
 4. Monitor for issues
 
 ### Phase 4: Cleanup (FUTURE)
+
 1. Mark legacy files as deprecated
 2. Add console warnings when using complex auth
 3. Eventually delete:
@@ -213,21 +232,25 @@ POLYMARKET_SIGNATURE_TYPE=1 POLYMARKET_PROXY_ADDRESS=0x... npm run auth:probe
 ## Benefits
 
 ### 1. Simplicity
+
 - **90% less code** to maintain
 - **One code path** instead of 5 fallback attempts
 - **Easy to understand** - any developer can read it
 
 ### 2. Reliability
+
 - **Matches working implementation** (Python agents)
 - **No custom logic** - lets SDK handle complexity
 - **Predictable behavior** - same flow every time
 
 ### 3. Maintainability
+
 - **Easy to debug** - single Auth Story shows everything
 - **Easy to test** - one code path to test
 - **Easy to modify** - no tangled dependencies
 
 ### 4. Performance
+
 - **Faster execution** - no retries, no exponential backoff
 - **Less logging** - single structured output
 - **Lower resource usage** - no rate limiters, no deduplication
@@ -248,6 +271,7 @@ POLYMARKET_SIGNATURE_TYPE=2 npm run auth:probe
 ```
 
 Expected output:
+
 ```
 ============================================================
 POLYMARKET MINIMAL AUTH PROBE
@@ -276,6 +300,7 @@ AUTH STORY
 ## Files Changed
 
 ### Created (5 files):
+
 1. `src/clob/minimal-auth.ts` - Core minimal auth
 2. `src/infrastructure/minimal-client-factory.ts` - Minimal factory
 3. `scripts/minimal_auth_probe.ts` - Auth probe script
@@ -283,19 +308,23 @@ AUTH STORY
 5. `docs/REFACTORING_SUMMARY.md` - This file
 
 ### Modified (1 file):
+
 1. `package.json` - Added auth:probe commands
 
 ### Unchanged (Legacy - 802 files):
+
 All other files remain unchanged for backwards compatibility.
 
 ## Next Steps
 
 1. **Test the minimal auth probe**:
+
    ```bash
    PRIVATE_KEY=0x... npm run auth:probe
    ```
 
 2. **Compare with legacy**:
+
    ```bash
    npm run auth:probe:simple
    npm run auth:probe:legacy
@@ -317,16 +346,19 @@ All other files remain unchanged for backwards compatibility.
 ## Troubleshooting
 
 ### "Wallet must trade on Polymarket first"
+
 - Visit https://polymarket.com
 - Connect wallet and make a trade
 - Retry authentication
 
 ### "Verification failed: 401"
+
 - Check `POLYMARKET_SIGNATURE_TYPE` is correct
 - For browser wallets, try `POLYMARKET_SIGNATURE_TYPE=2`
 - For Safe/Proxy, set `POLYMARKET_PROXY_ADDRESS`
 
 ### "Cannot find module @polymarket/clob-client"
+
 - Run `npm install`
 - Ensure dependencies are installed
 

@@ -7,6 +7,7 @@ Successfully refactored CLOB authentication from complex 100+ iteration system t
 ## Files Created (8 files)
 
 ### Source Code (3 files)
+
 1. **`src/clob/minimal-auth.ts`** (~340 lines)
    - Core minimal authentication module
    - Single `createOrDeriveApiKey()` call
@@ -24,12 +25,14 @@ Successfully refactored CLOB authentication from complex 100+ iteration system t
    - CI-friendly (exits 0/1)
 
 ### Testing (1 file)
+
 4. **`scripts/validate_minimal_auth.ts`** (~181 lines)
    - Validation test suite
    - Tests module structure and Auth Story format
    - Proper async handling with Promise patterns
 
 ### Documentation (4 files)
+
 5. **`docs/MINIMAL_AUTH.md`** (~400 lines)
    - Comprehensive migration guide
    - Usage examples and troubleshooting
@@ -46,6 +49,7 @@ Successfully refactored CLOB authentication from complex 100+ iteration system t
    - Pull request description
 
 ### Modified (1 file)
+
 9. **`package.json`**
    - Added new auth commands:
      - `npm run auth:probe` (minimal - default)
@@ -57,42 +61,48 @@ Successfully refactored CLOB authentication from complex 100+ iteration system t
 ## Code Quality - All Review Issues Addressed ✅
 
 ### Duplication Eliminated
+
 - ✅ Extracted `updateStoryDuration()` for duration calculation
 - ✅ Extracted `extractErrorStatus()` for error handling
 - ✅ Single source of truth for all code paths
 
 ### Type Safety Improved
+
 - ✅ Added proper type guard in `extractErrorStatus()`
 - ✅ Validates error structure before accessing nested properties
 - ✅ Documented type assertion rationale with future refactor path
 
 ### Async Handling Fixed
+
 - ✅ Replaced setTimeout with proper Promise patterns
 - ✅ Eliminated race conditions in test suite
 - ✅ Sequential test execution with proper error handling
 
 ### Security Enhanced
-- ✅ Improved secret redaction (uses "***" for strings ≤8 chars)
+
+- ✅ Improved secret redaction (uses "\*\*\*" for strings ≤8 chars)
 - ✅ Only shows last 6 chars for longer secrets
 - ✅ No secrets in error messages
 
 ### Configuration Validation
+
 - ✅ Added warning for invalid signature type
 - ✅ Helpful error messages for debugging
 
 ### Documentation Clarity
+
 - ✅ Explained type assertion usage
 - ✅ Clarified publicKeyMismatch field purpose
 - ✅ Function names reflect behavior (updateStoryDuration)
 
 ## Code Metrics
 
-| Metric | Before | After | Reduction |
-|--------|--------|-------|-----------|
-| Total lines | ~3,500 | ~340 | 90% |
-| Files | 5-6 | 1 core | 80% |
-| Auth attempts | 5 | 1 | 80% |
-| Complexity | High | Low | Significant |
+| Metric        | Before | After  | Reduction   |
+| ------------- | ------ | ------ | ----------- |
+| Total lines   | ~3,500 | ~340   | 90%         |
+| Files         | 5-6    | 1 core | 80%         |
+| Auth attempts | 5      | 1      | 80%         |
+| Complexity    | High   | Low    | Significant |
 
 ## Testing Commands
 
@@ -140,26 +150,31 @@ npm run auth:probe:legacy
 ## Benefits Delivered
 
 ### 1. Simplicity
+
 - 90% less code to maintain
 - Single code path (no fallback ladder)
 - Easy to understand and debug
 
-### 2. Reliability  
+### 2. Reliability
+
 - Matches proven Python agents implementation
 - Lets SDK handle complexity internally
 - Predictable behavior
 
 ### 3. Maintainability
+
 - Easy to test (one code path)
 - Easy to modify (no tangled dependencies)
 - Clear error messages
 
 ### 4. Security
+
 - No secret leakage (proper redaction)
 - Minimal logging (Auth Story only)
 - Type-safe error handling
 
 ### 5. Performance
+
 - Faster (no retries, no backoff)
 - Less resource usage (no rate limiters)
 - Single structured output
@@ -167,6 +182,7 @@ npm run auth:probe:legacy
 ## Python Agents Pattern Match ✅
 
 ### Python (3 lines)
+
 ```python
 self.client = ClobClient(self.clob_url, key=self.private_key, chain_id=self.chain_id)
 self.credentials = self.client.create_or_derive_api_creds()
@@ -174,6 +190,7 @@ self.client.set_api_creds(self.credentials)
 ```
 
 ### TypeScript (3 lines)
+
 ```typescript
 const client = new ClobClient(CLOB_HOST, CHAIN_ID, asClobSigner(wallet));
 const creds = await client.createOrDeriveApiKey();
@@ -185,22 +202,26 @@ client.setApiCreds(creds);
 ## Migration Path
 
 ### Phase 1: Add Minimal Auth ✅ COMPLETED
+
 - Created minimal auth module
 - Created minimal client factory
 - Added auth probe commands
 - Comprehensive documentation
 
 ### Phase 2: Validate (NEXT)
+
 - Test with different wallet types (EOA, Safe, Proxy)
 - Compare outputs with legacy
 - Verify Auth Story format
 
 ### Phase 3: Migrate Main App (FUTURE)
+
 - Update `main.ts` to use minimal factory
 - Test in production
 - Monitor for issues
 
 ### Phase 4: Cleanup (FUTURE)
+
 - Deprecate legacy files
 - Remove complex fallback system
 - Update all documentation
