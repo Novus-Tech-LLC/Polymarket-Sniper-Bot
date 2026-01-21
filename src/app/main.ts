@@ -67,13 +67,8 @@ async function main(): Promise<void> {
     env.detectOnly = false;
   }
 
-  // Get authenticated CLOB client
-  const clobClient = await auth.getClobClient();
-  
-  // Create a client object with wallet attached (for compatibility with existing code)
-  const { Wallet } = await import("ethers");
-  const wallet = new Wallet(env.privateKey);
-  const client = Object.assign(clobClient, { wallet });
+  // Get authenticated CLOB client (already has wallet with provider)
+  const client = await auth.getClobClient();
   const tradingReady = await ensureTradingReady({
     client,
     logger,
