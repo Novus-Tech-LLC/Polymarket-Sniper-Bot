@@ -989,6 +989,33 @@ services:
 - If **decisions log is empty**, ensure `/data` is writable and `ARB_DECISIONS_LOG` is set.
 - If **trades are blocked**, check for `/data/KILL`, low POL balance, or breached exposure caps.
 
+#### CLOB Allowance Bug Workaround
+
+**Symptom**: You see warnings like:
+```
+[WARN] [CLOB] Order skipped (INSUFFICIENT_BALANCE_OR_ALLOWANCE): need=0.87 have=93002583.00 allowance=0.00
+```
+
+**Cause**: The Polymarket CLOB API has a [known bug](https://github.com/Polymarket/clob-client/issues/128) where `getBalanceAllowance()` returns `allowance=0` even when on-chain approvals are correctly set to unlimited.
+
+**Solution**: The bot now includes a workaround that trusts on-chain approval verification from preflight checks instead of the CLOB API response. This is **enabled by default**.
+
+To verify it's working, look for logs like:
+```
+[Preflight][Approvals][USDC] ✅ spender=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E allowance=unlimited
+[CLOB][TrustMode] Bypassing CLOB allowance check - trusting on-chain approvals verified in preflight
+```
+
+To disable this workaround (not recommended):
+```bash
+TRUST_ONCHAIN_APPROVALS=false
+```
+
+**Related Issues**:
+- [Polymarket clob-client #128](https://github.com/Polymarket/clob-client/issues/128) - "getBalanceAllowance returns 0"
+- [Polymarket py-clob-client #102](https://github.com/Polymarket/py-clob-client/issues/102) - "Allowance function says balance 0"
+- [Polymarket py-clob-client #109](https://github.com/Polymarket/py-clob-client/issues/109) - "Not Enough Balance / Allowance Error"
+
 ### Running the Bot
 
 ```bash
