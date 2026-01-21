@@ -95,8 +95,9 @@ export class TradeExecutorService {
       }
 
       // Validate our order meets minimum size requirements
-      // Note: When MAX_POSITION_USD is set lower than MIN_ORDER_USD, the effective minimum
-      // is adjusted to match MAX_POSITION_USD. This allows trades to execute at the capped size.
+      // Note: When any position size cap (FRONTRUN_MAX_SIZE_USD or MAX_POSITION_USD) is lower
+      // than MIN_ORDER_USD, the effective minimum is adjusted to match the cap so trades can
+      // execute at the capped size.
       const minOrderSize = sizing.effectiveMinOrderUsd;
       if (frontrunSize < minOrderSize) {
         logger.warn(
@@ -211,12 +212,11 @@ export class TradeExecutorService {
     const cappedByEndgame = hasEndgameCap && endgameMax < frontrunMax;
     const size = Math.min(calculatedSize, maxSize);
 
-    // Auto-adjust MIN_ORDER_USD if MAX_POSITION_USD is lower to avoid impossible conditions
-    // This ensures orders can still execute when MAX_POSITION_USD is intentionally set low
+    // Auto-adjust MIN_ORDER_USD if any position size cap (FRONTRUN_MAX_SIZE_USD or MAX_POSITION_USD) is lower to avoid impossible conditions
+    // This ensures orders can still execute when either cap is intentionally set low
     const configuredMinOrderUsd = env.minOrderUsd || DEFAULT_CONFIG.MIN_ORDER_USD;
-    const effectiveMinOrderUsd = hasEndgameCap
-      ? Math.min(configuredMinOrderUsd, endgameMax)
-      : configuredMinOrderUsd;
+    const effectiveMinOrderUsd =
+      configuredMinOrderUsd > maxSize ? maxSize : configuredMinOrderUsd;
 
     return { size, multiplier, maxSize, wasCapped, cappedByEndgame, effectiveMinOrderUsd };
   }

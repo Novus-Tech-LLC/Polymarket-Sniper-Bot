@@ -212,7 +212,7 @@ test("frontrun executes trade when MAX_POSITION_USD is set below MIN_ORDER_USD",
     });
 
     // Target trade of 100 USD with 0.1 multiplier = 10 USD, capped to 5 USD by MAX_POSITION_USD
-    // With the fix, this should execute because MAX_POSITION_USD takes precedence
+    // With the fix, this should execute because the effective minimum is adjusted to match MAX_POSITION_USD
     await executor.frontrunTrade({
       trader: "0xabc",
       marketId: "market-1",
@@ -245,4 +245,68 @@ test("frontrun executes trade when MAX_POSITION_USD is set below MIN_ORDER_USD",
       delete process.env.MAX_POSITION_USD;
     }
   }
+});
+
+test("frontrun executes trade when FRONTRUN_MAX_SIZE_USD is set below MIN_ORDER_USD", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: { ...baseEnv, minOrderUsd: 10, frontrunMaxSizeUsd: 5 }, // FRONTRUN_MAX_SIZE_USD=5, MIN_ORDER_USD=10
+    logger,
+  });
+
+  // Target trade of 100 USD with 0.1 multiplier = 10 USD, capped to 5 USD by FRONTRUN_MAX_SIZE_USD
+  // With the fix, this should execute because the effective minimum is adjusted to match the cap
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-1",
+    tokenId: "token-1",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.5,
+    timestamp: Date.now(),
+  });
+
+  // Verify the order was executed (not skipped due to MIN_ORDER_USD conflict)
+  assert.ok(
+    logs.some((line) => line.includes("capped from") && line.includes("FRONTRUN_MAX_SIZE_USD")),
+    "Should log that order was capped by FRONTRUN_MAX_SIZE_USD",
+  );
+  assert.ok(
+    postOrderCalled,
+    "postOrder should be called - effective min is adjusted to 5 USD (matching FRONTRUN_MAX_SIZE_USD)",
+  );
+  assert.ok(
+    !logs.some((line) => line.includes("is below minimum")),
+    "Should NOT log warning about order being below minimum when FRONTRUN_MAX_SIZE_USD is intentionally set low",
+  );
 });
