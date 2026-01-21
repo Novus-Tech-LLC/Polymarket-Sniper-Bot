@@ -1011,14 +1011,10 @@ export const runClobAuthPreflight = async (params: {
     // (e.g., successful result object rather than HTTP response wrapper)
     // This is NON_FATAL - credentials are valid, trading can proceed
     const responseType = typeof response;
-    const hasData =
-      response && typeof response === "object" && "data" in response;
-    const hasError =
-      response && typeof response === "object" && "error" in response;
-    const responseKeys =
-      response && typeof response === "object"
-        ? Object.keys(response).join(",")
-        : "none";
+    const isObject = response && typeof response === "object";
+    const hasData = isObject && "data" in response;
+    const hasError = isObject && "error" in response;
+    const responseKeys = isObject ? Object.keys(response).join(",") : "none";
 
     logPreflightFailure({
       logger: params.logger,
