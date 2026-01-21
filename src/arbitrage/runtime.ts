@@ -55,7 +55,7 @@ export async function startArbitrageEngine(
   );
 
   // Use pre-authenticated client if provided (MODE=both), otherwise create new one
-  let client: ClobClient & { wallet: Wallet };
+  let client: ClobClient & { wallet: Wallet; executionDisabled?: boolean };
   let tradingReady: {
     detectOnly: boolean;
     authOk: boolean;
