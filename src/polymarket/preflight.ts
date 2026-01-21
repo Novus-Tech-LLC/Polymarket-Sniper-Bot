@@ -1,4 +1,5 @@
 import type { ApiKeyCreds, ClobClient } from "@polymarket/clob-client";
+import { AssetType } from "@polymarket/clob-client";
 import { formatUnits, type BigNumberish } from "ethers";
 import type { Wallet } from "ethers";
 import { isAuthError } from "../infrastructure/clob-auth";
@@ -611,6 +612,25 @@ export const ensureTradingReady = async (
       config: approvalsConfig,
     });
     approvalsOk = approvalResult?.ok ?? false;
+
+    // If approvals were set/confirmed, sync CLOB cache with on-chain state
+    if (approvalsOk) {
+      try {
+        params.logger.info(
+          "[Preflight][Approvals] Syncing CLOB allowance cache with on-chain state...",
+        );
+        await params.client.updateBalanceAllowance({
+          asset_type: AssetType.COLLATERAL,
+        });
+        params.logger.info(
+          "[Preflight][Approvals] CLOB allowance cache synced successfully.",
+        );
+      } catch (syncError) {
+        params.logger.warn(
+          `[Preflight][Approvals] Failed to sync CLOB cache, but approvals are confirmed on-chain. ${sanitizeErrorMessage(syncError)}`,
+        );
+      }
+    }
   } catch (error) {
     params.logger.warn(
       `[Preflight][Approvals] Failed to ensure approvals. ${sanitizeErrorMessage(error)}`,

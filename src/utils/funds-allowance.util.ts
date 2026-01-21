@@ -512,6 +512,28 @@ export const checkFundsAndAllowance = async (
                 logger: params.logger,
                 config: approvalsConfig,
               });
+
+              // Sync CLOB cache with on-chain state after approvals
+              try {
+                params.logger.info(
+                  "[CLOB] Syncing CLOB allowance cache after auto-approve...",
+                );
+                await params.client.updateBalanceAllowance({
+                  asset_type: AssetType.COLLATERAL,
+                });
+                params.logger.info(
+                  "[CLOB] CLOB allowance cache synced successfully.",
+                );
+              } catch (syncError) {
+                const syncMessage =
+                  syncError instanceof Error
+                    ? syncError.message
+                    : String(syncError);
+                params.logger.warn(
+                  `[CLOB] Failed to sync CLOB cache after auto-approve: ${syncMessage}`,
+                );
+              }
+
               await refreshAndRetry();
             }
           }
@@ -562,6 +584,28 @@ export const checkFundsAndAllowance = async (
                 logger: params.logger,
                 config: approvalsConfig,
               });
+
+              // Sync CLOB cache with on-chain state after ERC1155 approvals
+              try {
+                params.logger.info(
+                  "[CLOB] Syncing CLOB allowance cache after ERC1155 approval...",
+                );
+                await params.client.updateBalanceAllowance({
+                  asset_type: AssetType.COLLATERAL,
+                });
+                params.logger.info(
+                  "[CLOB] CLOB allowance cache synced successfully.",
+                );
+              } catch (syncError) {
+                const syncMessage =
+                  syncError instanceof Error
+                    ? syncError.message
+                    : String(syncError);
+                params.logger.warn(
+                  `[CLOB] Failed to sync CLOB cache after ERC1155 approval: ${syncMessage}`,
+                );
+              }
+
               const refreshedApproval = await fetchApprovedForAll({
                 client: params.client,
                 owner: tradingAddress,
