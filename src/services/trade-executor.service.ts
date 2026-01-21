@@ -103,6 +103,7 @@ export class TradeExecutorService {
       // The postOrder function will use higher gas prices if configured
       const submissionResult = await postOrder({
         client,
+        wallet: client.wallet,
         marketId: signal.marketId,
         tokenId: signal.tokenId,
         outcome: signal.outcome,
