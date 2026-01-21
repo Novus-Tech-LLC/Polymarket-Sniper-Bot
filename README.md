@@ -65,42 +65,47 @@ See `src/trading/onchain-executor.ts` for detailed implementation options.
 
 ### Mode Comparison
 
-| Feature | CLOB Mode (default) | On-Chain Mode |
+| Feature | CLOB Mode (default) | On-Chain Mode (experimental) |
 |---------|-------------------|--------------|
+| **Status** | ✅ Fully functional | ⚠️ Infrastructure ready, integration needed |
 | **API Credentials** | Required (or derived) | ❌ Not needed |
 | **Rate Limits** | Yes (36k orders/10min) | ❌ None (only gas) |
 | **Authentication** | Complex (EOA/Proxy/Safe) | ✅ Simple (just wallet) |
-| **Execution** | Via CLOB API | ✅ Direct blockchain |
-| **Transparency** | Order IDs | ✅ Transaction hashes |
-| **Setup Complexity** | Moderate | ✅ Minimal |
-| **Best For** | High-frequency trading | Simple reliable trades |
+| **Execution** | Via CLOB API | Direct blockchain (pending integration) |
+| **Transparency** | Order IDs | Transaction hashes (when complete) |
+| **Setup Complexity** | Moderate | Minimal (when complete) |
+| **Best For** | All trading (current default) | Future: simple reliable trades |
+
+**Note**: On-chain mode currently returns `NOT_IMPLEMENTED` and requires additional integration work to execute actual trades. See `ONCHAIN_TRADING_IMPLEMENTATION.md` for details.
 
 ### Technical Details
 
-On-chain mode uses Polymarket's CTF Exchange smart contracts directly:
+On-chain mode infrastructure uses Polymarket's CTF Exchange smart contracts directly:
 
 - **CTF Exchange**: `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E`
 - **Neg Risk Exchange**: `0xC5d563A36AE78145C45a50134d48A1215220f80a`
 - **CTF Contract**: `0x4d97dcd97ec945f40cf65f87097ace5ea0476045`
 - **USDC.e**: `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`
 
-The bot:
-1. Fetches orderbook from CLOB API (read-only, no auth)
-2. Calculates optimal trade parameters
-3. Builds and signs transaction locally with ethers.js
-4. Submits directly to Polygon network
-5. Returns transaction hash for tracking
+The framework includes:
+1. Balance and allowance verification
+2. Automatic USDC approval handling
+3. Price protection and validation
+4. Transaction building (pending order matching integration)
+
+**Current Status**: Infrastructure complete, but order execution requires integration with signed maker orders (see implementation docs).
 
 ### Configuration
 
 ```bash
-# Trade Mode (on-chain is DEFAULT - no need to set unless switching to CLOB)
-# TRADE_MODE=onchain         # Default - trades directly on blockchain
-# TRADE_MODE=clob            # Alternative - uses Polymarket API
+# Trade Mode (defaults to CLOB - fully functional)
+TRADE_MODE=clob              # Default - uses Polymarket CLOB API
+# TRADE_MODE=onchain         # Experimental - on-chain infrastructure (not yet complete)
 
-# Required for on-chain mode (which is the default)
-PRIVATE_KEY=0x...           # Your wallet private key
+# Required for CLOB mode (default)
+PRIVATE_KEY=0x...            # Your wallet private key  
 RPC_URL=https://polygon-rpc.com
+# API credentials auto-derived from PRIVATE_KEY
 
 # Optional overrides
 COLLATERAL_TOKEN_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
@@ -109,20 +114,19 @@ POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
 
 ### When to Use Each Mode
 
-**On-Chain Mode (DEFAULT):**
-- Simple setup - just PRIVATE_KEY and RPC_URL
-- No API credentials needed
-- Direct blockchain transactions
-- Transparent and reliable
-- No rate limits (just gas costs)
-- **Recommended for most users**
+**CLOB Mode (DEFAULT - Recommended):**
+- ✅ Fully functional trading
+- Works with all order types
+- Automatic credential derivation from PRIVATE_KEY
+- Proven, reliable execution
+- **Use this for actual trading**
 
-**CLOB Mode (Alternative):**
-- High-frequency trading (>1 trade/minute)
-- Advanced order types
-- Instant order book updates
-- Requires API credentials or derivation
-- Subject to rate limits
+**On-Chain Mode (Experimental):**
+- ⚠️ Infrastructure in place but incomplete
+- Currently returns `NOT_IMPLEMENTED`
+- Will offer: Direct blockchain transactions, no API keys, no rate limits
+- **Only for development/testing of on-chain integration**
+- See `ONCHAIN_TRADING_IMPLEMENTATION.md` for completion roadmap
 
 
 ## 🦀 Rust CLOB Bridge (New)

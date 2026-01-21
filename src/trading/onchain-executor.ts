@@ -45,11 +45,10 @@
  * @see https://docs.polymarket.com/developers/CTF/deployment-resources
  */
 
-import { Contract, JsonRpcProvider, Wallet, parseUnits, formatUnits, MaxUint256 } from "ethers";
+import { Contract, Wallet, parseUnits, formatUnits, MaxUint256 } from "ethers";
 import type { TransactionResponse, TransactionReceipt } from "ethers";
 import { resolvePolymarketContracts } from "../polymarket/contracts";
-import { CTF_EXCHANGE_ABI, ERC20_ABI, OrderSide as ABIOrderSide } from "./exchange-abi";
-import { estimateGasFees } from "../utils/gas";
+import { ERC20_ABI } from "./exchange-abi";
 import type { Logger } from "../utils/logger.util";
 import type { OrderSide, OrderOutcome } from "../utils/post-order.util";
 import axios from "axios";
@@ -261,7 +260,6 @@ export async function executeOnChainOrder(
   const {
     wallet,
     tokenId,
-    outcome,
     side,
     sizeUsd,
     maxAcceptablePrice,

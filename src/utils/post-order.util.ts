@@ -48,9 +48,10 @@ const missingOrderbooks = new Set<string>();
  * 
  * This function routes orders based on the TRADE_MODE environment variable:
  * - TRADE_MODE=clob (default): Uses CLOB API with authentication
- * - TRADE_MODE=onchain: Bypasses CLOB API and trades directly on-chain
+ * - TRADE_MODE=onchain (experimental): Bypasses CLOB API and trades directly on-chain
+ *   (Note: On-chain mode infrastructure is in place but requires additional integration)
  * 
- * On-chain mode benefits:
+ * On-chain mode benefits (when fully implemented):
  * - No API credentials required (only PRIVATE_KEY and RPC_URL)
  * - No rate limits from CLOB API
  * - Direct blockchain interaction
