@@ -40,7 +40,7 @@ export class TradeMonitorService {
   async start(): Promise<void> {
     const { logger, env } = this.deps;
     logger.info(
-      `Monitoring trader(${this.deps.targetAddresses.join(", ")})...`,
+      `👀 Monitoring trader(${this.deps.targetAddresses.join(", ")})...`,
     );
     this.timer = setInterval(
       () => void this.tick().catch(() => undefined),
@@ -60,7 +60,7 @@ export class TradeMonitorService {
         await this.fetchTraderActivities(trader, env);
       }
     } catch (err) {
-      logger.error("Monitor tick failed", sanitizeAxiosError(err));
+      logger.error("❌ Monitor tick failed", sanitizeAxiosError(err));
     }
   }
 
@@ -122,7 +122,7 @@ export class TradeMonitorService {
         };
 
         this.deps.logger.info(
-          `[Monitor] New trade detected: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD on market ${signal.marketId}`,
+          `[Monitor] 🎯 New trade detected: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD on market ${signal.marketId}`,
         );
 
         this.processedHashes.add(activity.transactionHash);
@@ -143,13 +143,13 @@ export class TradeMonitorService {
       // Handle 404 gracefully - user might have no activities yet or endpoint doesn't exist
       if (axios.isAxiosError(err) && err.response?.status === 404) {
         this.deps.logger.warn(
-          `[Monitor] No activities found for ${trader} (404)`,
+          `[Monitor] ⚠️  No activities found for ${trader} (404)`,
         );
         return;
       }
       // Log other errors
       this.deps.logger.error(
-        `Failed to fetch activities for ${trader}`,
+        `❌ Failed to fetch activities for ${trader}`,
         sanitizeAxiosError(err),
       );
     }

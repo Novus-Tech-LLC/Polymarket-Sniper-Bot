@@ -60,9 +60,9 @@ export class ArbitrageEngine {
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    this.logger.info("[ARB] ✅ Arbitrage engine started");
+    this.logger.info("[ARB] 🚀 Arbitrage engine started");
     this.logger.info(
-      "[ARB] 📊 Adaptive learning enabled - will learn from trade outcomes",
+      "[ARB] 🧠 Adaptive learning enabled - will learn from trade outcomes",
     );
     while (this.running) {
       const startedAt = Date.now();
@@ -117,12 +117,12 @@ export class ArbitrageEngine {
       opportunities.sort((a, b) => b.estProfitUsd - a.estProfitUsd);
       if (opportunities.length === 0) {
         this.logger.info(
-          `[ARB] Scan complete: 0 opportunities (markets=${markets.length}, orderbook_failures=${orderbookFailures}, markets_with_missing_orderbooks=${marketsWithOrderbookFailures}, skips=${skipSummary})`,
+          `[ARB] 🔍 Scan complete: 0 opportunities (markets=${markets.length}, orderbook_failures=${orderbookFailures}, markets_with_missing_orderbooks=${marketsWithOrderbookFailures}, skips=${skipSummary})`,
         );
       } else {
         const top = opportunities[0];
         this.logger.info(
-          `[ARB] Found ${opportunities.length} opportunity(ies). Top market=${top.marketId} edge=${top.edgeBps.toFixed(1)}bps est=$${top.estProfitUsd.toFixed(2)} size=$${top.sizeUsd.toFixed(2)} (orderbook_failures=${orderbookFailures}, markets_with_missing_orderbooks=${marketsWithOrderbookFailures}, skips=${skipSummary})`,
+          `[ARB] 🎯 Found ${opportunities.length} opportunity(ies). Top market=${top.marketId} edge=${top.edgeBps.toFixed(1)}bps est=$${top.estProfitUsd.toFixed(2)} size=$${top.sizeUsd.toFixed(2)} (orderbook_failures=${orderbookFailures}, markets_with_missing_orderbooks=${marketsWithOrderbookFailures}, skips=${skipSummary})`,
         );
       }
 
@@ -134,7 +134,7 @@ export class ArbitrageEngine {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`[ARB] Scan error: ${message}`);
+      this.logger.warn(`[ARB] ⚠️  Scan error: ${message}`);
     }
   }
 
@@ -148,7 +148,7 @@ export class ArbitrageEngine {
     } catch (error) {
       if (error instanceof OrderbookNotFoundError) {
         this.logger.warn(
-          `[ARB] Invalid orderbook token ${tokenId} for market ${marketId}. Remove from config/watchlist if applicable.`,
+          `[ARB] ⚠️  Invalid orderbook token ${tokenId} for market ${marketId}. Remove from config/watchlist if applicable.`,
         );
         return { top: { bestAsk: 0, bestBid: 0 }, failed: true };
       }

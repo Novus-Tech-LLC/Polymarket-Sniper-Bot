@@ -69,7 +69,7 @@ export class TradeExecutorService {
       const polBalance = balances.polBalance ?? 0;
 
       logger.info(
-        `[Frontrun] Balance check - POL: ${polBalance.toFixed(4)} POL, USDC: ${yourUsdBalance.toFixed(2)} USDC`,
+        `[Frontrun] 💰 Balance check - POL: ${polBalance.toFixed(4)} POL, USDC: ${yourUsdBalance.toFixed(2)} USDC`,
       );
 
       // For frontrunning, we execute the same trade but with higher priority
@@ -79,18 +79,18 @@ export class TradeExecutorService {
       const calculatedSize = signal.sizeUsd * sizing.multiplier;
 
       logger.info(
-        `[Frontrun] Detected trade: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD by other trader`,
+        `[Frontrun] 🔍 Detected trade: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD by other trader`,
       );
       if (sizing.wasCapped) {
         const capSource = sizing.cappedByEndgame
           ? "MAX_POSITION_USD"
           : "FRONTRUN_MAX_SIZE_USD";
         logger.info(
-          `[Frontrun] Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (capped from ${calculatedSize.toFixed(2)} USD by ${capSource}=${sizing.maxSize})`,
+          `[Frontrun] 📊 Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (capped from ${calculatedSize.toFixed(2)} USD by ${capSource}=${sizing.maxSize})`,
         );
       } else {
         logger.info(
-          `[Frontrun] Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (${(sizing.multiplier * 100).toFixed(1)}% of target)`,
+          `[Frontrun] 📊 Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (${(sizing.multiplier * 100).toFixed(1)}% of target)`,
         );
       }
 
@@ -100,10 +100,10 @@ export class TradeExecutorService {
       const minOrderSize = env.minOrderUsd || DEFAULT_CONFIG.MIN_ORDER_USD;
       if (frontrunSize < minOrderSize) {
         logger.warn(
-          `[Frontrun] Order size ${frontrunSize.toFixed(2)} USD is below minimum ${minOrderSize.toFixed(2)} USD. Skipping trade.`,
+          `[Frontrun] ⚠️  Order size ${frontrunSize.toFixed(2)} USD is below minimum ${minOrderSize.toFixed(2)} USD. Skipping trade.`,
         );
         logger.info(
-          `[Frontrun] Tip: Increase FRONTRUN_SIZE_MULTIPLIER (current: ${(sizing.multiplier * 100).toFixed(1)}%) or decrease MIN_ORDER_USD to execute smaller trades.`,
+          `[Frontrun] 💡 Tip: Increase FRONTRUN_SIZE_MULTIPLIER (current: ${(sizing.multiplier * 100).toFixed(1)}%) or decrease MIN_ORDER_USD to execute smaller trades.`,
         );
         return;
       }
@@ -115,7 +115,7 @@ export class TradeExecutorService {
       if (signal.side === "BUY") {
         if (yourUsdBalance < requiredUsdc) {
           logger.error(
-            `[Frontrun] Insufficient USDC balance. Required: ${requiredUsdc.toFixed(2)} USDC, Available: ${yourUsdBalance.toFixed(2)} USDC`,
+            `[Frontrun] ❌ Insufficient USDC balance. Required: ${requiredUsdc.toFixed(2)} USDC, Available: ${yourUsdBalance.toFixed(2)} USDC`,
           );
           return;
         }
@@ -123,7 +123,7 @@ export class TradeExecutorService {
 
       if (polBalance < minPolForGas) {
         logger.error(
-          `[Frontrun] Insufficient POL balance for gas. Required: ${minPolForGas} POL, Available: ${polBalance.toFixed(4)} POL`,
+          `[Frontrun] ⛽ Insufficient POL balance for gas. Required: ${minPolForGas} POL, Available: ${polBalance.toFixed(4)} POL`,
         );
         return;
       }
@@ -159,7 +159,7 @@ export class TradeExecutorService {
 
       if (submissionResult.status === "submitted") {
         logger.info(
-          `[Frontrun] Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`,
+          `[Frontrun] ✅ Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`,
         );
       }
     } catch (err) {
@@ -170,11 +170,11 @@ export class TradeExecutorService {
         errorMessage.includes("No orderbook")
       ) {
         logger.warn(
-          `[Frontrun] Skipping trade - Market ${signal.marketId} is closed or resolved: ${errorMessage}`,
+          `[Frontrun] ⏭️  Skipping trade - Market ${signal.marketId} is closed or resolved: ${errorMessage}`,
         );
       } else {
         logger.error(
-          `[Frontrun] Failed to frontrun trade: ${errorMessage}`,
+          `[Frontrun] ❌ Failed to frontrun trade: ${errorMessage}`,
           err as Error,
         );
       }

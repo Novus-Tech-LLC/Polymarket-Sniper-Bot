@@ -103,7 +103,7 @@ export class EndgameSweepStrategy {
       }
 
       this.logger.info(
-        `[EndgameSweep] Opportunity: ${market.id} at ${(market.price * 100).toFixed(1)}¢ (gross ${expectedGrossProfitPct.toFixed(2)}%, net ${expectedNetProfitPct.toFixed(2)}% after fees)`,
+        `[EndgameSweep] 💰 Opportunity: ${market.id} at ${(market.price * 100).toFixed(1)}¢ (gross ${expectedGrossProfitPct.toFixed(2)}%, net ${expectedNetProfitPct.toFixed(2)}% after fees)`,
       );
 
       try {
@@ -113,7 +113,7 @@ export class EndgameSweepStrategy {
         purchasedCount++;
       } catch (err) {
         this.logger.error(
-          `[EndgameSweep] Failed to buy position ${market.id}`,
+          `[EndgameSweep] ❌ Failed to buy position ${market.id}`,
           err as Error,
         );
       }
@@ -121,7 +121,7 @@ export class EndgameSweepStrategy {
 
     if (purchasedCount > 0) {
       this.logger.info(
-        `[EndgameSweep] Purchased ${purchasedCount} endgame positions`,
+        `[EndgameSweep] ✅ Purchased ${purchasedCount} endgame positions`,
       );
     }
 
@@ -296,14 +296,14 @@ export class EndgameSweepStrategy {
       if (opportunities.length > 0) {
         const top5 = opportunities.slice(0, 5);
         this.logger.info(
-          `[EndgameSweep] Top opportunities: ${top5.map((o) => `${(o.price * 100).toFixed(1)}¢ (${((1 - o.price) * 100).toFixed(2)}% profit)`).join(", ")}`,
+          `[EndgameSweep] 🎯 Top opportunities: ${top5.map((o) => `${(o.price * 100).toFixed(1)}¢ (${((1 - o.price) * 100).toFixed(2)}% profit)`).join(", ")}`,
         );
       }
 
       return opportunities;
     } catch (err) {
       this.logger.error(
-        `[EndgameSweep] Failed to scan for opportunities: ${err instanceof Error ? err.message : String(err)}`,
+        `[EndgameSweep] ❌ Failed to scan for opportunities: ${err instanceof Error ? err.message : String(err)}`,
         err as Error,
       );
       return [];
@@ -318,7 +318,7 @@ export class EndgameSweepStrategy {
     // Validate market price before calculations
     if (market.price <= 0) {
       this.logger.warn(
-        `[EndgameSweep] Invalid market price (${market.price}) for ${market.id}, skipping`,
+        `[EndgameSweep] ⚠️  Invalid market price (${market.price}) for ${market.id}, skipping`,
       );
       return;
     }
@@ -332,7 +332,7 @@ export class EndgameSweepStrategy {
     // Validate position size before proceeding
     if (positionSize <= 0) {
       this.logger.warn(
-        `[EndgameSweep] Invalid position size (${positionSize}) for ${market.id}, skipping`,
+        `[EndgameSweep] ⚠️  Invalid position size (${positionSize}) for ${market.id}, skipping`,
       );
       return;
     }
@@ -356,7 +356,7 @@ export class EndgameSweepStrategy {
       // Re-validate price is still in range (may have changed)
       if (bestAsk < this.config.minPrice || bestAsk > this.config.maxPrice) {
         this.logger.warn(
-          `[EndgameSweep] Price moved out of range: ${(bestAsk * 100).toFixed(1)}¢ (was ${(market.price * 100).toFixed(1)}¢)`,
+          `[EndgameSweep] ⚠️  Price moved out of range: ${(bestAsk * 100).toFixed(1)}¢ (was ${(market.price * 100).toFixed(1)}¢)`,
         );
         return;
       }
@@ -372,7 +372,7 @@ export class EndgameSweepStrategy {
       const liveTradingEnabled = isLiveTradingEnabled();
       if (!liveTradingEnabled) {
         this.logger.warn(
-          `[EndgameSweep] Would buy ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)}) - LIVE TRADING DISABLED`,
+          `[EndgameSweep] 🔒 Would buy ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)}) - LIVE TRADING DISABLED`,
         );
         return;
       }
@@ -385,7 +385,7 @@ export class EndgameSweepStrategy {
       const expectedProfitPct = ((1.0 - bestAsk) / bestAsk) * 100;
 
       this.logger.info(
-        `[EndgameSweep] Executing buy: ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)}, expected profit: $${expectedProfit.toFixed(2)} / ${expectedProfitPct.toFixed(2)}%)`,
+        `[EndgameSweep] 🛒 Executing buy: ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)}, expected profit: $${expectedProfit.toFixed(2)} / ${expectedProfitPct.toFixed(2)}%)`,
       );
 
       // Execute buy order
@@ -404,23 +404,23 @@ export class EndgameSweepStrategy {
 
       if (result.status === "submitted") {
         this.logger.info(
-          `[EndgameSweep] ✓ Bought ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ (expected profit: $${expectedProfit.toFixed(2)})`,
+          `[EndgameSweep] ✅ Bought ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ (expected profit: $${expectedProfit.toFixed(2)})`,
         );
       } else if (result.status === "skipped") {
         this.logger.warn(
-          `[EndgameSweep] Buy order skipped: ${result.reason ?? "unknown reason"}`,
+          `[EndgameSweep] ⏭️  Buy order skipped: ${result.reason ?? "unknown reason"}`,
         );
         throw new Error(`Buy order skipped: ${result.reason ?? "unknown"}`);
       } else {
         this.logger.error(
-          `[EndgameSweep] Buy order failed: ${result.reason ?? "unknown reason"}`,
+          `[EndgameSweep] ❌ Buy order failed: ${result.reason ?? "unknown reason"}`,
         );
         throw new Error(`Buy order failed: ${result.reason ?? "unknown"}`);
       }
     } catch (err) {
       // Re-throw error for caller to handle
       this.logger.error(
-        `[EndgameSweep] Failed to buy position: ${err instanceof Error ? err.message : String(err)}`,
+        `[EndgameSweep] ❌ Failed to buy position: ${err instanceof Error ? err.message : String(err)}`,
       );
       throw err;
     }

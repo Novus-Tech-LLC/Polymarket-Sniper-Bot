@@ -102,11 +102,11 @@ export class StrategyOrchestrator {
    */
   async start(): Promise<void> {
     if (this.isRunning) {
-      this.logger.warn("[Orchestrator] Already running");
+      this.logger.warn("[Orchestrator] ⚠️  Already running");
       return;
     }
 
-    this.logger.info("[Orchestrator] Starting strategy orchestrator");
+    this.logger.info("[Orchestrator] 🚀 Starting strategy orchestrator");
     this.isRunning = true;
 
     // Start position tracker and await initial refresh to ensure data is available
@@ -123,7 +123,7 @@ export class StrategyOrchestrator {
     }, this.executionIntervalMs);
 
     this.logger.info(
-      `[Orchestrator] Started (execution interval: ${this.executionIntervalMs}ms)`,
+      `[Orchestrator] ✅ Started (execution interval: ${this.executionIntervalMs}ms)`,
     );
   }
 
@@ -135,7 +135,7 @@ export class StrategyOrchestrator {
       return;
     }
 
-    this.logger.info("[Orchestrator] Stopping strategy orchestrator");
+    this.logger.info("[Orchestrator] 🛑 Stopping strategy orchestrator");
 
     if (this.executionTimer) {
       clearInterval(this.executionTimer);
@@ -145,7 +145,7 @@ export class StrategyOrchestrator {
     this.positionTracker.stop();
     this.isRunning = false;
 
-    this.logger.info("[Orchestrator] Stopped");
+    this.logger.info("[Orchestrator] ✅ Stopped");
   }
 
   /**
@@ -169,7 +169,7 @@ export class StrategyOrchestrator {
       const endgameCount = await this.endgameSweepStrategy.execute();
       if (endgameCount > 0) {
         this.logger.info(
-          `[Orchestrator] Priority 2: Endgame Sweep executed ${endgameCount} trades`,
+          `[Orchestrator] 💰 Priority 2: Endgame Sweep executed ${endgameCount} trades`,
         );
       }
 
@@ -181,7 +181,7 @@ export class StrategyOrchestrator {
       const autoSellCount = await this.autoSellStrategy.execute();
       if (autoSellCount > 0) {
         this.logger.info(
-          `[Orchestrator] Priority 3: Auto-Sell executed ${autoSellCount} trades`,
+          `[Orchestrator] 📤 Priority 3: Auto-Sell executed ${autoSellCount} trades`,
         );
       }
 
@@ -193,7 +193,7 @@ export class StrategyOrchestrator {
       const quickFlipCount = await this.quickFlipStrategy.execute();
       if (quickFlipCount > 0) {
         this.logger.info(
-          `[Orchestrator] Priority 4: Quick Flip executed ${quickFlipCount} trades`,
+          `[Orchestrator] 💹 Priority 4: Quick Flip executed ${quickFlipCount} trades`,
         );
       }
 
