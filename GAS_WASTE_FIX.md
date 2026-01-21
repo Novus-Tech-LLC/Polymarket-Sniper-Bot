@@ -25,11 +25,17 @@ if (!authOk) {
     "[Preflight][GasGuard] ⛔ BLOCKING APPROVALS: Authentication failed. Will not send on-chain transactions to prevent gas waste.",
   );
   // ... return early, preventing ensureApprovals() from running
-  return { detectOnly: true, authOk: false, approvalsOk: false, geoblockPassed };
+  return {
+    detectOnly: true,
+    authOk: false,
+    approvalsOk: false,
+    geoblockPassed,
+  };
 }
 ```
 
-**Impact**: 
+**Impact**:
+
 - Prevents ~$40+ gas waste per failed auth attempt
 - Blocks 3x retry attempts (saving ~$120 total)
 - Clear error messages guide users to fix auth issues first
@@ -48,28 +54,32 @@ if (!authOk) {
 ```typescript
 const validateGasCap = (maxFeePerGas: bigint, logger?: Logger): void => {
   const gasCapGwei = parseFloat(readEnv("POLY_MAX_FEE_GWEI_CAP") || "0");
-  
+
   if (gasCapGwei > 0) {
     const maxFeeGwei = parseFloat(formatUnits(maxFeePerGas, "gwei"));
-    
+
     if (maxFeePerGas > gasCap) {
       const errorMsg = `[Gas][Safety] ⛔ GAS PRICE TOO HIGH: ${maxFeeGwei.toFixed(2)} gwei exceeds cap...`;
       throw new Error(errorMsg);
     }
-    
+
     // Warning at 80% of cap
     if (maxFeePerGas > warningThreshold) {
-      logger?.warn(`[Gas][Safety] ⚠️  Gas price ${maxFeeGwei.toFixed(2)} gwei is approaching cap...`);
+      logger?.warn(
+        `[Gas][Safety] ⚠️  Gas price ${maxFeeGwei.toFixed(2)} gwei is approaching cap...`,
+      );
     }
   }
 };
 ```
 
 **Integration Points**:
+
 - Main gas estimation path (line ~79)
 - Fallback path for RPC failures (line ~108)
 
 **Impact**:
+
 - Transactions blocked when gas exceeds configured cap (e.g., 200 gwei)
 - Warning issued at 80% of cap threshold
 - Prevents scenarios like observed 195 gwei = $40 approval transaction
@@ -105,6 +115,7 @@ const validateGasCap = (maxFeePerGas: bigint, logger?: Logger): void => {
 ```
 
 **Impact**:
+
 - Users are informed about gas configuration options
 - Clear recommendation to set `POLY_MAX_FEE_GWEI_CAP=200`
 - Documents why the setting is important (references the $40 incident)
@@ -162,6 +173,7 @@ Scenario: Auth succeeds but gas is abnormally high
 ## Testing & Validation
 
 ### Build Verification
+
 ```bash
 npm install
 npm run build
@@ -171,6 +183,7 @@ npm run build
 ### Manual Testing Scenarios
 
 #### Test 1: Auth Failure Blocks Approvals
+
 ```bash
 # Set invalid credentials to force auth failure
 POLYMARKET_API_KEY=invalid_key npm start
@@ -183,6 +196,7 @@ POLYMARKET_API_KEY=invalid_key npm start
 ```
 
 #### Test 2: Gas Cap Protection
+
 ```bash
 # Set a low gas cap to test blocking
 POLY_MAX_FEE_GWEI_CAP=50 npm start
@@ -193,6 +207,7 @@ POLY_MAX_FEE_GWEI_CAP=50 npm start
 ```
 
 #### Test 3: Normal Operation
+
 ```bash
 # With valid credentials and reasonable gas
 POLY_MAX_FEE_GWEI_CAP=200 npm start
@@ -251,6 +266,7 @@ POLY_MAX_FEE_GWEI_CAP=10
 ### When Authentication Fails
 
 **Console Output**:
+
 ```
 [CLOB] Auth preflight failed; switching to detect-only.
 [Preflight][GasGuard] ⛔ BLOCKING APPROVALS: Authentication failed. Will not send on-chain transactions to prevent gas waste.
@@ -279,6 +295,7 @@ Auth Story Summary:
 ### When Gas Price Is Too High
 
 **Console Output**:
+
 ```
 [Gas] RPC feeData maxPriorityFeePerGas=150 gwei maxFeePerGas=195 gwei baseFeePerGas=180 gwei
 [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei. Transaction BLOCKED to prevent excessive fees. Current Polygon gas is abnormally high - wait for network to stabilize or increase POLY_MAX_FEE_GWEI_CAP if intentional.
@@ -291,6 +308,7 @@ Error: [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei
 ### When Gas Price Approaches Cap (80% threshold)
 
 **Console Output**:
+
 ```
 [Gas] RPC feeData maxPriorityFeePerGas=130 gwei maxFeePerGas=165 gwei
 [Gas][Safety] ⚠️  Gas price 165.00 gwei is 83% of cap (200 gwei). Consider waiting if not urgent.
@@ -314,6 +332,7 @@ Error: [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei
 ### Breaking Changes
 
 **NONE** - All changes are backward compatible:
+
 - Auth blocking only activates when `authOk=false` (already existing logic)
 - Gas cap is optional (defaults to 0 = disabled if not set)
 - All existing configurations continue to work as before
@@ -331,29 +350,29 @@ Error: [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei
 
 ### Code Locations
 
-| Component | File | Lines | Purpose |
-|-----------|------|-------|---------|
-| Auth guard | `src/polymarket/preflight.ts` | ~473-498 | Blocks approvals when authOk=false |
-| Gas validation | `src/utils/gas.ts` | ~17-57 | Validates gas price against cap |
-| Gas integration | `src/utils/gas.ts` | ~79, ~108 | Calls validateGasCap() before returning |
-| Config docs | `.env.example` | ~85-102 | Documents gas configuration options |
+| Component       | File                          | Lines     | Purpose                                 |
+| --------------- | ----------------------------- | --------- | --------------------------------------- |
+| Auth guard      | `src/polymarket/preflight.ts` | ~473-498  | Blocks approvals when authOk=false      |
+| Gas validation  | `src/utils/gas.ts`            | ~17-57    | Validates gas price against cap         |
+| Gas integration | `src/utils/gas.ts`            | ~79, ~108 | Calls validateGasCap() before returning |
+| Config docs     | `.env.example`                | ~85-102   | Documents gas configuration options     |
 
 ### Environment Variables
 
-| Variable | Type | Default | Purpose |
-|----------|------|---------|---------|
-| `POLY_MAX_FEE_GWEI_CAP` | number | 0 (disabled) | Maximum gas price in gwei before blocking |
-| `POLY_GAS_MULTIPLIER` | number | 1.2 | Multiplier applied to RPC gas estimates |
-| `POLY_MAX_PRIORITY_FEE_GWEI` | number | 30 | Minimum priority fee in gwei |
-| `POLY_MAX_FEE_GWEI` | number | 60 | Minimum max fee in gwei |
+| Variable                     | Type   | Default      | Purpose                                   |
+| ---------------------------- | ------ | ------------ | ----------------------------------------- |
+| `POLY_MAX_FEE_GWEI_CAP`      | number | 0 (disabled) | Maximum gas price in gwei before blocking |
+| `POLY_GAS_MULTIPLIER`        | number | 1.2          | Multiplier applied to RPC gas estimates   |
+| `POLY_MAX_PRIORITY_FEE_GWEI` | number | 30           | Minimum priority fee in gwei              |
+| `POLY_MAX_FEE_GWEI`          | number | 60           | Minimum max fee in gwei                   |
 
 ### Error Types
 
-| Error Message | Cause | Resolution |
-|---------------|-------|------------|
-| `BLOCKING APPROVALS: Authentication failed` | CLOB auth returned 401/403 | Fix credentials or proxy address |
-| `GAS PRICE TOO HIGH: X gwei exceeds cap` | Network gas above configured cap | Wait for gas to drop or increase cap |
-| `Gas price X gwei is Y% of cap` | Gas approaching cap (warning) | Consider waiting or increasing cap |
+| Error Message                               | Cause                            | Resolution                           |
+| ------------------------------------------- | -------------------------------- | ------------------------------------ |
+| `BLOCKING APPROVALS: Authentication failed` | CLOB auth returned 401/403       | Fix credentials or proxy address     |
+| `GAS PRICE TOO HIGH: X gwei exceeds cap`    | Network gas above configured cap | Wait for gas to drop or increase cap |
+| `Gas price X gwei is Y% of cap`             | Gas approaching cap (warning)    | Consider waiting or increasing cap   |
 
 ---
 
@@ -363,21 +382,21 @@ Error: [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei
 
 **Scenario**: User with invalid auth credentials attempts to start bot
 
-| Metric | Before Fix | After Fix | Savings |
-|--------|------------|-----------|---------|
-| Approval transactions sent | 3 (with retries) | 0 | 3 transactions |
-| Gas price (observed) | 195 gwei | N/A | N/A |
-| Gas fees per transaction | ~$40 | $0 | $40 |
-| Total gas fees | ~$120 | $0 | **$120 saved** |
+| Metric                     | Before Fix       | After Fix | Savings        |
+| -------------------------- | ---------------- | --------- | -------------- |
+| Approval transactions sent | 3 (with retries) | 0         | 3 transactions |
+| Gas price (observed)       | 195 gwei         | N/A       | N/A            |
+| Gas fees per transaction   | ~$40             | $0        | $40            |
+| Total gas fees             | ~$120            | $0        | **$120 saved** |
 
 **Scenario**: User with valid auth during gas spike (195 gwei)
 
-| Metric | Before Fix | After Fix | Savings |
-|--------|------------|-----------|---------|
-| Approval transactions sent | 1-3 | 0 | 1-3 transactions |
-| Gas price | 195 gwei | Blocked | N/A |
-| Gas fees per transaction | ~$40 | $0 | $40 |
-| Total gas fees | $40-120 | $0 | **$40-120 saved** |
+| Metric                     | Before Fix | After Fix | Savings           |
+| -------------------------- | ---------- | --------- | ----------------- |
+| Approval transactions sent | 1-3        | 0         | 1-3 transactions  |
+| Gas price                  | 195 gwei   | Blocked   | N/A               |
+| Gas fees per transaction   | ~$40       | $0        | $40               |
+| Total gas fees             | $40-120    | $0        | **$40-120 saved** |
 
 ### User Experience
 
@@ -454,6 +473,7 @@ Error: [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei
 ### v1.0.0 - Gas Waste Prevention (Current)
 
 **Added**:
+
 - Auth failure guard in `preflight.ts` to block approvals when `authOk=false`
 - Gas price validation in `gas.ts` with configurable `POLY_MAX_FEE_GWEI_CAP`
 - Warning at 80% of gas cap threshold
@@ -461,11 +481,13 @@ Error: [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei
 - Clear error messages for auth failures and gas blocks
 
 **Changed**:
+
 - Execution flow now stops at auth failure (early return)
 - Gas estimation now validates price before returning
 - Auth Story Summary includes new `AUTH_FAILED_BLOCKED_APPROVALS` reason
 
 **Impact**:
+
 - **Prevents $40-120+ gas waste** per auth failure incident
 - **Protects against gas spikes** (e.g., 195 gwei scenario)
 - **Improves UX** with clear error messages and guidance

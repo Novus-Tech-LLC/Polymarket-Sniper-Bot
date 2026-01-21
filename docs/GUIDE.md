@@ -62,17 +62,20 @@ To identify successful traders to track, you can use these resources:
 ### Steps
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/telix5000/Polymarket-Sniper-Bot.git
 cd Polymarket-Sniper-Bot
 ```
 
 2. Install dependencies:
+
 ```bash
 npm install
 ```
 
 3. Build the project:
+
 ```bash
 npm run build
 ```
@@ -98,56 +101,56 @@ There are TWO different credential systems in Polymarket:
 
 #### Required
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `TARGET_ADDRESSES` | Comma-separated target addresses to frontrun | `0xabc...,0xdef...` |
-| `PRIVATE_KEY` | Your wallet private key | `your_private_key` |
-| `RPC_URL` | Polygon RPC endpoint (must support pending tx monitoring) | `https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID`|
-| `CLOB_DERIVE_CREDS` | Set to `true` to derive CLOB keys from private key (recommended) | `true` |
+| Variable            | Description                                                      | Example                                                |
+| ------------------- | ---------------------------------------------------------------- | ------------------------------------------------------ |
+| `TARGET_ADDRESSES`  | Comma-separated target addresses to frontrun                     | `0xabc...,0xdef...`                                    |
+| `PRIVATE_KEY`       | Your wallet private key                                          | `your_private_key`                                     |
+| `RPC_URL`           | Polygon RPC endpoint (must support pending tx monitoring)        | `https://polygon-mainnet.infura.io/v3/YOUR_PROJECT_ID` |
+| `CLOB_DERIVE_CREDS` | Set to `true` to derive CLOB keys from private key (recommended) | `true`                                                 |
 
 #### Optional
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PUBLIC_KEY` | (derived) | Your Polygon wallet address (auto-derived if omitted) |
-| `POLYMARKET_API_KEY` | - | CLOB API key (omit if using `CLOB_DERIVE_CREDS=true`) |
-| `POLYMARKET_API_SECRET` | - | CLOB API secret (omit if using `CLOB_DERIVE_CREDS=true`) |
-| `POLYMARKET_API_PASSPHRASE` | - | CLOB API passphrase (omit if using `CLOB_DERIVE_CREDS=true`) |
-| `POLY_BUILDER_API_KEY` | - | Builder API key (for gasless transactions, optional) |
-| `POLY_BUILDER_API_SECRET` | - | Builder API secret (for gasless transactions, optional) |
-| `POLY_BUILDER_API_PASSPHRASE` | - | Builder API passphrase (for gasless transactions, optional) |
-| `FETCH_INTERVAL` | `1` | Polling frequency in seconds |
-| `MIN_TRADE_SIZE_USD` | `100` | Minimum trade size to frontrun (USD) |
-| `FRONTRUN_SIZE_MULTIPLIER` | `0.5` | Frontrun size as % of target (0.0-1.0) |
-| `FRONTRUN_MAX_SIZE_USD` | `50` | Maximum USD size for any frontrun order (caps calculated size) |
-| `GAS_PRICE_MULTIPLIER` | `1.2` | Gas price multiplier for priority (e.g., 1.2 = 20% higher) |
-| `TRADE_MULTIPLIER` | `1.0` | Legacy: Position size multiplier (kept for compatibility) |
-| `RETRY_LIMIT` | `3` | Maximum retry attempts for failed orders |
-| `TRADE_AGGREGATION_ENABLED` | `false` | Enable trade aggregation |
-| `TRADE_AGGREGATION_WINDOW_SECONDS` | `300` | Time window for aggregating trades (seconds) |
-| `COLLATERAL_TOKEN_ADDRESS` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC/USDC.e contract on Polygon |
-| `MONGO_URI` | - | MongoDB connection string (optional) |
-| `OPENVPN_ENABLED` | `false` | Enable OpenVPN setup on startup |
-| `OPENVPN_CONFIG` | - | Full OpenVPN config contents (optional if file mounted) |
-| `OPENVPN_CONFIG_PATH` | `/etc/openvpn/openvpn.conf` | OpenVPN config path |
-| `OPENVPN_AUTH_PATH` | `/etc/openvpn/auth.txt` | OpenVPN auth file path |
-| `OPENVPN_USERNAME` | - | OpenVPN username (requires password) |
-| `OPENVPN_PASSWORD` | - | OpenVPN password (requires username) |
-| `OPENVPN_EXTRA_ARGS` | - | Extra args passed to `openvpn` |
-| `WIREGUARD_ENABLED` | `false` | Enable WireGuard setup on startup |
-| `WIREGUARD_INTERFACE_NAME` | `wg0` | WireGuard interface name |
-| `WIREGUARD_CONFIG_PATH` | `/etc/wireguard/wg0.conf` | Config path written at startup |
-| `WIREGUARD_CONFIG` | - | Full WireGuard config contents (overrides per-field vars) |
-| `WIREGUARD_ADDRESS` | - | Interface Address (comma-separated) |
-| `WIREGUARD_PRIVATE_KEY` | - | Interface private key |
-| `WIREGUARD_MTU` | - | MTU (optional) |
-| `WIREGUARD_DNS` | - | DNS servers (comma-separated) |
-| `WIREGUARD_PEER_PUBLIC_KEY` | - | Peer public key |
-| `WIREGUARD_PEER_PRESHARED_KEY` | - | Peer preshared key (optional) |
-| `WIREGUARD_PEER_ENDPOINT` | - | Peer endpoint (host:port) |
-| `WIREGUARD_ALLOWED_IPS` | - | Allowed IP ranges |
-| `WIREGUARD_PERSISTENT_KEEPALIVE` | - | Persistent keepalive interval (seconds) |
-| `WIREGUARD_FORCE_RESTART` | `false` | Force `wg-quick down` before `up` |
+| Variable                           | Default                                      | Description                                                  |
+| ---------------------------------- | -------------------------------------------- | ------------------------------------------------------------ |
+| `PUBLIC_KEY`                       | (derived)                                    | Your Polygon wallet address (auto-derived if omitted)        |
+| `POLYMARKET_API_KEY`               | -                                            | CLOB API key (omit if using `CLOB_DERIVE_CREDS=true`)        |
+| `POLYMARKET_API_SECRET`            | -                                            | CLOB API secret (omit if using `CLOB_DERIVE_CREDS=true`)     |
+| `POLYMARKET_API_PASSPHRASE`        | -                                            | CLOB API passphrase (omit if using `CLOB_DERIVE_CREDS=true`) |
+| `POLY_BUILDER_API_KEY`             | -                                            | Builder API key (for gasless transactions, optional)         |
+| `POLY_BUILDER_API_SECRET`          | -                                            | Builder API secret (for gasless transactions, optional)      |
+| `POLY_BUILDER_API_PASSPHRASE`      | -                                            | Builder API passphrase (for gasless transactions, optional)  |
+| `FETCH_INTERVAL`                   | `1`                                          | Polling frequency in seconds                                 |
+| `MIN_TRADE_SIZE_USD`               | `100`                                        | Minimum trade size to frontrun (USD)                         |
+| `FRONTRUN_SIZE_MULTIPLIER`         | `0.5`                                        | Frontrun size as % of target (0.0-1.0)                       |
+| `FRONTRUN_MAX_SIZE_USD`            | `50`                                         | Maximum USD size for any frontrun order (caps calculated size) |
+| `GAS_PRICE_MULTIPLIER`             | `1.2`                                        | Gas price multiplier for priority (e.g., 1.2 = 20% higher)   |
+| `TRADE_MULTIPLIER`                 | `1.0`                                        | Legacy: Position size multiplier (kept for compatibility)    |
+| `RETRY_LIMIT`                      | `3`                                          | Maximum retry attempts for failed orders                     |
+| `TRADE_AGGREGATION_ENABLED`        | `false`                                      | Enable trade aggregation                                     |
+| `TRADE_AGGREGATION_WINDOW_SECONDS` | `300`                                        | Time window for aggregating trades (seconds)                 |
+| `COLLATERAL_TOKEN_ADDRESS`         | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | USDC/USDC.e contract on Polygon                              |
+| `MONGO_URI`                        | -                                            | MongoDB connection string (optional)                         |
+| `OPENVPN_ENABLED`                  | `false`                                      | Enable OpenVPN setup on startup                              |
+| `OPENVPN_CONFIG`                   | -                                            | Full OpenVPN config contents (optional if file mounted)      |
+| `OPENVPN_CONFIG_PATH`              | `/etc/openvpn/openvpn.conf`                  | OpenVPN config path                                          |
+| `OPENVPN_AUTH_PATH`                | `/etc/openvpn/auth.txt`                      | OpenVPN auth file path                                       |
+| `OPENVPN_USERNAME`                 | -                                            | OpenVPN username (requires password)                         |
+| `OPENVPN_PASSWORD`                 | -                                            | OpenVPN password (requires username)                         |
+| `OPENVPN_EXTRA_ARGS`               | -                                            | Extra args passed to `openvpn`                               |
+| `WIREGUARD_ENABLED`                | `false`                                      | Enable WireGuard setup on startup                            |
+| `WIREGUARD_INTERFACE_NAME`         | `wg0`                                        | WireGuard interface name                                     |
+| `WIREGUARD_CONFIG_PATH`            | `/etc/wireguard/wg0.conf`                    | Config path written at startup                               |
+| `WIREGUARD_CONFIG`                 | -                                            | Full WireGuard config contents (overrides per-field vars)    |
+| `WIREGUARD_ADDRESS`                | -                                            | Interface Address (comma-separated)                          |
+| `WIREGUARD_PRIVATE_KEY`            | -                                            | Interface private key                                        |
+| `WIREGUARD_MTU`                    | -                                            | MTU (optional)                                               |
+| `WIREGUARD_DNS`                    | -                                            | DNS servers (comma-separated)                                |
+| `WIREGUARD_PEER_PUBLIC_KEY`        | -                                            | Peer public key                                              |
+| `WIREGUARD_PEER_PRESHARED_KEY`     | -                                            | Peer preshared key (optional)                                |
+| `WIREGUARD_PEER_ENDPOINT`          | -                                            | Peer endpoint (host:port)                                    |
+| `WIREGUARD_ALLOWED_IPS`            | -                                            | Allowed IP ranges                                            |
+| `WIREGUARD_PERSISTENT_KEEPALIVE`   | -                                            | Persistent keepalive interval (seconds)                      |
+| `WIREGUARD_FORCE_RESTART`          | `false`                                      | Force `wg-quick down` before `up`                            |
 
 ### Example `.env` File (Recommended - Derived Credentials)
 
@@ -252,6 +255,7 @@ You need two types of funds on your Polygon wallet:
 **Important:** For frontrunning, you need an RPC endpoint that supports pending transaction monitoring.
 
 You can get a free RPC endpoint from:
+
 - [Infura](https://infura.io) - Free tier available (supports pending tx)
 - [Alchemy](https://alchemy.com) - Free tier available (supports pending tx)
 - [QuickNode](https://quicknode.com) - Free tier available (supports pending tx)
@@ -282,12 +286,14 @@ Compiles TypeScript to JavaScript first, then runs the compiled code. Recommende
 ### Docker Deployment
 
 **Build and run:**
+
 ```bash
 docker build -t polymarket-sniper-bot .
 docker run --env-file .env polymarket-sniper-bot
 ```
 
 **Using Docker Compose:**
+
 ```bash
 docker-compose up -d
 ```
@@ -336,6 +342,7 @@ This ensures your maximum exposure per trade is controlled regardless of target 
 ### Gas Price Strategy
 
 The bot uses a gas price multiplier to ensure priority execution:
+
 ```
 your_gas_price = target_gas_price * GAS_PRICE_MULTIPLIER
 ```
@@ -355,6 +362,7 @@ Default multiplier is 1.2 (20% higher), ensuring your transaction is prioritized
 ### Current Implementation
 
 The bot automatically:
+
 - Tracks processed transaction hashes to avoid duplicates
 - Calculates frontrun position sizes based on target trade
 - Handles both BUY and SELL signals
@@ -363,6 +371,7 @@ The bot automatically:
 ### Planned Features
 
 Future enhancements may include:
+
 - MongoDB persistence for trade history
 - Position aggregation per market/outcome
 - Proportional sell engine that mirrors trader exits
@@ -372,6 +381,7 @@ Future enhancements may include:
 ### Manual Position Management
 
 You can check your positions on:
+
 - Polymarket website (your profile)
 - PolygonScan (token balances)
 - Polymarket API: `https://data-api.polymarket.com/positions?user=YOUR_ADDRESS`
@@ -383,6 +393,7 @@ You can check your positions on:
 ### Overview
 
 The bot includes infrastructure for simulation and backtesting, allowing you to:
+
 - Test different `FRONTRUN_SIZE_MULTIPLIER` values
 - Evaluate `GAS_PRICE_MULTIPLIER` impact on success rate
 - Test different `MIN_TRADE_SIZE_USD` thresholds
@@ -439,6 +450,7 @@ To implement full backtesting:
 **Solutions:**
 
 1. **Use derived credentials (recommended):**
+
    ```env
    CLOB_DERIVE_CREDS=true
    # Remove or comment out POLYMARKET_API_* variables
@@ -450,9 +462,11 @@ To implement full backtesting:
    - These are NOT interchangeable!
 
 3. **Check the preflight summary in logs:**
+
    ```
    [Preflight][Summary] ... auth_ok=false ...
    ```
+
    - `auth_ok=false` means CLOB authentication failed
    - `relayer_enabled=false` means Builder credentials are missing (this is OK for basic trading)
 
@@ -469,6 +483,7 @@ To implement full backtesting:
 **Symptoms:** Bot runs but no trades are frontrun
 
 **Solutions:**
+
 1. Verify `TARGET_ADDRESSES` are correct and active traders
 2. Check that target addresses have recent activity on Polymarket
 3. Verify RPC URL supports pending transaction monitoring
@@ -483,6 +498,7 @@ To implement full backtesting:
 **Symptoms:** Trades detected but orders fail
 
 **Solutions:**
+
 1. **Check USDC balance:**
    - Ensure sufficient USDC in wallet
    - Verify balance on PolygonScan
@@ -512,6 +528,7 @@ To implement full backtesting:
 **Symptoms:** Bot can't connect to APIs
 
 **Solutions:**
+
 1. Check internet connection
 2. Verify RPC URL is correct
 3. Check if Polymarket API is accessible
@@ -521,6 +538,7 @@ To implement full backtesting:
 ### High Gas Costs
 
 **Solutions:**
+
 1. Adjust `GAS_PRICE_MULTIPLIER` - lower values (e.g., 1.1) reduce costs but may reduce success rate
 2. Increase `MIN_TRADE_SIZE_USD` to only frontrun larger, more profitable trades
 3. Monitor gas prices and trade during low-traffic periods
@@ -529,6 +547,7 @@ To implement full backtesting:
 ### Performance Issues
 
 **Solutions:**
+
 1. Increase `FETCH_INTERVAL` if CPU usage is high
 2. Reduce number of tracked traders
 3. Optimize RPC endpoint (use premium providers)
@@ -548,16 +567,19 @@ npm start
 ### Docker
 
 **Build:**
+
 ```bash
 docker build -t polymarket-frontrun-bot .
 ```
 
 **Run:**
+
 ```bash
 docker run --env-file .env -d --name polymarket-bot polymarket-sniper-bot
 ```
 
 **Stop:**
+
 ```bash
 docker stop polymarket-bot
 ```

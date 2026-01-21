@@ -152,14 +152,22 @@ test("frontrun skips trade when order size is below MIN_ORDER_USD", async () => 
 
   // Verify the order was skipped
   assert.ok(
-    logs.some((line) => line.includes("Order size 10.00 USD is below minimum 50.00 USD")),
+    logs.some((line) =>
+      line.includes("Order size 10.00 USD is below minimum 50.00 USD"),
+    ),
     "Should log warning about order size being below minimum",
   );
   assert.ok(
-    logs.some((line) => line.includes("Tip: Increase FRONTRUN_SIZE_MULTIPLIER")),
+    logs.some((line) =>
+      line.includes("Tip: Increase FRONTRUN_SIZE_MULTIPLIER"),
+    ),
     "Should provide helpful tip",
   );
-  assert.equal(postOrderCalled, false, "postOrder should not be called for orders below minimum");
+  assert.equal(
+    postOrderCalled,
+    false,
+    "postOrder should not be called for orders below minimum",
+  );
 });
 
 test("frontrun caps order size at FRONTRUN_MAX_SIZE_USD", async () => {

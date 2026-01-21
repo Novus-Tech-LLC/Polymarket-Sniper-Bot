@@ -7,6 +7,7 @@ This document summarizes the implementation of fixes for persistent CLOB authent
 ## Problem Statement
 
 ### Symptoms
+
 - `deriveApiKey` verification succeeds (logs show "Credential verification successful")
 - Immediately after, CLOB preflight request to `/balance-allowance` fails with **401 "Unauthorized/Invalid api key"**
 - Logs show signed path includes query: `pathSigned=/balance-allowance?asset_type=COLLATERAL&signature_type=0`
@@ -17,23 +18,25 @@ This document summarizes the implementation of fixes for persistent CLOB authent
 The issue was in the `@polymarket/clob-client` library's `getBalanceAllowance` method:
 
 **Before Fix:**
+
 ```javascript
 async getBalanceAllowance(params) {
     const endpoint = GET_BALANCE_ALLOWANCE; // "/balance-allowance"
-    
+
     // Creates headers with ONLY the endpoint path
     const headerArgs = {
         method: GET,
         requestPath: endpoint,  // ❌ No query params!
     };
     const headers = await createL2Headers(..., headerArgs, ...);
-    
+
     // Passes params separately to axios
     return this.get(`${this.host}${endpoint}`, { headers, params: _params }); // ❌ Axios may serialize differently
 }
 ```
 
 **What happens:**
+
 1. Signature is computed on `/balance-allowance` (without query)
 2. Axios receives `params: { asset_type: "COLLATERAL", signature_type: 0 }`
 3. Axios serializes params and sends: `/balance-allowance?asset_type=COLLATERAL&signature_type=0`
@@ -46,6 +49,7 @@ async getBalanceAllowance(params) {
 **Location:** `patches/@polymarket+clob-client+5.2.1.patch`
 
 **Changes:**
+
 1. Added `buildCanonicalQueryString()` helper function that:
    - Filters out undefined values
    - Sorts keys alphabetically (deterministic)
@@ -59,6 +63,7 @@ async getBalanceAllowance(params) {
    - Avoid axios re-serialization
 
 **After Fix:**
+
 ```javascript
 async getBalanceAllowance(params) {
     const endpoint = GET_BALANCE_ALLOWANCE;
@@ -66,18 +71,18 @@ async getBalanceAllowance(params) {
         ...params,
         signature_type: this.orderBuilder.signatureType,
     };
-    
+
     // ✅ Build canonical query string
     const queryString = buildCanonicalQueryString(_params);
     const requestPath = queryString ? `${endpoint}?${queryString}` : endpoint;
-    
+
     // ✅ Include query in signed path
     const headerArgs = {
         method: GET,
         requestPath: requestPath,  // "/balance-allowance?asset_type=COLLATERAL&signature_type=0"
     };
     const headers = await createL2Headers(..., headerArgs, ...);
-    
+
     // ✅ Pass full URL without params object
     const fullUrl = queryString ? `${this.host}${endpoint}?${queryString}` : `${this.host}${endpoint}`;
     return this.get(fullUrl, { headers });  // No params!
@@ -91,6 +96,7 @@ async getBalanceAllowance(params) {
 **File:** `src/infrastructure/clob-http-client.ts`
 
 Created a custom HTTP client module with request interceptor that logs (when `CLOB_DEBUG_CANON=true`):
+
 - HTTP method
 - Base URL and request path
 - Query parameters (raw and serialized)
@@ -106,6 +112,7 @@ This was created for future use but not currently integrated (as the patch fixes
 **File:** `docs/CLOB_AUTH_DEBUGGING.md` (10KB comprehensive guide)
 
 Contains:
+
 - Quick diagnosis for common symptoms
 - Environment variable explanations
 - Step-by-step debugging workflow
@@ -115,6 +122,7 @@ Contains:
 - Security notes
 
 **Updated:** `RUNBOOK.md`
+
 - Added debug environment variables section
 - Referenced new debugging guide
 - Included troubleshooting steps
@@ -124,6 +132,7 @@ Contains:
 **File:** `tests/utils/canonicalization.test.ts`
 
 Added comprehensive unit tests for:
+
 - `canonicalQuery()` - sorting, filtering, encoding
 - `buildSignedPath()` - query string appending
 - **Canonicalization Invariant** - the critical property that enables authentication:
@@ -139,6 +148,7 @@ Added comprehensive unit tests for:
 **File:** `src/services/mempool-monitor.service.ts`
 
 Improved RPC pending transaction filter error messages:
+
 - Clearer explanation when `eth_newPendingTransactionFilter` is unsupported
 - Actionable guidance about alternative RPC providers
 - Mention of polling fallback option
@@ -176,21 +186,25 @@ npm test
 ### For Users
 
 1. **Install/Update Dependencies:**
+
    ```bash
    npm install  # Patch auto-applies
    ```
 
 2. **Clear Cached Credentials (if needed):**
+
    ```bash
    rm data/clob-creds.json
    ```
 
 3. **Run Preflight:**
+
    ```bash
    npm run preflight
    ```
 
 4. **Enable Debug Logging (if issues persist):**
+
    ```bash
    export CLOB_DEBUG_CANON=true
    export DEBUG_HTTP_HEADERS=true
@@ -205,11 +219,13 @@ npm test
 ### For Developers
 
 **Testing Canonicalization:**
+
 ```bash
 npm test -- tests/utils/canonicalization.test.ts
 ```
 
 **Verifying Patch:**
+
 ```bash
 grep -A 15 "async getBalanceAllowance" node_modules/@polymarket/clob-client/dist/client.js
 # Should show: buildCanonicalQueryString(_params)
@@ -217,6 +233,7 @@ grep -A 15 "async getBalanceAllowance" node_modules/@polymarket/clob-client/dist
 ```
 
 **Reading Logs:**
+
 ```bash
 [CLOB][Diag][Sign] pathSigned=/balance-allowance?asset_type=COLLATERAL&signature_type=0
 # This should match:
@@ -226,12 +243,14 @@ grep -A 15 "async getBalanceAllowance" node_modules/@polymarket/clob-client/dist
 ## Impact
 
 ### Before Fix
+
 - ❌ Authentication fails with 401 even with valid credentials
 - ❌ Signature computed on different path than what's sent
 - ❌ Difficult to diagnose (no visibility into canonicalization)
 - ❌ Users unable to trade despite correct setup
 
 ### After Fix
+
 - ✅ Authentication succeeds reliably
 - ✅ Signed path matches actual request path (invariant enforced)
 - ✅ Comprehensive debugging available when needed
@@ -245,11 +264,13 @@ grep -A 15 "async getBalanceAllowance" node_modules/@polymarket/clob-client/dist
 **Critical Property:** `signedPath === actualRequestPath`
 
 This invariant MUST hold for authentication to succeed:
+
 - The path used to generate the HMAC signature
 - Must be byte-for-byte identical to
 - The path in the actual HTTP request
 
 Our fix ensures this by:
+
 1. Using the same `buildCanonicalQueryString` function everywhere
 2. Not allowing axios to re-serialize parameters
 3. Building the full URL with query string upfront
@@ -265,6 +286,7 @@ Our fix ensures this by:
 ### Identity Handling
 
 The existing code already handles EOA auto-detection correctly:
+
 - When signature type switches from Safe (2) to EOA (0), funder address is cleared
 - Auth calls use the correct identity (signer for EOA, not leftover Safe address)
 - This was already implemented in `clob-client.factory.ts` lines 714-726

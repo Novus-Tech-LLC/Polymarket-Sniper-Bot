@@ -93,6 +93,7 @@ DEBUG_PREFLIGHT_MATRIX=true npm run clob:matrix
 ### 1. Correlation IDs
 
 Every log entry includes correlation IDs for tracing:
+
 - **RUN_ID**: Unique per execution (e.g., `run_1705623743672_a1b2c3d4`)
 - **REQ_ID**: Unique per HTTP request (e.g., `req_1705623743800_e5f6a7`)
 - **ATTEMPT_ID**: Unique per auth attempt (A, B, C, D, E)
@@ -100,6 +101,7 @@ Every log entry includes correlation IDs for tracing:
 ### 2. Log Categories
 
 Logs are tagged with categories for filtering:
+
 - `STARTUP`: Application initialization
 - `IDENTITY`: Wallet identity resolution
 - `CRED_DERIVE`: Credential derivation
@@ -111,6 +113,7 @@ Logs are tagged with categories for filtering:
 ### 3. Automatic Deduplication
 
 Repeated identical messages within a 5-second window are automatically suppressed:
+
 ```
 [INFO] [IDENTITY] Wallet mode detected: EOA
 (suppressed 3 repeats)
@@ -119,6 +122,7 @@ Repeated identical messages within a 5-second window are automatically suppresse
 ### 4. Secret Redaction
 
 Sensitive data is automatically redacted:
+
 - **Private keys**: `[REDACTED len=66]`
 - **API keys**: `***abc123` (last 6 chars only)
 - **Secrets**: `base...cret [len=88]` (first/last 4 chars + length)
@@ -128,6 +132,7 @@ Sensitive data is automatically redacted:
 ### 5. Auth Story Summary
 
 At the end of each run, a comprehensive AUTH STORY is printed showing:
+
 - Identity configuration (mode, signature type, addresses)
 - Credential fingerprint (API key suffix, secret length/encoding)
 - All authentication attempts (A..E) with results
@@ -145,19 +150,25 @@ At the end of each run, a comprehensive AUTH STORY is printed showing:
 ### Common Issues
 
 #### 401 Unauthorized
+
 Check the AUTH STORY summary for:
+
 - `errorCode=WRONG_KEY_TYPE`: Using wrong credentials (Builder vs CLOB keys)
 - `errorCode=WRONG_SIGNATURE_TYPE`: Wrong signature type (0/1/2)
 - `usedAxiosParams=true`: Bug - query params in wrong place
 
 #### Wallet Not Activated
+
 ```
 [A] ❌ FAILED (WALLET_NOT_ACTIVATED) errorTextShort=Could not create api key
 ```
+
 Solution: Make at least one trade on Polymarket to activate the wallet.
 
 #### Identity Mismatch
+
 Check that all addresses in the Identity Configuration match:
+
 ```
 Identity Configuration: signerAddress=0x1234...5678 makerAddress=0x1234...5678 effectiveAddress=0x1234...5678
 ```
@@ -165,21 +176,25 @@ Identity Configuration: signerAddress=0x1234...5678 makerAddress=0x1234...5678 e
 ## Filtering Logs
 
 ### Filter by Category (JSON format)
+
 ```bash
 npm run clob:probe | jq 'select(.context.category == "HTTP")'
 ```
 
 ### Filter by Log Level
+
 ```bash
 npm run clob:probe | jq 'select(.level == "error" or .level == "warn")'
 ```
 
 ### Filter by RUN_ID
+
 ```bash
 npm run clob:probe | jq 'select(.context.runId == "run_1705623743672_a1b2c3d4")'
 ```
 
 ### Extract Auth Story Summary
+
 ```bash
 npm run clob:probe | jq 'select(.context.category == "SUMMARY")'
 ```
@@ -207,9 +222,9 @@ logger.info("Authentication succeeded", {
 });
 
 // Child logger with base context
-const childLogger = logger.child({ 
+const childLogger = logger.child({
   category: "HTTP",
-  reqId: "req_123" 
+  reqId: "req_123",
 });
 childLogger.debug("Making request", { url: "https://api.example.com" });
 ```

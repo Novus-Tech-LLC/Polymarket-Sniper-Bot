@@ -236,6 +236,7 @@ export class MempoolMonitorService {
         concurrency: MAX_CONCURRENT_ADDRESS_CHECKS,
         logger,
         label: "activity-check",
+        silent: true, // Suppress internal log since we log a detailed summary below
       },
     );
 

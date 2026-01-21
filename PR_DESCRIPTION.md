@@ -43,7 +43,7 @@ client.setApiCreds(creds);
 
 1. **`src/clob/minimal-auth.ts`** (~330 lines)
    - Core minimal authentication implementation
-   - Single function `authenticateMinimal()` 
+   - Single function `authenticateMinimal()`
    - One call to `createOrDeriveApiKey()`
    - Returns structured `AuthStory` JSON
    - Secret redaction (only last 4-6 chars)
@@ -94,6 +94,7 @@ client.setApiCreds(creds);
 ✅ **All existing code continues to work** - no breaking changes!
 
 The legacy files remain functional:
+
 - `src/clob/credential-derivation-v2.ts` - Complex fallback system
 - `src/clob/auth-fallback.ts` - Hard-coded 5-attempt ladder
 - `src/infrastructure/clob-client.factory.ts` - Complex factory
@@ -104,26 +105,31 @@ These are marked for future deprecation but work as before.
 ## Key Benefits
 
 ### 1. Simplicity
+
 - **90% less code** (3,500 → 330 lines)
 - **One code path** instead of 5 fallback attempts
 - **Easy to understand** - any developer can read it
 
 ### 2. Reliability
+
 - **Matches working implementation** (Python agents)
 - **No custom logic** - lets SDK handle complexity
 - **Predictable behavior** - same flow every time
 
 ### 3. Maintainability
+
 - **Easy to debug** - single Auth Story shows everything
 - **Easy to test** - one code path to test
 - **Easy to modify** - no tangled dependencies
 
 ### 4. Security
+
 - **No secret leakage** - only shows last 4-6 chars
 - **Minimal logging** - Auth Story contains essentials
 - **No repeated dumps** - one structured output per run
 
 ### 5. Performance
+
 - **Faster execution** - no retries, no exponential backoff
 - **Less logging** - single structured output
 - **Lower resource usage** - no rate limiters, deduplication
@@ -151,11 +157,13 @@ Each authentication run produces a single structured JSON summary:
 ## Testing
 
 ### Unit Tests
+
 ```bash
 npm run auth:validate
 ```
 
 ### Integration Tests
+
 ```bash
 # Test minimal auth
 npm run auth:probe
@@ -168,6 +176,7 @@ POLYMARKET_SIGNATURE_TYPE=2 npm run auth:probe
 ```
 
 ### Comparison Tests
+
 ```bash
 # Compare minimal vs simple vs legacy
 npm run auth:probe:minimal
@@ -177,36 +186,40 @@ npm run auth:probe:legacy
 
 ## Code Metrics
 
-| Metric | Before (Complex) | After (Minimal) | Reduction |
-|--------|-----------------|-----------------|-----------|
-| Total lines | ~3,500 | ~330 | 90% |
-| Number of files | 5-6 | 1 | 80% |
-| Auth attempts | 5 | 1 | 80% |
-| Code paths | Multiple | Single | N/A |
-| Fallback logic | Yes | No | 100% |
-| Retry logic | Yes | No | 100% |
-| Signature detection | Yes | No | 100% |
-| Address swapping | Yes | No | 100% |
+| Metric              | Before (Complex) | After (Minimal) | Reduction |
+| ------------------- | ---------------- | --------------- | --------- |
+| Total lines         | ~3,500           | ~330            | 90%       |
+| Number of files     | 5-6              | 1               | 80%       |
+| Auth attempts       | 5                | 1               | 80%       |
+| Code paths          | Multiple         | Single          | N/A       |
+| Fallback logic      | Yes              | No              | 100%      |
+| Retry logic         | Yes              | No              | 100%      |
+| Signature detection | Yes              | No              | 100%      |
+| Address swapping    | Yes              | No              | 100%      |
 
 ## Migration Path
 
 ### Phase 1: Add Minimal Auth ✅ COMPLETED (This PR)
+
 - Create minimal auth module
 - Create minimal client factory
 - Add auth probe commands
 - Document migration process
 
 ### Phase 2: Validate (Next Sprint)
+
 - Test with different wallet types
 - Compare with legacy system
 - Verify Auth Story format
 
 ### Phase 3: Migrate Main App (Future Sprint)
+
 - Update `src/app/main.ts` to use minimal factory
 - Test in production
 - Monitor for issues
 
 ### Phase 4: Cleanup (Future Sprint)
+
 - Deprecate legacy auth files
 - Remove complex fallback system
 - Update documentation

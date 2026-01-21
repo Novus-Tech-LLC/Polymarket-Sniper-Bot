@@ -7,6 +7,7 @@ This document provides detailed information for debugging CLOB (Central Limit Or
 ### Symptom: 401 "Unauthorized/Invalid api key"
 
 **Most Common Causes:**
+
 1. **Signature mismatch** - Query parameters not included in signed path
 2. **Wrong signature type** - Using EOA credentials with Safe/Proxy signature type (or vice versa)
 3. **Expired/invalid credentials** - API keys need regeneration
@@ -15,6 +16,7 @@ This document provides detailed information for debugging CLOB (Central Limit Or
 ### Symptom: 401 "Invalid L1 Request headers"
 
 **Most Common Causes:**
+
 1. **Wrong L1 auth address** - Using effective address instead of signer (or vice versa)
 2. **Missing headers** - POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, or POLY_NONCE not set
 3. **EIP-712 signature mismatch** - Signing with wrong address or nonce
@@ -30,6 +32,7 @@ CLOB_DEBUG_CANON=true
 ```
 
 **What it logs:**
+
 - HTTP method (GET, POST, etc.)
 - Base URL and request path
 - Query parameters (raw object and serialized string)
@@ -39,6 +42,7 @@ CLOB_DEBUG_CANON=true
 - Redacted auth headers (first 8 + last 4 characters)
 
 **Example output:**
+
 ```
 [ClobHttpClient][Canon] ===== Request Canonicalization =====
 [ClobHttpClient][Canon] METHOD: GET
@@ -64,6 +68,7 @@ DEBUG_HTTP_HEADERS=true
 ```
 
 **What it logs:**
+
 - All HTTP request headers sent to CLOB API
 - Redacted values (first 4 + last 4 characters only)
 
@@ -76,6 +81,7 @@ CLOB_DERIVE_CREDS=true
 ```
 
 **What it does:**
+
 - Attempts to derive existing API keys via `/auth/derive-api-key`
 - Falls back to creating new keys via `/auth/api-key` if none exist
 - Uses fallback ladder to try different signature types and L1 auth addresses
@@ -129,6 +135,7 @@ Look for these key indicators:
 ```
 
 **Solution**: Ensure patch is applied correctly:
+
 ```bash
 npm install  # Should show "Applying patches..."
 ```
@@ -141,7 +148,8 @@ npm install  # Should show "Applying patches..."
 # Using Safe signature type but wallet is actually EOA
 ```
 
-**Solution**: 
+**Solution**:
+
 1. Delete cached credentials: `rm data/clob-creds.json`
 2. Let auto-detection find correct signature type
 3. OR: Explicitly set `POLYMARKET_SIGNATURE_TYPE=0` for EOA
@@ -163,6 +171,7 @@ npm install  # Should show "Applying patches..."
 The **invariant** for successful auth: `pathSigned` must equal `pathWithQuery`
 
 **Check logs for these lines:**
+
 ```
 [CLOB][Diag][Sign] pathSigned=/balance-allowance?asset_type=COLLATERAL&signature_type=0
 [ClobHttpClient][Canon] pathWithQuery: /balance-allowance?asset_type=COLLATERAL&signature_type=0
@@ -182,11 +191,13 @@ npm test -- tests/arbitrage/clob-credential-handling.test.ts
 ### Issue: "Patch not applying"
 
 **Symptoms:**
+
 ```
 No patch files found
 ```
 
 **Solution:**
+
 ```bash
 # Verify patch file exists
 ls -la patches/@polymarket+clob-client+5.2.1.patch
@@ -204,11 +215,13 @@ npm install
 ### Issue: "Wallet never traded"
 
 **Symptoms:**
+
 ```
 [CredDerive] ❌ Failed: Could not create api key (wallet needs to trade first)
 ```
 
 **Solution:**
+
 1. Visit https://polymarket.com
 2. Connect your wallet
 3. Make at least one trade (even $1 is fine)
@@ -218,11 +231,13 @@ npm install
 ### Issue: "Cached credentials expired"
 
 **Symptoms:**
+
 ```
 [CLOB] Credential verification failed with all signature types
 ```
 
 **Solution:**
+
 ```bash
 rm data/clob-creds.json
 npm run preflight  # Will re-derive
@@ -234,6 +249,7 @@ npm run preflight  # Will re-derive
 Authentication succeeds for `/auth/derive-api-key` but fails for `/balance-allowance`.
 
 **Note**: Builder API keys and CLOB API keys are **different**:
+
 - **Builder keys**: For gasless transactions (`@polymarket/builder-relayer-client`)
 - **CLOB keys**: For order book trading (`@polymarket/clob-client`)
 

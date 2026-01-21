@@ -16,7 +16,8 @@ This prevents your bot from paying $40+ in gas fees when things go wrong.
 
 ### Problem 1: Bot Wasted Gas When Auth Failed ❌
 
-**Before**: 
+**Before**:
+
 - Auth fails with 401 error
 - Bot continues anyway
 - Sends approval transactions
@@ -24,6 +25,7 @@ This prevents your bot from paying $40+ in gas fees when things go wrong.
 - Bot does nothing useful
 
 **After**: ✅
+
 - Auth fails with 401 error
 - Bot STOPS immediately
 - No transactions sent
@@ -33,12 +35,14 @@ This prevents your bot from paying $40+ in gas fees when things go wrong.
 ### Problem 2: No Protection Against High Gas Prices ❌
 
 **Before**:
+
 - Polygon gas spikes to 195 gwei (normal is 30-50)
 - Bot sends transaction anyway
 - You pay ~$40 for a simple approval
 - No warning, no protection
 
 **After**: ✅
+
 - Bot checks gas price before every transaction
 - If gas > your configured cap (e.g., 200 gwei)
 - Transaction is BLOCKED
@@ -59,7 +63,8 @@ POLY_MAX_FEE_GWEI_CAP=200
 
 **What this does**: Blocks any transaction if gas price exceeds 200 gwei.
 
-**Why 200?**: 
+**Why 200?**:
+
 - Normal Polygon gas: 30-50 gwei
 - During congestion: 80-120 gwei
 - Abnormal/spike: 150-200+ gwei
@@ -95,6 +100,7 @@ or
 ### If Auth Fails
 
 **Old behavior**:
+
 ```
 [CLOB] Auth failed
 [Preflight][Approvals] Checking approvals...
@@ -104,6 +110,7 @@ Trading still disabled
 ```
 
 **New behavior**:
+
 ```
 [CLOB] Auth failed
 [Preflight][GasGuard] ⛔ BLOCKING APPROVALS: Authentication failed.
@@ -115,6 +122,7 @@ Gas paid: $0
 ### If Gas Is Too High
 
 **Old behavior**:
+
 ```
 [Gas] maxFeePerGas=195 gwei
 Approval transaction sent (0x...)
@@ -122,6 +130,7 @@ Gas paid: $40.55
 ```
 
 **New behavior**:
+
 ```
 [Gas] RPC feeData maxFeePerGas=195 gwei
 [Gas][Safety] ⛔ GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei.
@@ -222,12 +231,12 @@ A: No. Gas checks are instant. Auth blocking prevents wasted time on futile oper
 
 ## How Much This Could Save You
 
-| Scenario | Gas Price | Transactions | Old Cost | New Cost | **Savings** |
-|----------|-----------|--------------|----------|----------|-------------|
-| Auth failure (1 retry) | 195 gwei | 3 | $120 | $0 | **$120** |
-| Auth failure (no retry) | 195 gwei | 1 | $40 | $0 | **$40** |
-| High gas + valid auth | 195 gwei | 1 | $40 | $0 | **$40** |
-| Normal operation | 35 gwei | 1 | $1 | $1 | $0 |
+| Scenario                | Gas Price | Transactions | Old Cost | New Cost | **Savings** |
+| ----------------------- | --------- | ------------ | -------- | -------- | ----------- |
+| Auth failure (1 retry)  | 195 gwei  | 3            | $120     | $0       | **$120**    |
+| Auth failure (no retry) | 195 gwei  | 1            | $40      | $0       | **$40**     |
+| High gas + valid auth   | 195 gwei  | 1            | $40      | $0       | **$40**     |
+| Normal operation        | 35 gwei   | 1            | $1       | $1       | $0          |
 
 **Average savings per prevented incident: $40-120**
 
@@ -248,12 +257,14 @@ If you're still seeing issues:
 ## Summary
 
 ✅ **What you get**:
+
 - No more gas waste on auth failures
 - Protection against gas spikes
 - Clear error messages
 - Backward compatible
 
 ✅ **What you need to do**:
+
 - Add `POLY_MAX_FEE_GWEI_CAP=200` to `.env`
 - Rebuild: `npm install && npm run build`
 - Restart your bot

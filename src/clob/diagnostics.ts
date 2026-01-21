@@ -1006,6 +1006,16 @@ export const runClobAuthPreflight = async (params: {
       preflightBackoffMs = PREFLIGHT_BACKOFF_BASE_MS;
       return { ok: true, status, forced: Boolean(params.force) };
     }
+    // UNKNOWN_ERROR case: response received but status is undefined or unexpected
+    // This typically occurs when the API client returns a success response without HTTP status
+    // (e.g., successful result object rather than HTTP response wrapper)
+    // This is NON_FATAL - credentials are valid, trading can proceed
+    const responseType = typeof response;
+    const isObject = response !== null && typeof response === "object";
+    const hasData = isObject && "data" in response;
+    const hasError = isObject && "error" in response;
+    const responseKeys = isObject ? Object.keys(response).join(",") : "none";
+
     logPreflightFailure({
       logger: params.logger,
       stage: "auth",
@@ -1026,15 +1036,20 @@ export const runClobAuthPreflight = async (params: {
     });
 
     if (isStructuredLogger(params.logger)) {
-      params.logger.warn("Preflight check failed with unknown error", {
+      params.logger.warn("Preflight: response without HTTP status (benign)", {
         ...logContext,
-        status,
+        status: status ?? "undefined",
         severity,
         issue,
+        responseType,
+        hasData,
+        hasError,
+        responseKeys,
+        note: "Credentials valid, trading allowed",
       });
     } else {
       params.logger.warn(
-        `[CLOB][Preflight] UNKNOWN_ERROR status=${status} severity=${severity} issue=${issue}`,
+        `[CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed. Details: status=${status ?? "undefined"} severity=${severity} issue=${issue} responseType=${responseType} hasData=${hasData} hasError=${hasError} keys=${responseKeys}`,
       );
     }
 

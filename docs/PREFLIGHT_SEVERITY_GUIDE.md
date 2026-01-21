@@ -7,29 +7,35 @@ The bot now intelligently classifies preflight check failures into three severit
 ## Severity Levels
 
 ### 🔴 FATAL (Blocks Trading)
+
 **Status Codes:** 401, 403  
 **Meaning:** Authentication has truly failed - invalid credentials  
 **Action:** Trading is blocked until auth is fixed  
 **Example:**
+
 ```
 [CLOB] Auth preflight failed (FATAL); switching to detect-only.
 [Preflight][GasGuard] ⛔ BLOCKING ALL ON-CHAIN TRANSACTIONS
 ```
 
 ### 🟡 TRANSIENT (Allows Trading with Warning)
+
 **Status Codes:** 500+, network errors (ECONNRESET, ETIMEDOUT)  
 **Meaning:** Temporary server or network issue - credentials are likely valid  
 **Action:** Trading continues with warning, will retry  
 **Example:**
+
 ```
 [CLOB] Auth preflight check failed (TRANSIENT); allowing trading with retry. status=503
 ```
 
 ### 🟢 NON_FATAL (Allows Trading with Warning)
+
 **Status Codes:** 400 (bad params), unknown errors  
 **Meaning:** Credentials are valid but preflight request had issues  
 **Action:** Trading continues, issue is logged for diagnosis  
 **Example:**
+
 ```
 [CLOB] Auth preflight check failed (NON_FATAL) but credentials appear valid; allowing trading. status=400
 ```
@@ -63,6 +69,7 @@ The bot now intelligently classifies preflight check failures into three severit
 ## Examples
 
 ### Before This Fix ❌
+
 ```
 ✅ Successfully derived CLOB credentials
 ✅ Credentials validated with /auth/derive-api-key
@@ -72,8 +79,9 @@ The bot now intelligently classifies preflight check failures into three severit
 ```
 
 ### After This Fix ✅
+
 ```
-✅ Successfully derived CLOB credentials  
+✅ Successfully derived CLOB credentials
 ✅ Credentials validated with /auth/derive-api-key
 ⚠️  Preflight /balance-allowance returned unknown error (network glitch)
 ✅ Severity: TRANSIENT (not blocking)
@@ -91,6 +99,7 @@ ALLOW_TRADING_WITHOUT_PREFLIGHT=true
 ```
 
 This bypasses the GasGuard entirely. Only use for:
+
 - Testing in development
 - Temporary workaround while investigating specific issues
 - Cases where you've verified credentials work via other means
@@ -98,6 +107,7 @@ This bypasses the GasGuard entirely. Only use for:
 ## Error Classification Details
 
 ### FATAL Errors
+
 - **When:** Polymarket API explicitly rejects credentials
 - **HTTP Status:** 401 (Unauthorized), 403 (Forbidden)
 - **Message Examples:**
@@ -107,6 +117,7 @@ This bypasses the GasGuard entirely. Only use for:
 - **Resolution:** Fix credentials, check signature type, verify wallet address
 
 ### TRANSIENT Errors
+
 - **When:** Infrastructure or temporary issues
 - **HTTP Status:** 500, 502, 503, 504
 - **Error Codes:** ECONNRESET, ETIMEDOUT
@@ -117,6 +128,7 @@ This bypasses the GasGuard entirely. Only use for:
 - **Resolution:** Wait and retry, check network, verify Polymarket API status
 
 ### NON_FATAL Errors
+
 - **When:** Request format issues, not auth problems
 - **HTTP Status:** 400 (Bad Request), other 4xx
 - **Message Examples:**
@@ -149,18 +161,21 @@ A: If the failure is TRANSIENT or NON_FATAL, your credentials are likely valid. 
 
 **Q: Is it safe to trade with a failed preflight?**  
 A: It depends on the severity:
+
 - FATAL (401/403): No - credentials are definitely invalid
 - TRANSIENT (network/server): Yes - temporary issue, will retry
 - NON_FATAL (params/unknown): Yes - credentials valid, just a request issue
 
 **Q: How do I know which severity caused the issue?**  
 A: Check logs for:
+
 - `FATAL` = "Auth preflight failed (FATAL); switching to detect-only"
 - `TRANSIENT` = "Auth preflight check failed (TRANSIENT); allowing trading"
 - `NON_FATAL` = "Auth preflight check failed (NON_FATAL) but credentials appear valid"
 
 **Q: What if I keep seeing TRANSIENT failures?**  
 A: This suggests persistent network or API issues. Check:
+
 1. Your internet connection
 2. Polymarket API status
 3. VPN/proxy configuration

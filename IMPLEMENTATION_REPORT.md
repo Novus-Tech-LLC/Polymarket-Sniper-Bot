@@ -7,6 +7,7 @@ After comprehensive analysis of the Polymarket bot authentication system, I foun
 ## Problem Statement Analysis
 
 The problem statement mentioned:
+
 1. L1 auth returns "Invalid L1 Request headers" → indicates L2 headers being sent to L1 endpoints
 2. L2 auth returns 401 "Invalid api key" → indicates HMAC signature mismatch
 3. Need proper Safe/Proxy mode support with correct address usage
@@ -20,6 +21,7 @@ The problem statement mentioned:
 **File:** `src/utils/l1-auth-headers.util.ts`
 
 **Implementation:**
+
 ```typescript
 // Line 67-68: Always uses signer address, never effective/funder
 const signerAddress = await signer.getAddress();
@@ -44,18 +46,19 @@ const headers: L1AuthHeaders = {
 **File:** `node_modules/@polymarket/clob-client/dist/headers/index.js`
 
 **Implementation:**
+
 ```typescript
 // Lines 26-42: Creates L2 headers with HMAC signature
 const createL2Headers = (signer, creds, l2HeaderArgs, timestamp) => {
   const address = yield signer.getAddress();
   const sig = buildPolyHmacSignature(
-    creds.secret,  // base64 encoded
+    creds.secret, // base64 encoded
     ts,
     l2HeaderArgs.method,
-    l2HeaderArgs.requestPath,  // includes query params
-    l2HeaderArgs.body
+    l2HeaderArgs.requestPath, // includes query params
+    l2HeaderArgs.body,
   );
-  
+
   return {
     POLY_ADDRESS: address,
     POLY_SIGNATURE: sig,
@@ -75,6 +78,7 @@ const createL2Headers = (signer, creds, l2HeaderArgs, timestamp) => {
 **File:** `patches/@polymarket+clob-client+4.22.8.patch`
 
 **Fix Applied:**
+
 ```javascript
 // Before: Query params were added by axios AFTER signing
 const response = await this.get(`${this.host}${endpoint}`, {
@@ -89,15 +93,16 @@ const headerArgs = {
   requestPath: signedPath,  // ✅ Includes query string
 };
 const headers = yield createL2Headers(this.signer, this.creds, headerArgs);
-const response = yield this.get(url, { 
+const response = yield this.get(url, {
   params: {},  // ✅ Prevents axios from re-adding
-  headers 
+  headers
 });
 ```
 
 **File:** `src/utils/query-string.util.ts`
 
 **Implementation:**
+
 ```typescript
 // Lines 15-41: Canonical query string builder
 export function buildSignedPath(
@@ -106,14 +111,15 @@ export function buildSignedPath(
 ): { signedPath: string; paramsKeys: string[] } {
   const keys = Object.keys(params)
     .filter((key) => params[key] !== undefined)
-    .sort();  // ✅ Alphabetical sorting
-  
+    .sort(); // ✅ Alphabetical sorting
+
   const queryString = keys
-    .map((key) => 
-      `${encodeURIComponent(key)}=${encodeURIComponent(String(params[key]))}`
+    .map(
+      (key) =>
+        `${encodeURIComponent(key)}=${encodeURIComponent(String(params[key]))}`,
     )
     .join("&");
-  
+
   return {
     signedPath: queryString ? `${path}?${queryString}` : path,
     paramsKeys: keys,
@@ -130,11 +136,14 @@ export function buildSignedPath(
 **File:** `src/clob/identity-resolver.ts`
 
 **Implementation:**
+
 ```typescript
 // Lines 109-162: resolveOrderIdentity
-export function resolveOrderIdentity(params: IdentityResolverParams): OrderIdentity {
+export function resolveOrderIdentity(
+  params: IdentityResolverParams,
+): OrderIdentity {
   const sigType = params.signatureType ?? 0;
-  
+
   if (sigType === SignatureType.POLY_GNOSIS_SAFE) {
     // Safe mode: use funder address for orders
     return {
@@ -143,7 +152,7 @@ export function resolveOrderIdentity(params: IdentityResolverParams): OrderIdent
       signatureTypeForOrders: SignatureType.POLY_GNOSIS_SAFE,
     };
   }
-  
+
   if (sigType === SignatureType.POLY_PROXY) {
     // Proxy mode: use funder address for orders
     return {
@@ -152,7 +161,7 @@ export function resolveOrderIdentity(params: IdentityResolverParams): OrderIdent
       signatureTypeForOrders: SignatureType.POLY_PROXY,
     };
   }
-  
+
   // EOA mode: use signer address
   return {
     makerAddress: signerAddress,
@@ -170,7 +179,7 @@ export function resolveL1AuthIdentity(
   if (!useEffectiveForL1) {
     return { l1AuthAddress: signerAddress };
   }
-  
+
   // Fallback: try effective address for L1 (rarely works)
   return { l1AuthAddress: params.funderAddress ?? signerAddress };
 }
@@ -185,31 +194,37 @@ export function resolveL1AuthIdentity(
 **File:** `src/clob/diagnostics.ts`
 
 **Implementation:**
+
 ```typescript
 // Lines 106-121: Auto-detect secret encoding
-export const detectSecretDecodingMode = (secret?: string): SecretDecodingMode => {
+export const detectSecretDecodingMode = (
+  secret?: string,
+): SecretDecodingMode => {
   if (!secret) return "raw";
-  
+
   // base64url: contains - or _
   if (secretLooksBase64Url(secret)) {
     return "base64url";
   }
-  
+
   // base64: contains + or / or ends with =
   if (secret.includes("+") || secret.includes("/") || secret.endsWith("=")) {
     return "base64";
   }
-  
+
   // base64: only alphanumeric, length divisible by 4
   if (/^[A-Za-z0-9]+$/.test(secret) && secret.length % 4 === 0) {
     return "base64";
   }
-  
+
   return "raw";
 };
 
 // Lines 123-142: Decode secret based on detected mode
-export const decodeSecretBytes = (secret: string, mode: SecretDecodingMode): Buffer => {
+export const decodeSecretBytes = (
+  secret: string,
+  mode: SecretDecodingMode,
+): Buffer => {
   if (mode === "base64url") {
     // Convert base64url to base64: - → +, _ → /
     let normalized = secret.replace(/-/g, "+").replace(/_/g, "/");
@@ -223,11 +238,11 @@ export const decodeSecretBytes = (secret: string, mode: SecretDecodingMode): Buf
     }
     return Buffer.from(normalized, "base64");
   }
-  
+
   if (mode === "base64") {
     return Buffer.from(secret, "base64");
   }
-  
+
   // raw
   return Buffer.from(secret, "utf8");
 };
@@ -242,22 +257,29 @@ export const decodeSecretBytes = (secret: string, mode: SecretDecodingMode): Buf
 **File:** `node_modules/@polymarket/clob-client/dist/signing/hmac.js`
 
 **Implementation:**
+
 ```javascript
 // Lines 17-31: buildPolyHmacSignature
-const buildPolyHmacSignature = (secret, timestamp, method, requestPath, body) => {
+const buildPolyHmacSignature = (
+  secret,
+  timestamp,
+  method,
+  requestPath,
+  body,
+) => {
   // 1. Build message: timestamp + method + path + [body]
   let message = timestamp + method + requestPath;
   if (body !== undefined) {
     message += body;
   }
-  
+
   // 2. Decode secret from base64
   const base64Secret = Buffer.from(secret, "base64");
-  
+
   // 3. Compute HMAC-SHA256
   const hmac = crypto_1.default.createHmac("sha256", base64Secret);
   const sig = hmac.update(message).digest("base64");
-  
+
   // 4. Convert to base64url: + → -, / → _
   const sigUrlSafe = replaceAll(replaceAll(sig, "+", "-"), "/", "_");
   return sigUrlSafe;
@@ -301,6 +323,7 @@ Since the implementation was already correct, I focused on:
 **File:** `scripts/clob_auth_smoke_test.ts`
 
 **Features:**
+
 - Validates environment variables
 - Tests wallet connection and balance
 - Tests L1 authentication (derive/create API key)
@@ -310,6 +333,7 @@ Since the implementation was already correct, I focused on:
 - Supports EOA, Safe, and Proxy modes
 
 **Usage:**
+
 ```bash
 # EOA mode
 export PRIVATE_KEY=0x...
@@ -331,6 +355,7 @@ ts-node scripts/clob_auth_smoke_test.ts
 **Added:** `logAuthDiagnostics()` function
 
 **Features:**
+
 - Logs credential details on verification failure
 - Shows signature type and wallet address
 - Displays redacted API key, secret, passphrase
@@ -338,6 +363,7 @@ ts-node scripts/clob_auth_smoke_test.ts
 - Helps debug 401 errors
 
 **Example Output:**
+
 ```
 [CredDerive] Auth Diagnostics:
   signatureType: 2
@@ -355,6 +381,7 @@ ts-node scripts/clob_auth_smoke_test.ts
 **File:** `docs/POLYMARKET_AUTH_GUIDE.md`
 
 **Contents:**
+
 - Complete explanation of L1 vs L2 authentication
 - EIP-712 signature details for L1
 - HMAC-SHA256 signature details for L2
@@ -369,6 +396,7 @@ ts-node scripts/clob_auth_smoke_test.ts
 **File:** `scripts/README.md`
 
 **Contents:**
+
 - Smoke test usage instructions
 - Environment variable reference
 - Expected output examples
@@ -383,6 +411,7 @@ ts-node scripts/clob_auth_smoke_test.ts
 ### What Was Wrong?
 
 **Nothing in the current codebase!** The authentication implementation is correct:
+
 - L1 auth uses only EIP-712 headers (4 headers)
 - L2 auth uses HMAC headers (5 headers)
 - Query parameters are included in L2 signatures
@@ -424,6 +453,7 @@ If users experience auth failures, the likely causes are:
 ### For End Users
 
 **Test your configuration:**
+
 ```bash
 export PRIVATE_KEY=0x...
 export CLOB_SIGNATURE_TYPE=2  # If using Safe
@@ -432,30 +462,36 @@ ts-node scripts/clob_auth_smoke_test.ts
 ```
 
 **If it fails:**
+
 1. Check the error message
 2. Follow the suggested fix
 3. Consult `docs/POLYMARKET_AUTH_GUIDE.md`
 4. Check `scripts/README.md` for troubleshooting
 
 **If it succeeds:**
+
 ```
 ✅ AUTH OK - All authentication tests passed!
 ```
+
 Your configuration is correct and ready to use with the bot.
 
 ### For Developers
 
 **Run tests:**
+
 ```bash
 npm test
 ```
 
 **Build:**
+
 ```bash
 npm run build
 ```
 
 **Review implementation:**
+
 - Read `docs/POLYMARKET_AUTH_GUIDE.md`
 - Check `src/utils/l1-auth-headers.util.ts`
 - Check `node_modules/@polymarket/clob-client/dist/headers/index.js`
@@ -466,6 +502,7 @@ npm run build
 ## Files Modified/Added
 
 ### Added
+
 - `scripts/clob_auth_smoke_test.ts` (370 lines)
 - `scripts/README.md` (329 lines)
 - `docs/POLYMARKET_AUTH_GUIDE.md` (541 lines)
@@ -473,6 +510,7 @@ npm run build
 - `tests/arbitrage/l2-signature-message.test.ts` (146 lines)
 
 ### Modified
+
 - `src/clob/credential-derivation-v2.ts` (+39 lines)
 
 **Total:** 1,680 lines of new code, tests, and documentation

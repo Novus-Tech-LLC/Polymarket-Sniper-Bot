@@ -7,28 +7,32 @@ This document provides a comprehensive analysis of persistent 401 "Unauthorized/
 ## Problem Statement
 
 Users reported authentication failures with the following characteristics:
+
 - ✅ Valid API credentials derived from `deriveApiKey`
 - ✅ All required auth headers present (api key, secret, passphrase, signature)
 - ✅ Wallet has USDC balance and proper contract approvals
 - ✅ All three signature types attempted (EOA, Gnosis Safe, Proxy)
 - ❌ Server returns: 401 "Unauthorized/Invalid api key"
 
-Quote from issue: *"do deep research into why this authentication fails, even though we have addressed nearly every single document addressing this."*
+Quote from issue: _"do deep research into why this authentication fails, even though we have addressed nearly every single document addressing this."_
 
 ## Research Methodology
 
 ### 1. Code Analysis
+
 - Examined clob-client source code (v4.22.8)
 - Analyzed HMAC signature implementation in `signing/hmac.js`
 - Reviewed query parameter handling in HTTP requests
 - Inspected axios request configuration and parameter merging
 
 ### 2. Patch Analysis
+
 - Reviewed existing patch to clob-client (query param signatures)
 - Traced request flow from method call to axios
 - Identified discrepancy between signed URL and final request
 
 ### 3. Authentication Flow Tracing
+
 ```
 User Code
   → ClobClient.getBalanceAllowance()
@@ -47,15 +51,19 @@ User Code
 ## Root Cause Identified
 
 ### The Bug
+
 The existing patch correctly included query parameters in HMAC signatures, BUT introduced a subtle parameter handling issue:
 
 1. **Patch (Correct)**: Built signed URLs with query params
+
    ```javascript
-   const signedPath = "/balance-allowance?asset_type=COLLATERAL&signature_type=0"
-   const signature = hmac(timestamp + "GET" + signedPath)
+   const signedPath =
+     "/balance-allowance?asset_type=COLLATERAL&signature_type=0";
+   const signature = hmac(timestamp + "GET" + signedPath);
    ```
 
 2. **Issue**: `ClobClient.get()` method adds params again
+
    ```javascript
    get(endpoint, options) {
      return http_helpers.get(endpoint, {
@@ -75,6 +83,7 @@ The existing patch correctly included query parameters in HMAC signatures, BUT i
    - Signature validation fails → 401
 
 ### Why This Was Hard to Detect
+
 - `geo_block_token` is often `undefined` (axios filters it out)
 - But axios still processes the params object
 - Parameter order matters for signatures
@@ -83,6 +92,7 @@ The existing patch correctly included query parameters in HMAC signatures, BUT i
 ## Solution Implemented
 
 ### Technical Fix
+
 Updated `patches/@polymarket+clob-client+4.22.8.patch` to explicitly pass empty params:
 
 ```javascript
@@ -102,7 +112,9 @@ this.get(url, { params: {}, headers })
 ```
 
 ### Methods Fixed
+
 All authenticated CLOB API methods that use query parameters:
+
 - `getTrades()` / `getTradesPaginated()`
 - `getBuilderTrades()`
 - `getNotifications()` / `dropNotifications()`
@@ -115,12 +127,15 @@ All authenticated CLOB API methods that use query parameters:
 ## Additional Deliverables
 
 ### 1. Technical Documentation (`AUTHENTICATION_FIX.md`)
+
 - Detailed before/after comparison
 - Technical explanation of signature process
 - Impact assessment
 
 ### 2. Diagnostic Tool (`diagnose-auth.js`)
+
 Interactive tool that:
+
 - Checks environment variables
 - Verifies wallet connection
 - Tests API connectivity
@@ -129,7 +144,9 @@ Interactive tool that:
 - Provides actionable guidance
 
 ### 3. User Documentation (`README.md`)
+
 Added troubleshooting section with:
+
 - Common issues and solutions
 - Diagnostic tool usage
 - Clear next steps
@@ -137,6 +154,7 @@ Added troubleshooting section with:
 ## Verification
 
 ### Test Results
+
 ```
 ✅ All 110 existing tests pass
 ✅ TypeScript build successful
@@ -145,6 +163,7 @@ Added troubleshooting section with:
 ```
 
 ### Manual Testing
+
 ```bash
 # Fresh install
 npm install
@@ -160,11 +179,13 @@ npm test
 ## Impact Assessment
 
 ### What This Fixes
+
 - ✅ Authentication for wallets that HAVE traded on Polymarket
 - ✅ Signature mismatches due to parameter handling
 - ✅ 401 errors from valid credentials
 
 ### What This Does NOT Fix
+
 - ❌ Wallets that have NEVER traded (Polymarket requirement)
 - ❌ Invalid credentials (wrong keys, expired, etc.)
 - ❌ Network/API issues (separate problem)
@@ -172,8 +193,10 @@ npm test
 ## Remaining Issues & Guidance
 
 ### "Could not create api key" (400 Error)
+
 **Cause**: Wallet has never traded on Polymarket  
 **Solution**:
+
 1. Visit https://polymarket.com
 2. Connect wallet from PRIVATE_KEY
 3. Make at least ONE small trade
@@ -181,12 +204,15 @@ npm test
 5. Restart bot
 
 ### Builder vs CLOB Credentials
+
 **Issue**: Users confuse Builder API keys with CLOB API keys  
 **Solution**: Documentation clarifies the difference
+
 - Builder keys: For attribution and gasless approvals
 - CLOB keys: For trading (required)
 
 ### Network Issues
+
 **Symptoms**: Intermittent failures, timeouts  
 **Solution**: Diagnostic tool helps identify vs authentication issues
 
@@ -215,7 +241,7 @@ npm test
 
 ## Conclusion
 
-Through deep research into the authentication failure, we identified that the existing patch correctly implemented query parameter signatures, but the interaction with the `ClobClient.get()` method's parameter handling caused signature mismatches. 
+Through deep research into the authentication failure, we identified that the existing patch correctly implemented query parameter signatures, but the interaction with the `ClobClient.get()` method's parameter handling caused signature mismatches.
 
 The fix is minimal, surgical, and tested - adding `params: {}` to all authenticated GET requests prevents axios from interfering with pre-built signed URLs.
 

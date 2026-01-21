@@ -338,13 +338,16 @@ export const ensureTradingReady = async (
           authFailureContext.verificationFailed = false;
           authFailureContext.status = preflight.status;
           params.logger.warn(
-            `[CLOB] Auth preflight check failed (NON_FATAL) but credentials appear valid; allowing trading. status=${preflight.status}`,
+            `[CLOB] Auth preflight NON_FATAL issue detected - credentials are valid, trading continues normally. status=${preflight.status ?? "undefined"}`,
           );
           // Add attempt to auth story showing non-fatal issue
           authStory.addAttempt(
             createAuthAttempt("A", {
               httpStatus: preflight.status,
-              errorTextShort: `Non-fatal: ${preflight.reason ?? "Unknown"}`,
+              errorTextShort:
+                preflight.status === undefined
+                  ? `Non-fatal: Response without HTTP status (credentials valid)`
+                  : `Non-fatal: ${preflight.reason ?? "Unknown"}`,
               success: true, // Mark as success since we're allowing trading
               severity: "NON_FATAL",
             }),

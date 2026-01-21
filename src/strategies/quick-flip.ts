@@ -69,6 +69,7 @@ export class QuickFlipStrategy {
             position.marketId,
             position.tokenId,
             position.size,
+            false, // Not a stop-loss
           );
           soldCount++;
         } catch (err) {
@@ -97,6 +98,7 @@ export class QuickFlipStrategy {
             position.marketId,
             position.tokenId,
             position.size,
+            true, // Stop-loss - bypass minimum check
           );
           soldCount++;
         } catch (err) {
@@ -139,11 +141,17 @@ export class QuickFlipStrategy {
   /**
    * Sell a position using postOrder utility
    * Executes market sell order at best bid price
+   * @param marketId - The market ID
+   * @param tokenId - The token ID to sell
+   * @param size - Number of shares to sell
+   * @param isStopLoss - If true, bypasses minimum order size check to ensure stop-loss can execute.
+   *                     Defaults to false for regular profit-taking sells which respect the minimum.
    */
   private async sellPosition(
     marketId: string,
     tokenId: string,
     size: number,
+    isStopLoss: boolean = false,
   ): Promise<void> {
     try {
       // Import postOrder utility
@@ -177,9 +185,10 @@ export class QuickFlipStrategy {
       // Calculate sell value (size * best bid price)
       const sizeUsd = size * bestBid;
 
-      // Validate minimum order size
+      // Validate minimum order size for regular sells only
+      // Stop-loss sells bypass this check to prevent being stuck in losing positions
       const minOrderUsd = 10; // From DEFAULT_CONFIG
-      if (sizeUsd < minOrderUsd) {
+      if (!isStopLoss && sizeUsd < minOrderUsd) {
         this.logger.warn(
           `[QuickFlip] Position too small to sell: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,
         );
@@ -194,6 +203,7 @@ export class QuickFlipStrategy {
       );
 
       // Execute sell order using postOrder utility
+      // For stop-loss orders, set minOrderUsd=0 to bypass order-submission layer checks
       const result = await postOrder({
         client: this.client,
         wallet,
@@ -205,6 +215,7 @@ export class QuickFlipStrategy {
         maxAcceptablePrice: bestBid * 0.95, // Accept up to 5% slippage
         logger: this.logger,
         priority: false, // Not a frontrun trade
+        orderConfig: isStopLoss ? { minOrderUsd: 0 } : undefined,
       });
 
       if (result.status === "submitted") {

@@ -68,6 +68,35 @@ describe("parallelBatch", () => {
     // Verify undefined is in the results
     assert.ok(result.results.includes(undefined as unknown as number));
   });
+
+  it("should suppress completion log when silent option is true", async () => {
+    const logs: string[] = [];
+    const mockLogger = {
+      info: (msg: string) => logs.push(`INFO: ${msg}`),
+      warn: (msg: string) => logs.push(`WARN: ${msg}`),
+      error: (msg: string) => logs.push(`ERROR: ${msg}`),
+      debug: (msg: string) => logs.push(`DEBUG: ${msg}`),
+    };
+
+    // Without silent option - should log completion
+    await parallelBatch([1, 2], async (n) => n, {
+      logger: mockLogger,
+      label: "test",
+    });
+    assert.strictEqual(logs.length, 1);
+    assert.ok(logs[0].includes("Processed 2 items"));
+
+    // Reset logs
+    logs.length = 0;
+
+    // With silent option - should NOT log completion
+    await parallelBatch([1, 2], async (n) => n, {
+      logger: mockLogger,
+      label: "test",
+      silent: true,
+    });
+    assert.strictEqual(logs.length, 0);
+  });
 });
 
 describe("parallelFetch", () => {

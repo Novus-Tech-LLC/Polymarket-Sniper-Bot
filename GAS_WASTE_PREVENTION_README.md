@@ -13,10 +13,12 @@ POLY_MAX_FEE_GWEI_CAP=200
 ## What This Fixes
 
 ### Problem 1: Auth Failures Cost $40-120
+
 - ❌ **Before**: Bot fails auth → still sends approval transactions → wastes $40-120
 - ✅ **After**: Bot fails auth → BLOCKS approvals → saves $40-120
 
 ### Problem 2: High Gas Prices Cost $40+
+
 - ❌ **Before**: Gas spikes to 195 gwei → bot sends transaction anyway → wastes $40+
 - ✅ **After**: Gas > 200 gwei → bot BLOCKS transaction → saves $40+
 
@@ -43,12 +45,14 @@ npm start
 ## What You'll See
 
 ### When Auth Fails (Now Blocked ✅)
+
 ```
 [Preflight][GasGuard] ⛔ BLOCKING APPROVALS: Authentication failed.
 Will not send on-chain transactions to prevent gas waste.
 ```
 
 ### When Gas Is Too High (Now Blocked ✅)
+
 ```
 [Gas][Safety] GAS PRICE TOO HIGH: 195.00 gwei exceeds cap of 200 gwei.
 Transaction BLOCKED to prevent excessive fees.
@@ -66,10 +70,10 @@ Transaction BLOCKED to prevent excessive fees.
 
 ## Expected Savings
 
-| Incident Type | Old Cost | New Cost | Savings |
-|---------------|----------|----------|---------|
-| Auth failure (3 retries) | $120 | $0 | **$120** |
-| Gas spike (195 gwei) | $40 | $0 | **$40** |
+| Incident Type            | Old Cost | New Cost | Savings  |
+| ------------------------ | -------- | -------- | -------- |
+| Auth failure (3 retries) | $120     | $0       | **$120** |
+| Gas spike (195 gwei)     | $40      | $0       | **$40**  |
 
 ---
 
