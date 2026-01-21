@@ -14,6 +14,7 @@ import {
   sanitizeAxiosError,
   sanitizeErrorMessage,
 } from "../utils/sanitize-axios-error.util";
+import { parallelBatch } from "../utils/parallel-utils";
 
 export type MempoolMonitorDeps = {
   client: ClobClient;
@@ -205,7 +206,6 @@ export class MempoolMonitorService {
   private async monitorRecentOrders(): Promise<void> {
     const { logger, env } = this.deps;
     const startTime = Date.now();
-    let checkedAddresses = 0;
     const stats: MonitorStats = {
       tradesSeen: 0,
       recentTrades: 0,
@@ -221,22 +221,60 @@ export class MempoolMonitorService {
       skippedOtherTrades: 0,
     };
 
-    // Monitor all addresses from env (these are the addresses we want to frontrun)
-    for (const targetAddress of env.targetAddresses) {
-      try {
-        await this.checkRecentActivity(targetAddress, stats);
-        checkedAddresses += 1;
-      } catch (err) {
-        if (axios.isAxiosError(err) && err.response?.status === 404) {
-          checkedAddresses += 1;
-          continue;
+    // Monitor all addresses from env in parallel (these are the addresses we want to frontrun)
+    // Use parallelBatch to control concurrency and prevent overwhelming the API
+    const MAX_CONCURRENT_ADDRESS_CHECKS = 4;
+    
+    const batchResult = await parallelBatch(
+      env.targetAddresses,
+      async (targetAddress) => {
+        const localStats: MonitorStats = { ...stats };
+        Object.keys(localStats).forEach(key => {
+          localStats[key as keyof MonitorStats] = 0;
+        });
+        
+        try {
+          await this.checkRecentActivity(targetAddress, localStats);
+          return { success: true, stats: localStats };
+        } catch (err) {
+          if (axios.isAxiosError(err) && err.response?.status === 404) {
+            return { success: true, stats: localStats };
+          }
+          logger.debug(
+            `Error checking activity for ${targetAddress}: ${sanitizeErrorMessage(err)}`,
+          );
+          return { success: false, stats: localStats, error: err };
         }
-        stats.skippedApiErrorTrades += 1;
-        logger.debug(
-          `Error checking activity for ${targetAddress}: ${sanitizeErrorMessage(err)}`,
-        );
+      },
+      { concurrency: MAX_CONCURRENT_ADDRESS_CHECKS, logger, label: "activity-check" },
+    );
+
+    // Aggregate stats from all parallel checks
+    let checkedAddresses = 0;
+    for (const result of batchResult.results) {
+      if (result) {
+        checkedAddresses++;
+        if (!result.success) {
+          stats.skippedApiErrorTrades += 1;
+        }
+        // Aggregate individual stats
+        stats.tradesSeen += result.stats.tradesSeen;
+        stats.recentTrades += result.stats.recentTrades;
+        stats.eligibleTrades += result.stats.eligibleTrades;
+        stats.skippedSmallTrades += result.stats.skippedSmallTrades;
+        stats.skippedUnconfirmedTrades += result.stats.skippedUnconfirmedTrades;
+        stats.skippedNonTargetTrades += result.stats.skippedNonTargetTrades;
+        stats.skippedParseErrorTrades += result.stats.skippedParseErrorTrades;
+        stats.skippedOutsideRecentWindowTrades += result.stats.skippedOutsideRecentWindowTrades;
+        stats.skippedUnsupportedActionTrades += result.stats.skippedUnsupportedActionTrades;
+        stats.skippedMissingFieldsTrades += result.stats.skippedMissingFieldsTrades;
+        stats.skippedApiErrorTrades += result.stats.skippedApiErrorTrades;
+        stats.skippedOtherTrades += result.stats.skippedOtherTrades;
       }
     }
+    // Add errors count to checked addresses (they were still checked)
+    checkedAddresses += batchResult.errors.length;
+    stats.skippedApiErrorTrades += batchResult.errors.length;
 
     const durationMs = Date.now() - startTime;
     logger.info(

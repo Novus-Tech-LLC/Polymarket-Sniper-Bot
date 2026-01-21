@@ -2,11 +2,16 @@ import type { ClobClient } from "@polymarket/clob-client";
 import type { Logger } from "../../utils/logger.util";
 import { OrderbookNotFoundError } from "../../errors/app.errors";
 import type { MarketDataProvider, MarketSummary, OrderBookTop } from "../types";
+import { TTLCache } from "../../utils/parallel-utils";
 
 const OUTCOME_YES = new Set(["yes", "y", "true"]);
 const OUTCOME_NO = new Set(["no", "n", "false"]);
 const END_CURSOR = "LTE=";
 const MAX_MARKET_PAGES = 20;
+// Cache orderbook data for 2 seconds to avoid redundant API calls during the same scan cycle
+const ORDERBOOK_CACHE_TTL_MS = 2000;
+// Cache active markets for 30 seconds since they don't change frequently
+const MARKETS_CACHE_TTL_MS = 30000;
 
 function parseOutcome(value?: string): "YES" | "NO" | undefined {
   if (!value) return undefined;
@@ -107,6 +112,9 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
   private readonly logger: Logger;
   private readonly missingOrderbooks = new Set<string>();
   private readonly tokenMarketMap = new Map<string, string>();
+  // TTL caches to reduce redundant API calls
+  private readonly orderbookCache = new TTLCache<string, OrderBookTop>(ORDERBOOK_CACHE_TTL_MS);
+  private readonly marketsCache = new TTLCache<string, MarketSummary[]>(MARKETS_CACHE_TTL_MS);
 
   constructor(params: { client: ClobClient; logger: Logger }) {
     this.client = params.client;
@@ -114,6 +122,12 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
   }
 
   async getActiveMarkets(): Promise<MarketSummary[]> {
+    // Check cache first
+    const cached = this.marketsCache.get("active");
+    if (cached) {
+      return cached;
+    }
+
     const markets: MarketSummary[] = [];
     let nextCursor: string | undefined;
     let pagesChecked = 0;
@@ -303,6 +317,8 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
       );
     }
 
+    // Cache the result
+    this.marketsCache.set("active", markets);
     return markets;
   }
 
@@ -311,14 +327,23 @@ export class PolymarketMarketDataProvider implements MarketDataProvider {
       return { bestAsk: 0, bestBid: 0 };
     }
 
+    // Check cache first to avoid redundant API calls within the same scan cycle
+    const cached = this.orderbookCache.get(tokenId);
+    if (cached) {
+      return cached;
+    }
+
     try {
       const book = await this.client.getOrderBook(tokenId);
       const bestAsk = book.asks?.length ? Number(book.asks[0].price) : 0;
       const bestBid = book.bids?.length ? Number(book.bids[0].price) : 0;
-      return {
+      const result = {
         bestAsk: Number.isFinite(bestAsk) ? bestAsk : 0,
         bestBid: Number.isFinite(bestBid) ? bestBid : 0,
       };
+      // Cache the result
+      this.orderbookCache.set(tokenId, result);
+      return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (

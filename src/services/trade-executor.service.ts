@@ -10,6 +10,7 @@ import {
   POLYMARKET_API,
   DEFAULT_CONFIG,
 } from "../constants/polymarket.constants";
+import { parallelFetch, TTLCache } from "../utils/parallel-utils";
 
 export type TradeExecutorDeps = {
   client: ClobClient & { wallet: Wallet };
@@ -27,6 +28,8 @@ interface Position {
 export class TradeExecutorService {
   private readonly deps: TradeExecutorDeps;
   private detectOnlyLogged = false;
+  // Cache balances for 5 seconds to avoid repeated RPC calls within the same trade cycle
+  private readonly balanceCache = new TTLCache<string, number>(5000);
 
   constructor(deps: TradeExecutorDeps) {
     this.deps = deps;
@@ -44,12 +47,25 @@ export class TradeExecutorService {
       return;
     }
     try {
-      const yourUsdBalance = await getUsdBalanceApprox(
-        client.wallet,
-        env.collateralTokenAddress,
-        env.collateralTokenDecimals,
-      );
-      const polBalance = await getPolBalance(client.wallet);
+      // Fetch both balances in parallel instead of sequentially
+      // This reduces latency by ~50% for balance checks
+      const balances = await parallelFetch({
+        usdBalance: this.balanceCache.getOrFetch(
+          `usdc:${client.wallet.address}`,
+          () => getUsdBalanceApprox(
+            client.wallet,
+            env.collateralTokenAddress,
+            env.collateralTokenDecimals,
+          ),
+        ),
+        polBalance: this.balanceCache.getOrFetch(
+          `pol:${client.wallet.address}`,
+          () => getPolBalance(client.wallet),
+        ),
+      });
+
+      const yourUsdBalance = balances.usdBalance ?? 0;
+      const polBalance = balances.polBalance ?? 0;
 
       logger.info(
         `[Frontrun] Balance check - POL: ${polBalance.toFixed(4)} POL, USDC: ${yourUsdBalance.toFixed(2)} USDC`,

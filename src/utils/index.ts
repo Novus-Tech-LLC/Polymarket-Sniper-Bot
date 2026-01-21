@@ -6,3 +6,4 @@ export * from "./post-order.util";
 export * from "./spinner.util";
 export * from "./geoblock.util";
 export * from "./secret-encoding.util";
+export * from "./parallel-utils";
