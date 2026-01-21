@@ -10,6 +10,7 @@ import { formatClobAuthFailureHint } from "../utils/clob-auth-hint.util";
 import { isGeoblocked } from "../utils/geoblock.util";
 import type { Logger } from "../utils/logger.util";
 import { sanitizeErrorMessage } from "../utils/sanitize-axios-error.util";
+import { syncClobAllowanceCache } from "../utils/funds-allowance.util";
 import {
   publicKeyMatchesDerived,
   deriveSignerAddress,
@@ -611,6 +612,15 @@ export const ensureTradingReady = async (
       config: approvalsConfig,
     });
     approvalsOk = approvalResult?.ok ?? false;
+
+    // If approvals were set/confirmed, sync CLOB cache with on-chain state
+    if (approvalsOk) {
+      await syncClobAllowanceCache(
+        params.client,
+        params.logger,
+        "after preflight approvals",
+      );
+    }
   } catch (error) {
     params.logger.warn(
       `[Preflight][Approvals] Failed to ensure approvals. ${sanitizeErrorMessage(error)}`,
