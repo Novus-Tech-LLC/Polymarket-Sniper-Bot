@@ -37,6 +37,10 @@ export class PositionTracker {
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
   private missingOrderbooks = new Set<string>(); // Cache tokenIds with no orderbook to avoid repeated API calls
+  private marketOutcomeCache: Map<string, "YES" | "NO" | null> = new Map(); // Cache market outcomes to avoid redundant API calls
+
+  // API timeout constant for external API calls
+  private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
 
   constructor(config: PositionTrackerConfig) {
     this.client = config.client;
