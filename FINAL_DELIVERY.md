@@ -148,13 +148,13 @@ Instead of **guessing**, we **intercept both sides** and show you the exact disc
 
 ## 🎯 Expected Root Causes (Ranked)
 
-| Cause                           | Probability | How to Fix                              |
-|---------------------------------|-------------|-----------------------------------------|
-| Query param order mismatch      | 70%         | Extend patch (I'll do this)             |
-| Wrong signature type            | 20%         | Set SIGNATURE_TYPE=2 + PROXY_ADDRESS    |
-| Secret encoding                 | 5%          | Already handled by clob-client          |
-| Timestamp drift                 | 3%          | Check system clock                      |
-| Body encoding                   | 2%          | Unlikely - diagnostic will show it      |
+| Cause                      | Probability | How to Fix                           |
+| -------------------------- | ----------- | ------------------------------------ |
+| Query param order mismatch | 70%         | Extend patch (I'll do this)          |
+| Wrong signature type       | 20%         | Set SIGNATURE_TYPE=2 + PROXY_ADDRESS |
+| Secret encoding            | 5%          | Already handled by clob-client       |
+| Timestamp drift            | 3%          | Check system clock                   |
+| Body encoding              | 2%          | Unlikely - diagnostic will show it   |
 
 ---
 
@@ -164,7 +164,7 @@ Instead of **guessing**, we **intercept both sides** and show you the exact disc
 ✅ **Only first/last 4-8 chars** of keys shown  
 ✅ **Opt-in diagnostic mode** - disabled by default  
 ✅ **Zero overhead** when not in use  
-✅ **No plaintext credentials** in output  
+✅ **No plaintext credentials** in output
 
 ---
 
@@ -179,6 +179,7 @@ Instead of **guessing**, we **intercept both sides** and show you the exact disc
 ### 2. Share the Output
 
 Send me:
+
 - The `[HmacDiag] MISMATCH DETECTED` logs (if present)
 - The JSON diagnostic output
 - Any errors from the script
@@ -186,6 +187,7 @@ Send me:
 ### 3. I'll Implement the Fix
 
 Based on your output, I'll:
+
 - **If path mismatch**: Extend the patch to fix all endpoints (10-20 min)
 - **If signature type**: Confirm your wallet type and proxy address (5 min)
 - **If other issue**: Provide targeted fix based on diagnostic
@@ -198,13 +200,13 @@ Re-run the diagnostic → should see `✓ Success! Balance retrieved.`
 
 ## ⏱️ Timeline to Resolution
 
-| Step                  | Time     |
-|-----------------------|----------|
-| Run diagnostic        | 5 min    |
-| Analyze output        | 5 min    |
-| Implement fix         | 10-30 min|
-| Verify fix            | 5 min    |
-| **TOTAL**             | **30-60 min** |
+| Step           | Time          |
+| -------------- | ------------- |
+| Run diagnostic | 5 min         |
+| Analyze output | 5 min         |
+| Implement fix  | 10-30 min     |
+| Verify fix     | 5 min         |
+| **TOTAL**      | **30-60 min** |
 
 ---
 
@@ -228,7 +230,7 @@ Start here → **`NEXT_STEPS_401_FIX.md`**
 ✅ Comprehensive documentation  
 ✅ README updated  
 ✅ Compiles without errors  
-✅ Scripts are executable  
+✅ Scripts are executable
 
 ---
 
@@ -246,6 +248,7 @@ Start here → **`NEXT_STEPS_401_FIX.md`**
 ## 🔥 Key Insight That Drives This Solution
 
 Your diagnostic showed:
+
 ```
 secretEncoding: likely base64url (hasBase64Chars=false hasBase64UrlChars=true)
 ```
@@ -255,11 +258,12 @@ But the official `@polymarket/clob-client` **already normalizes** base64url → 
 ```javascript
 // From node_modules/@polymarket/clob-client/dist/signing/hmac.js:8-11
 const sanitizedBase64 = base64
-  .replace(/-/g, "+")  // base64url → base64
-  .replace(/_/g, "/")  // base64url → base64
+  .replace(/-/g, "+") // base64url → base64
+  .replace(/_/g, "/"); // base64url → base64
 ```
 
 So the issue **can't be** secret encoding. It must be:
+
 1. **Path/query param mismatch** (most likely)
 2. **Signature type** (if browser wallet)
 3. **Something else the diagnostic will reveal**
@@ -271,6 +275,7 @@ This diagnostic **eliminates guesswork** and gives us **precise data** to implem
 ## 📬 Contact for Follow-Up
 
 Run the diagnostic and share:
+
 1. Terminal output (including any warnings)
 2. JSON diagnostic (if 401 occurs)
 3. Your environment config (redact secrets):
@@ -283,6 +288,7 @@ I'll provide a targeted fix based on your output.
 ---
 
 **Commits**:
+
 - `57a724e` - feat: Add HMAC diagnostic instrumentation
 - `d03f486` - docs: Add implementation summary
 - `1fe446f` - docs: Add visual flow and quick-start script

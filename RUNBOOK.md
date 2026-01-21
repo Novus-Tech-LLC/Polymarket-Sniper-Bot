@@ -56,6 +56,7 @@ npm run preflight
 ### Mode 2: Gnosis Safe / Browser Wallet
 
 When you've created a Polymarket account via the web browser, a Gnosis Safe proxy wallet is created for you. You need both:
+
 - **Signer EOA**: The private key that controls the Safe (for L1 auth)
 - **Proxy/Safe Address**: The Safe contract address (for L2 trading)
 
@@ -134,11 +135,13 @@ DEBUG_HTTP_HEADERS=true
 ```
 
 This logs:
+
 - Request method and path
 - All header names
 - Redacted header values (first 4 + last 4 characters)
 
 Example output:
+
 ```
 [L1Auth] HTTP Request Debug:
   Method: GET
@@ -169,6 +172,7 @@ CLOB_FORCE_SIGNATURE_TYPE=0  # 0=EOA, 1=Proxy, 2=Gnosis Safe
 **Cause**: L1 authentication headers are missing or incorrect.
 
 **Solutions**:
+
 1. Verify the patch is applied: `npm install` (should show "Applying patches...")
 2. Check that `CLOB_DERIVE_CREDS=true` is set
 3. Enable debug logging: `DEBUG_HTTP_HEADERS=true`
@@ -179,6 +183,7 @@ CLOB_FORCE_SIGNATURE_TYPE=0  # 0=EOA, 1=Proxy, 2=Gnosis Safe
 **Cause**: Wallet has never traded on Polymarket or is not approved.
 
 **Solution**:
+
 1. Visit https://polymarket.com
 2. Connect your wallet
 3. Make at least one small trade (e.g., bet $1 on any market)
@@ -190,6 +195,7 @@ CLOB_FORCE_SIGNATURE_TYPE=0  # 0=EOA, 1=Proxy, 2=Gnosis Safe
 **Cause**: Derived credentials don't match the wallet's signature type.
 
 **Solutions**:
+
 1. Delete `/data/clob-creds.json`
 2. Verify `POLYMARKET_SIGNATURE_TYPE` matches your wallet type:
    - Direct wallet = 0 (or omit)
@@ -201,6 +207,7 @@ CLOB_FORCE_SIGNATURE_TYPE=0  # 0=EOA, 1=Proxy, 2=Gnosis Safe
 **Symptom**: Bot shows different address than expected in `[CLOB][Auth]` logs.
 
 **Solution**: Check these in order:
+
 1. For Gnosis Safe: Set `POLYMARKET_PROXY_ADDRESS` to your Safe address
 2. Verify `PRIVATE_KEY` matches the correct wallet
 3. Check `POLYMARKET_SIGNATURE_TYPE`:
@@ -222,6 +229,7 @@ ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 ```
 
 Expected logs:
+
 ```
 [CLOB][Auth] mode=MODE_B_DERIVED signatureType=0 walletMode="EOA (direct wallet)"
 [L1Auth] addressMode: default (signer)
@@ -241,6 +249,7 @@ ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 ```
 
 Expected logs:
+
 ```
 [CLOB][Auth] mode=MODE_B_DERIVED_MODE_C_PROXY signatureType=2 walletMode="Gnosis Safe"
 [CLOB][Auth] Using Gnosis Safe: signer=0x9B9883... (EOA for signing), maker/funder=0xb40336... (proxy for orders)
@@ -319,16 +328,16 @@ curl -v "https://clob.polymarket.com/auth/derive-api-key" \
 
 ## Environment Variable Reference
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `RPC_URL` | Yes | - | Polygon RPC endpoint |
-| `PRIVATE_KEY` | Yes | - | Wallet private key (64 hex chars, no 0x) |
-| `CLOB_DERIVE_CREDS` | No | `false` | Enable automatic credential derivation |
-| `POLYMARKET_SIGNATURE_TYPE` | No | Auto-detect | 0=EOA, 1=Proxy, 2=Gnosis Safe |
-| `POLYMARKET_PROXY_ADDRESS` | Conditional | - | Required if signature_type=1 or 2 |
-| `DEBUG_HTTP_HEADERS` | No | `false` | Log HTTP headers (redacted) |
-| `CLOB_FORCE_SIGNATURE_TYPE` | No | Auto-detect | Override signature type: 0, 1, or 2 |
-| `ARB_LIVE_TRADING` | Yes | - | Must be `I_UNDERSTAND_THE_RISKS` |
+| Variable                    | Required    | Default     | Description                              |
+| --------------------------- | ----------- | ----------- | ---------------------------------------- |
+| `RPC_URL`                   | Yes         | -           | Polygon RPC endpoint                     |
+| `PRIVATE_KEY`               | Yes         | -           | Wallet private key (64 hex chars, no 0x) |
+| `CLOB_DERIVE_CREDS`         | No          | `false`     | Enable automatic credential derivation   |
+| `POLYMARKET_SIGNATURE_TYPE` | No          | Auto-detect | 0=EOA, 1=Proxy, 2=Gnosis Safe            |
+| `POLYMARKET_PROXY_ADDRESS`  | Conditional | -           | Required if signature_type=1 or 2        |
+| `DEBUG_HTTP_HEADERS`        | No          | `false`     | Log HTTP headers (redacted)              |
+| `CLOB_FORCE_SIGNATURE_TYPE` | No          | Auto-detect | Override signature type: 0, 1, or 2      |
+| `ARB_LIVE_TRADING`          | Yes         | -           | Must be `I_UNDERSTAND_THE_RISKS`         |
 
 ---
 

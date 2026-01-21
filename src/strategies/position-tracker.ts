@@ -1,5 +1,7 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import type { ConsoleLogger } from "../utils/logger.util";
+import { httpGet } from "../utils/fetch-data.util";
+import { POLYMARKET_API } from "../constants/polymarket.constants";
 
 export interface Position {
   marketId: string;
@@ -12,6 +14,9 @@ export interface Position {
   pnlUsd: number;
   redeemable?: boolean; // True if market is resolved/closed
 }
+
+// Price display constants
+const PRICE_TO_CENTS_MULTIPLIER = 100;
 
 export interface PositionTrackerConfig {
   client: ClobClient;
@@ -303,7 +308,8 @@ export class PositionTracker {
                   }
                 } catch (err) {
                   // If all pricing methods fail, skip this position
-                  const errMsg = err instanceof Error ? err.message : String(err);
+                  const errMsg =
+                    err instanceof Error ? err.message : String(err);
                   const reason = `Failed to fetch price data: ${errMsg}`;
                   skippedPositions.push({ reason, data: apiPos });
                   this.logger.debug(`[PositionTracker] ${reason}`);
@@ -450,19 +456,18 @@ export class PositionTracker {
    * Uses mid-price between BUY and SELL sides
    */
   private async fetchPriceFallback(tokenId: string): Promise<number> {
-    const { httpGet } = await import("../utils/fetch-data.util");
-    const { POLYMARKET_API } =
-      await import("../constants/polymarket.constants");
-
     try {
+      // Properly encode tokenId for URL safety
+      const encodedTokenId = encodeURIComponent(tokenId);
+
       // Fetch both BUY and SELL prices to calculate mid-price
       const [buyPriceData, sellPriceData] = await Promise.all([
         httpGet<{ price: string }>(
-          `${POLYMARKET_API.BASE_URL}/price?token_id=${tokenId}&side=BUY`,
+          `${POLYMARKET_API.BASE_URL}/price?token_id=${encodedTokenId}&side=BUY`,
           { timeout: 5000 },
         ),
         httpGet<{ price: string }>(
-          `${POLYMARKET_API.BASE_URL}/price?token_id=${tokenId}&side=SELL`,
+          `${POLYMARKET_API.BASE_URL}/price?token_id=${encodedTokenId}&side=SELL`,
           { timeout: 5000 },
         ),
       ]);
@@ -470,7 +475,13 @@ export class PositionTracker {
       const buyPrice = parseFloat(buyPriceData.price);
       const sellPrice = parseFloat(sellPriceData.price);
 
-      if (!Number.isFinite(buyPrice) || !Number.isFinite(sellPrice)) {
+      // Validate prices are finite and non-negative
+      if (
+        !Number.isFinite(buyPrice) ||
+        !Number.isFinite(sellPrice) ||
+        buyPrice < 0 ||
+        sellPrice < 0
+      ) {
         throw new Error(
           `Invalid price data from fallback API: buy=${buyPrice}, sell=${sellPrice}`,
         );
@@ -479,7 +490,7 @@ export class PositionTracker {
       // Return mid-price as best estimate of current value
       const midPrice = (buyPrice + sellPrice) / 2;
       this.logger.debug(
-        `[PositionTracker] Fallback price for ${tokenId}: ${(midPrice * 100).toFixed(2)}¢ (buy: ${(buyPrice * 100).toFixed(2)}¢, sell: ${(sellPrice * 100).toFixed(2)}¢)`,
+        `[PositionTracker] Fallback price for ${tokenId}: ${(midPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢ (buy: ${(buyPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢, sell: ${(sellPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢)`,
       );
       return midPrice;
     } catch (err) {

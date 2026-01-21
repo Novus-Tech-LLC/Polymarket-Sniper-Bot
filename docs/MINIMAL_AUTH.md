@@ -27,6 +27,7 @@ client.setApiCreds(creds);
 ## What Was Removed
 
 ### ❌ Complex Systems (REMOVED)
+
 - **Fallback ladder** (5 combinations: EOA/Safe/Proxy with different L1 auth)
 - **Exponential backoff** (30s, 60s, 2m, 5m, 10m)
 - **Signature type auto-detection** (trying all 3 types)
@@ -36,6 +37,7 @@ client.setApiCreds(creds);
 - **Rate-limited logging** with deduplication
 
 ### ✅ Simple System (NEW)
+
 - **One call** to `createOrDeriveApiKey()`
 - **One verification** with `/balance-allowance`
 - **One Auth Story** summary per run
@@ -44,11 +46,13 @@ client.setApiCreds(creds);
 ## Files
 
 ### New Files (Minimal Auth)
+
 - `src/clob/minimal-auth.ts` - Core minimal auth implementation (~300 lines)
 - `src/infrastructure/minimal-client-factory.ts` - Minimal client factory
 - `scripts/minimal_auth_probe.ts` - Auth probe using minimal approach
 
 ### Legacy Files (Complex - To Be Deprecated)
+
 - `src/clob/credential-derivation-v2.ts` (1007 lines) - Complex fallback system
 - `src/clob/auth-fallback.ts` (323 lines) - Hard-coded 5-attempt ladder
 - `src/clob/identity-resolver.ts` (332 lines) - Identity resolution logic
@@ -56,6 +60,7 @@ client.setApiCreds(creds);
 - `src/infrastructure/clob-client.factory.ts` - Complex client factory
 
 ### Keep As-Is
+
 - `src/clob/simple-auth.ts` (317 lines) - Middle ground, uses `createOrDeriveApiKey()` but still has caching/verification
 - `src/clob/polymarket-auth.ts` (354 lines) - OOP wrapper, reasonable complexity
 
@@ -123,14 +128,17 @@ LOG_LEVEL=debug npm run auth:probe
 ## Environment Variables
 
 ### Required
+
 - `PRIVATE_KEY` - Your wallet private key
 
 ### Optional
+
 - `POLYMARKET_SIGNATURE_TYPE` - Signature type (0=EOA, 1=Proxy, 2=GnosisSafe)
 - `POLYMARKET_PROXY_ADDRESS` - Proxy/funder address (for Proxy/Safe modes)
 - `LOG_LEVEL` - Logging level (debug, info, error)
 
 ### Legacy (Still Supported in Old Factory)
+
 - `CLOB_DERIVE_CREDS` - Enable credential derivation (default: true)
 - `CLOB_SIGNATURE_TYPE` - Legacy name for POLYMARKET_SIGNATURE_TYPE
 - `CLOB_FUNDER_ADDRESS` - Legacy name for POLYMARKET_PROXY_ADDRESS
@@ -156,6 +164,7 @@ Each authentication run produces a single structured JSON summary:
 ```
 
 ### Fields
+
 - `runId` - Unique identifier for this auth attempt
 - `timestamp` - ISO 8601 timestamp
 - `success` - Overall success (true/false)
@@ -171,12 +180,14 @@ Each authentication run produces a single structured JSON summary:
 ## Migration Path
 
 ### Phase 1: Add Minimal Auth (✅ DONE)
+
 1. Created `minimal-auth.ts` with Python agents approach
 2. Created `minimal-client-factory.ts` for client creation
 3. Created `minimal_auth_probe.ts` for testing
 4. Updated `package.json` with new commands
 
 ### Phase 2: Validate (NEXT)
+
 1. Test minimal auth with different wallet types:
    - EOA wallets
    - Proxy wallets (signatureType=1)
@@ -185,11 +196,13 @@ Each authentication run produces a single structured JSON summary:
 3. Compare with legacy: `npm run auth:probe:simple`
 
 ### Phase 3: Migrate Main App (FUTURE)
+
 1. Update `src/app/main.ts` to use `createMinimalPolymarketClient`
 2. Update other services to use minimal factory
 3. Remove legacy factory dependencies
 
 ### Phase 4: Cleanup (FUTURE)
+
 1. Mark legacy files as deprecated
 2. Add warnings when using complex auth
 3. Eventually remove:
@@ -201,21 +214,25 @@ Each authentication run produces a single structured JSON summary:
 ## Benefits
 
 ### Simplicity
+
 - **~300 lines** vs **~3,500 lines** (90% reduction)
 - **1 function call** vs **5-attempt fallback ladder**
 - **Simple errors** vs **complex diagnostic trees**
 
 ### Reliability
+
 - **Matches working Python implementation**
 - **No custom logic** - lets SDK handle complexity
 - **Predictable behavior** - same flow every time
 
 ### Maintainability
+
 - **Easy to understand** - any developer can read it
 - **Easy to debug** - single Auth Story shows everything
 - **Easy to test** - one code path to test
 
 ### Security
+
 - **No secret leakage** - only shows last 4-6 chars
 - **Minimal logging** - Auth Story contains only essentials
 - **No verbose dumps** - no repeated identity logs
@@ -223,33 +240,36 @@ Each authentication run produces a single structured JSON summary:
 ## Troubleshooting
 
 ### "Wallet must trade on Polymarket first"
+
 - Visit https://polymarket.com
 - Connect your wallet
 - Make at least one trade
 - Retry authentication
 
 ### "Verification failed: 401 Unauthorized"
+
 - Check `POLYMARKET_SIGNATURE_TYPE` is correct
 - For browser wallets, try `POLYMARKET_SIGNATURE_TYPE=2`
 - For Safe/Proxy, also set `POLYMARKET_PROXY_ADDRESS`
 
 ### "Credentials incomplete"
+
 - Wallet may not have traded on Polymarket
 - SDK returned incomplete credentials
 - Check network connectivity
 
 ## Comparison: Complex vs Minimal
 
-| Feature | Complex Auth (OLD) | Minimal Auth (NEW) |
-|---------|-------------------|-------------------|
-| Lines of code | ~3,500 | ~300 |
-| Attempts | 5 (fallback ladder) | 1 |
-| Signature detection | Yes (tries all 3) | No (use configured) |
-| Address swapping | Yes | No |
-| Exponential backoff | Yes | No |
-| Caching | Complex invalidation | Simple (optional) |
-| Logging | Verbose, repeated | Single Auth Story |
-| Matches Python | No | Yes ✅ |
+| Feature             | Complex Auth (OLD)   | Minimal Auth (NEW)  |
+| ------------------- | -------------------- | ------------------- |
+| Lines of code       | ~3,500               | ~300                |
+| Attempts            | 5 (fallback ladder)  | 1                   |
+| Signature detection | Yes (tries all 3)    | No (use configured) |
+| Address swapping    | Yes                  | No                  |
+| Exponential backoff | Yes                  | No                  |
+| Caching             | Complex invalidation | Simple (optional)   |
+| Logging             | Verbose, repeated    | Single Auth Story   |
+| Matches Python      | No                   | Yes ✅              |
 
 ## References
 

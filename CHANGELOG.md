@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLOB Authentication**: Downgraded `@polymarket/clob-client` from `^5.2.1` to `4.22.8` to resolve 401 Unauthorized/Invalid API key errors
   - **Issue**: Recent v5.x versions have known authentication and packaging issues
   - **Solution**: v4.22.8 is the stable, recommended version that resolves auth failures
-  - **References**: 
+  - **References**:
     - [GitHub Issue #175](https://github.com/Polymarket/py-clob-client/issues/175) - Invalid API key errors in v5.x
     - [GitHub Issue #248](https://github.com/Polymarket/clob-client/issues/248) - POLY_ADDRESS header bug in v5.x
     - [Stack Overflow Discussion](https://stackoverflow.com/questions/79845282/typescript-says-module-not-found-for-polymarket-clob-client-even-though-it-is-i) - v5.x packaging issues

@@ -9,6 +9,7 @@ I've implemented **surgical HMAC diagnostic instrumentation** that will show you
 ## Files Created/Modified
 
 ### New Files
+
 1. **`src/utils/hmac-diagnostic-interceptor.ts`**
    - Axios interceptor that captures HTTP requests
    - Compares signed path vs actual path sent
@@ -30,6 +31,7 @@ I've implemented **surgical HMAC diagnostic instrumentation** that will show you
    - Fix strategies based on results
 
 ### Modified Files
+
 1. **`src/infrastructure/clob-client.factory.ts`**
    - Added diagnostic installation at client creation
    - Gated by `ENABLE_HMAC_DIAGNOSTICS` env var
@@ -58,6 +60,7 @@ node scripts/test-hmac-diagnostic.js
 ### Option 2: Enable in your existing bot
 
 Add to your `.env` file:
+
 ```
 ENABLE_HMAC_DIAGNOSTICS=true
 DEBUG_HMAC_SIGNING=true
@@ -70,6 +73,7 @@ Then run your bot normally. The diagnostic will activate on any API call.
 ### 1. Path Mismatch (Most Likely)
 
 If you see this:
+
 ```
 [WARN] [HmacDiag] MISMATCH DETECTED:
   Signed path:  /balance-allowance?asset_type=COLLATERAL&signature_type=0
@@ -90,6 +94,7 @@ export POLYMARKET_PROXY_ADDRESS="your_polymarket_proxy_address"
 ```
 
 You can find your proxy address by:
+
 1. Going to polymarket.com
 2. Connecting your wallet
 3. Looking at your profile - the deposit address is your proxy address
@@ -97,6 +102,7 @@ You can find your proxy address by:
 ### 3. Complete Diagnostic on 401
 
 On a 401 error, you'll get:
+
 ```json
 {
   "signedPath": "/balance-allowance?asset_type=COLLATERAL&signature_type=0",
@@ -118,11 +124,12 @@ On a 401 error, you'll get:
 
 ✅ Secrets are SHA256 hashed before logging  
 ✅ Only first/last 4-8 chars of keys shown  
-✅ Diagnostic mode is opt-in (disabled by default)  
+✅ Diagnostic mode is opt-in (disabled by default)
 
 ## Why This Is The Right Fix
 
 The previous diagnostics showed:
+
 - ✅ Wallet address is correct
 - ✅ Secret is base64-encoded (length=44)
 - ✅ API key and passphrase present

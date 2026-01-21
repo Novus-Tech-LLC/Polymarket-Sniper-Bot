@@ -14,12 +14,14 @@ Polymarket uses **TWO COMPLETELY DIFFERENT** credential systems:
 
 **Required for:** ALL trading activity, including this auto-trading bot
 
-**How to get them:** 
+**How to get them:**
+
 - **ONLY OPTION:** Use `CLOB_DERIVE_CREDS=true` in your `.env` file
 - The bot will automatically create them using L1 authentication (signing with your private key)
 - **There is NO web UI to manually generate these**
 
 **Environment Variables:**
+
 ```bash
 # Don't set these manually - let the bot derive them:
 # POLYMARKET_API_KEY=...
@@ -35,20 +37,23 @@ PRIVATE_KEY=your_wallet_private_key
 
 ### 2. Builder API Credentials (What You Have)
 
-**Purpose:** 
+**Purpose:**
+
 - Order attribution on the Builder Leaderboard
 - Optional gasless approval transactions via relayer
 
 **Required for:**
+
 - ONLY if you're building an app that routes orders for OTHER users
 - Leaderboard tracking and grants competition
 - NOT required for personal auto-trading
 
 **Environment Variables:**
+
 ```bash
 # These are optional - only for leaderboard attribution:
 POLY_BUILDER_API_KEY=your_builder_key
-POLY_BUILDER_API_SECRET=your_builder_secret  
+POLY_BUILDER_API_SECRET=your_builder_secret
 POLY_BUILDER_API_PASSPHRASE=your_builder_passphrase
 ```
 
@@ -74,7 +79,7 @@ PRIVATE_KEY=your_wallet_private_key_here
 
 # You can OPTIONALLY keep Builder keys if you want leaderboard tracking:
 # POLY_BUILDER_API_KEY=your_builder_key
-# POLY_BUILDER_API_SECRET=your_builder_secret  
+# POLY_BUILDER_API_SECRET=your_builder_secret
 # POLY_BUILDER_API_PASSPHRASE=your_builder_passphrase
 ```
 
@@ -114,6 +119,7 @@ When `CLOB_DERIVE_CREDS=true`:
 ## Common Mistakes
 
 ❌ **WRONG:** Using Builder keys as CLOB keys
+
 ```bash
 # This will NOT work:
 POLYMARKET_API_KEY=<builder_api_key>
@@ -122,6 +128,7 @@ POLYMARKET_API_PASSPHRASE=<builder_api_passphrase>
 ```
 
 ✅ **CORRECT:** Let the bot derive CLOB credentials
+
 ```bash
 # This WILL work:
 CLOB_DERIVE_CREDS=true
@@ -146,6 +153,7 @@ A: Your wallet has never traded on Polymarket. Make at least one trade on https:
 
 **Q: How do I know if my credentials are working?**  
 A: Check the logs for:
+
 ```
 [Preflight][Summary] ... auth_ok=true ready_to_trade=true
 ```

@@ -7,6 +7,7 @@
 ## Problem Statement
 
 When using Gnosis Safe (signature_type=2) or Proxy (signature_type=1) wallet modes:
+
 - ✅ Credential derivation succeeds
 - ❌ Credential verification fails with 401 Unauthorized
 
@@ -14,14 +15,13 @@ When using Gnosis Safe (signature_type=2) or Proxy (signature_type=1) wallet mod
 
 **Wallet Address Mismatch Between Derivation and Verification:**
 
-1. **During Derivation**: Uses `effectiveSigner` 
+1. **During Derivation**: Uses `effectiveSigner`
    - Proxy wrapper that returns Safe/proxy address via `getAddress()`
    - POLY_ADDRESS header = Safe/proxy address ✅
 
 2. **During Verification** (BEFORE FIX): Used `params.wallet`
    - Raw wallet that returns EOA address
    - POLY_ADDRESS header = EOA address ❌
-   
 3. **Result**: API rejects verification because addresses don't match
 
 ## Solution Implemented
@@ -29,6 +29,7 @@ When using Gnosis Safe (signature_type=2) or Proxy (signature_type=1) wallet mod
 ### Core Changes
 
 #### 1. Fix in `attemptDerive()` Function (Line 601)
+
 ```typescript
 // BEFORE (BROKEN):
 const isValid = await verifyCredentials({
@@ -46,6 +47,7 @@ const isValid = await verifyCredentials({
 ```
 
 #### 2. Fix in Cached Credential Verification (Lines 770-792)
+
 ```typescript
 // BEFORE (BROKEN):
 const isValid = await verifyCredentials({
@@ -72,11 +74,12 @@ const isValid = await verifyCredentials({
 ### Supporting Improvements
 
 #### 3. Helper Function (Lines 426-437)
+
 ```typescript
 /**
  * Check if a signature type requires an effective signer
  * Safe/Proxy modes need effectiveSigner to return the correct address
- * 
+ *
  * @param signatureType - The signature type to check (0=EOA, 1=Proxy, 2=Safe)
  * @returns true if the signature type requires an effective signer (Proxy or Safe), false otherwise
  */
@@ -89,27 +92,32 @@ function requiresEffectiveSigner(signatureType: number): boolean {
 ```
 
 #### 4. Defensive Logging
+
 - Logs wallet address before verification in `attemptDerive()` (lines 588-599)
 - Logs effectiveSigner details for cached verification (lines 781-790)
 - Helps diagnose future wallet address mismatches
 
 #### 5. Performance Optimization
+
 - Move `await getAddress()` calls outside logging contexts
 - Avoid expensive async operations in log statement construction
 
 ## Behavior by Wallet Mode
 
 ### EOA Mode (signature_type=0)
+
 - `effectiveSigner` = `wallet` (no proxy)
 - No behavior change
 - ✅ Already worked, still works
 
 ### Proxy Mode (signature_type=1)
+
 - `effectiveSigner` = Proxy wrapper returning proxy address
 - Verification now uses proxy address (matches derivation)
 - ✅ **FIXED**: Was broken, now works
 
 ### Safe Mode (signature_type=2)
+
 - `effectiveSigner` = Proxy wrapper returning Safe address
 - Verification now uses Safe address (matches derivation)
 - ✅ **FIXED**: Was broken, now works
@@ -117,17 +125,20 @@ function requiresEffectiveSigner(signatureType: number): boolean {
 ## Impact Analysis
 
 ### What Changed
+
 - Wallet identity used for verification (2 locations)
 - Added helper function for DRY
 - Added defensive logging
 
 ### What Didn't Change
+
 - Credential derivation logic (unchanged)
 - Credential creation API calls (unchanged)
 - EOA mode behavior (unchanged)
 - Safe/Proxy mode derivation (unchanged - already worked)
 
 ### Risk Assessment
+
 - **Risk Level**: Minimal
 - **Scope**: Targeted (only affects verification step)
 - **Safety**: High (no changes to credential creation or derivation)
@@ -143,6 +154,7 @@ function requiresEffectiveSigner(signatureType: number): boolean {
 ## Testing Recommendations
 
 ### Manual Testing
+
 1. Test with EOA wallet (signature_type=0) - should work as before
 2. Test with Proxy wallet (signature_type=1) - verification should now succeed ✅
 3. Test with Safe wallet (signature_type=2) - verification should now succeed ✅
@@ -150,6 +162,7 @@ function requiresEffectiveSigner(signatureType: number): boolean {
 5. Verify logs show correct wallet addresses
 
 ### Verification Points
+
 - [ ] Credential derivation succeeds for all modes
 - [ ] Credential verification succeeds for all modes
 - [ ] Cached credentials work for all modes

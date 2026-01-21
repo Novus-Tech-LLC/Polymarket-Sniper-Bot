@@ -10,7 +10,7 @@ The trading bot initially reported `READY_TO_TRADE=true` with both auth and appr
 
 When `MODE=both` is set, the application starts both the ARB (arbitrage) engine and the MEMPOOL monitor. This caused `ensureTradingReady()` to be called twice:
 
-1. **First call** (arbitrage/runtime.ts:71): ✅ PASSES 
+1. **First call** (arbitrage/runtime.ts:71): ✅ PASSES
 2. **Second call** (app/main.ts:77): ❌ FAILS
 
 The second call would fail because the wallet lacked a provider, causing approval checks to fail.
@@ -22,15 +22,17 @@ The second call would fail because the wallet lacked a provider, causing approva
 The issue was in how the wallet was being initialized:
 
 **Before:**
+
 ```typescript
 // app/main.ts (WRONG)
 const clobClient = await auth.getClobClient();
 const { Wallet } = await import("ethers");
-const wallet = new Wallet(env.privateKey);  // ❌ No provider!
+const wallet = new Wallet(env.privateKey); // ❌ No provider!
 const client = Object.assign(clobClient, { wallet });
 ```
 
 This created a wallet **without** an Ethereum provider, which is required for:
+
 - Balance queries (`getPolBalance`, `getUsdBalanceApprox`)
 - Approval checks (`ensureApprovals`)
 - On-chain transactions
@@ -40,9 +42,10 @@ This created a wallet **without** an Ethereum provider, which is required for:
 The `PolymarketAuth` class was creating wallets without providers:
 
 **Before:**
+
 ```typescript
 // polymarket-auth.ts (INCOMPLETE)
-this.signer = new Wallet(privateKey);  // ❌ No provider!
+this.signer = new Wallet(privateKey); // ❌ No provider!
 ```
 
 ## Solution: Single Preflight Architecture
@@ -55,7 +58,7 @@ Instead of running preflight twice with caching workarounds, we now run it **ONC
 MODE=both startup
   │
   ├─ [MAIN.TS] Run authentication ONCE
-  ├─ [MAIN.TS] Create client with provider ONCE  
+  ├─ [MAIN.TS] Create client with provider ONCE
   ├─ [MAIN.TS] Run ensureTradingReady() ONCE
   │
   ├─ Pass authenticated client to ARB engine ✅
@@ -72,21 +75,24 @@ MODE=both startup
 **File:** `src/clob/polymarket-auth.ts`
 
 **Changes:**
+
 - Added optional `rpcUrl` parameter to `PolymarketCredentials` interface
 - Updated constructor to create wallet with `JsonRpcProvider` when RPC URL is provided
 - Updated `getClobClient()` to return client with attached wallet
 - Updated `createPolymarketAuthFromEnv()` to read `RPC_URL` from environment
 
 **After:**
+
 ```typescript
 // polymarket-auth.ts (COMPLETE)
 if (credentials.rpcUrl) {
   const provider = new JsonRpcProvider(credentials.rpcUrl);
-  this.signer = new Wallet(privateKey, provider);  // ✅ With provider!
+  this.signer = new Wallet(privateKey, provider); // ✅ With provider!
 }
 ```
 
 **Benefits:**
+
 - Wallet now has proper provider for blockchain interactions
 - Balance queries work correctly
 - Approval checks function properly
@@ -96,16 +102,19 @@ if (credentials.rpcUrl) {
 **Files:** `src/app/main.ts`, `src/tools/preflight.ts`
 
 **Changes:**
+
 - Removed manual wallet creation: `new Wallet(env.privateKey)`
 - Use wallet from CLOB client directly: `await auth.getClobClient()`
 
 **After:**
+
 ```typescript
 // app/main.ts (CORRECT)
-const client = await auth.getClobClient();  // ✅ Already has wallet with provider
+const client = await auth.getClobClient(); // ✅ Already has wallet with provider
 ```
 
 **Benefits:**
+
 - No more wallet without provider
 - Consistent wallet usage across codebase
 - Eliminates provider-related errors
@@ -117,6 +126,7 @@ const client = await auth.getClobClient();  // ✅ Already has wallet with provi
 **Changes:**
 
 **main.ts** - Runs preflight once at top level:
+
 ```typescript
 // Run authentication and preflight ONCE before starting any engines
 const auth = createPolymarketAuthFromEnv(logger);
@@ -134,6 +144,7 @@ if (mode === "mempool" || mode === "both") {
 ```
 
 **runtime.ts** - Accepts pre-authenticated client:
+
 ```typescript
 export async function startArbitrageEngine(
   overrides: Record<string, string | undefined> = {},
@@ -154,6 +165,7 @@ export async function startArbitrageEngine(
 ```
 
 **Benefits:**
+
 - Preflight runs ONCE (not twice) in MODE=both
 - Simpler architecture - single source of truth
 - No caching workarounds needed
@@ -165,12 +177,14 @@ export async function startArbitrageEngine(
 **File:** `src/polymarket/preflight.ts`
 
 **Changes:**
+
 - Removed global `preflightCache` variable
 - Removed cache TTL constant
 - Removed cache hit/miss logic
 - Simplified function to just run preflight
 
 **Before:**
+
 ```typescript
 // Check cache, run preflight, store result
 if (cache && cache.signerAddress === signer && ...) {
@@ -182,6 +196,7 @@ return result;
 ```
 
 **After:**
+
 ```typescript
 // Simply run preflight once
 export const ensureTradingReady = async (params) => {
@@ -191,6 +206,7 @@ export const ensureTradingReady = async (params) => {
 ```
 
 **Benefits:**
+
 - Cleaner code - no cache management
 - No stale cache issues
 - Single execution model
@@ -238,6 +254,7 @@ MODE=both startup
 ## Verification
 
 ### Build Status
+
 ```bash
 npm run build
 # ✅ Builds successfully
@@ -246,6 +263,7 @@ npm run build
 ### Expected Behavior
 
 When running with `MODE=both`:
+
 1. Main.ts authenticates and runs preflight ONCE
 2. ARB engine receives pre-authenticated client
 3. ARB engine logs: "⚡ Using pre-authenticated client from main (preflight already completed)"
@@ -273,17 +291,20 @@ When running with `MODE=both`:
 ## Modes of Operation
 
 ### MODE=arb (ARB only)
+
 - ARB engine creates its own client
 - ARB engine runs its own preflight
 - No changes to existing behavior
 
 ### MODE=mempool (MEMPOOL only)
+
 - Main creates client once
 - Main runs preflight once
 - MEMPOOL uses that client
 - No changes to existing behavior
 
 ### MODE=both (ARB + MEMPOOL)
+
 - ✅ Main creates client ONCE
 - ✅ Main runs preflight ONCE
 - ✅ ARB receives pre-authenticated client
@@ -316,6 +337,7 @@ If not set, the wallet will be created without a provider and a warning will be 
 ## Impact
 
 ### Positive
+
 - ✅ Trading no longer disabled after successful startup
 - ✅ MODE=both now works correctly
 - ✅ No duplicate preflight runs - cleaner logs
@@ -325,6 +347,7 @@ If not set, the wallet will be created without a provider and a warning will be 
 - ✅ Single source of truth
 
 ### Potential Issues
+
 - ⚠️ Requires RPC_URL environment variable
 - ⚠️ Changes ARB engine signature (backwards compatible via optional params)
 
