@@ -32,8 +32,11 @@ export class PositionTracker {
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
   
-  // Timeout for Gamma API market outcome requests (in milliseconds)
-  private static readonly MARKET_OUTCOME_TIMEOUT_MS = 5000;
+  // Cache for market outcomes to avoid redundant API calls within a refresh cycle
+  private marketOutcomeCache: Map<string, "YES" | "NO" | null> = new Map();
+  
+  // Timeout for API requests (in milliseconds) - unified across all endpoints
+  private static readonly API_TIMEOUT_MS = 10000;
 
   constructor(config: PositionTrackerConfig) {
     this.client = config.client;
@@ -81,6 +84,9 @@ export class PositionTracker {
     this.isRefreshing = true;
 
     try {
+      // Clear market outcome cache at the start of each refresh cycle
+      this.marketOutcomeCache.clear();
+      
       // Get current positions from Data API and enrich with current market prices
       this.logger.debug("[PositionTracker] Refreshing positions");
 
@@ -198,7 +204,7 @@ export class PositionTracker {
 
       const apiPositions = await httpGet<ApiPosition[]>(
         POLYMARKET_API.POSITIONS_ENDPOINT(walletAddress),
-        { timeout: 10000 },
+        { timeout: PositionTracker.API_TIMEOUT_MS },
       );
 
       if (!apiPositions || apiPositions.length === 0) {
@@ -250,17 +256,16 @@ export class PositionTracker {
               // Determine position side early (needed for both redeemable and active positions)
               const sideValue = apiPos.outcome ?? apiPos.side;
               const sideUpperCase = sideValue?.toUpperCase();
-              let side: "YES" | "NO";
               
-              if (sideUpperCase === "YES" || sideUpperCase === "NO") {
-                side = sideUpperCase;
-              } else {
-                // Log warning when side is unknown - this could affect P&L accuracy
-                this.logger.warn(
-                  `[PositionTracker] Unknown side/outcome value "${sideValue}" for tokenId ${tokenId}, defaulting to YES`,
-                );
-                side = "YES";
+              if (sideUpperCase !== "YES" && sideUpperCase !== "NO") {
+                // Unknown side/outcome - skip this position to avoid incorrect P&L calculation
+                const reason = `Unknown side/outcome value "${sideValue}" for tokenId ${tokenId}`;
+                skippedPositions.push({ reason, data: apiPos });
+                this.logger.warn(`[PositionTracker] ${reason}`);
+                return null;
               }
+              
+              const side: "YES" | "NO" = sideUpperCase;
 
               // Skip orderbook fetch for resolved/closed markets (no orderbook available)
               let currentPrice: number;
@@ -268,7 +273,13 @@ export class PositionTracker {
 
               if (isRedeemable) {
                 // Market is resolved - fetch the actual market outcome to determine settlement price
-                const winningOutcome = await this.fetchMarketOutcome(marketId);
+                // Use cache to avoid redundant API calls for the same market
+                let winningOutcome = this.marketOutcomeCache.get(marketId);
+                
+                if (winningOutcome === undefined) {
+                  winningOutcome = await this.fetchMarketOutcome(marketId);
+                  this.marketOutcomeCache.set(marketId, winningOutcome);
+                }
 
                 if (!winningOutcome) {
                   // Cannot determine outcome - skip this position
@@ -436,8 +447,9 @@ export class PositionTracker {
   }
 
   /**
-   * Fetch market resolution/outcome data from Gamma API
-   * Returns the winning outcome side ("YES" or "NO") or null if not resolved
+   * Fetch market resolution/outcome data from Gamma API.
+   * Returns the winning outcome side ("YES" or "NO") or null if the outcome
+   * cannot be determined (e.g. market unresolved, API/network error, or malformed response).
    */
   private async fetchMarketOutcome(
     marketId: string,
@@ -468,7 +480,7 @@ export class PositionTracker {
       );
 
       const market = await httpGet<GammaMarketResponse>(url, {
-        timeout: PositionTracker.MARKET_OUTCOME_TIMEOUT_MS,
+        timeout: PositionTracker.API_TIMEOUT_MS,
       });
 
       if (!market) {
@@ -518,10 +530,51 @@ export class PositionTracker {
       }
 
       return null;
-    } catch (err) {
+    } catch (err: unknown) {
+      const anyErr = err as any;
+      const message = err instanceof Error ? err.message : String(err);
+      const status: number | undefined =
+        typeof anyErr?.status === "number"
+          ? anyErr.status
+          : typeof anyErr?.statusCode === "number"
+            ? anyErr.statusCode
+            : typeof anyErr?.response?.status === "number"
+              ? anyErr.response.status
+              : undefined;
+      const code: string | undefined =
+        typeof anyErr?.code === "string" ? anyErr.code : undefined;
+
+      if (status === 404) {
+        this.logger.warn(
+          `[PositionTracker] Market ${marketId} not found (404) while fetching outcome: ${message}`,
+        );
+      } else if (status !== undefined && status >= 400 && status < 500) {
+        this.logger.warn(
+          `[PositionTracker] Client error (${status}) fetching market outcome for ${marketId}: ${message}`,
+        );
+      } else if (status !== undefined && status >= 500) {
+        this.logger.error(
+          `[PositionTracker] Server error (${status}) fetching market outcome for ${marketId}: ${message}`,
+        );
+      } else if (
+        code === "ETIMEDOUT" ||
+        code === "ECONNREFUSED" ||
+        code === "ECONNRESET"
+      ) {
+        this.logger.error(
+          `[PositionTracker] Network error (${code}) fetching market outcome for ${marketId}: ${message}`,
+        );
+      } else {
+        this.logger.error(
+          `[PositionTracker] Unexpected error fetching market outcome for ${marketId}: ${message}`,
+        );
+      }
+
+      // Log raw error at debug level for troubleshooting
       this.logger.debug(
-        `[PositionTracker] Failed to fetch market outcome for ${marketId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[PositionTracker] Raw error while fetching market outcome for ${marketId}: ${JSON.stringify(anyErr)}`,
       );
+
       return null;
     }
   }

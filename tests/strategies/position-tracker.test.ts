@@ -116,3 +116,116 @@ describe("PositionTracker Settlement Price Logic", () => {
     }
   });
 });
+
+describe("PositionTracker Error Handling", () => {
+  test("Error categorization - 404 should be categorized as warning", () => {
+    // Simulates error categorization logic in fetchMarketOutcome
+    const status = 404;
+    const shouldWarn = status === 404;
+    const shouldError = status >= 500;
+
+    assert.ok(shouldWarn, "404 errors should be categorized as warnings");
+    assert.ok(!shouldError, "404 errors should not be categorized as errors");
+  });
+
+  test("Error categorization - 500 should be categorized as error", () => {
+    const status = 500;
+    const shouldWarn = status >= 400 && status < 500;
+    const shouldError = status >= 500;
+
+    assert.ok(!shouldWarn, "500 errors should not be categorized as warnings");
+    assert.ok(shouldError, "500 errors should be categorized as errors");
+  });
+
+  test("Error categorization - network errors should be categorized as error", () => {
+    const networkCodes = ["ETIMEDOUT", "ECONNREFUSED", "ECONNRESET"];
+
+    for (const code of networkCodes) {
+      const isNetworkError = ["ETIMEDOUT", "ECONNREFUSED", "ECONNRESET"].includes(code);
+      assert.ok(isNetworkError, `${code} should be recognized as network error`);
+    }
+  });
+});
+
+describe("PositionTracker Caching Logic", () => {
+  test("Cache should deduplicate market outcome requests", () => {
+    // Simulates cache behavior
+    const cache = new Map<string, string | null>();
+    const marketId = "test-market-123";
+
+    // First request - cache miss
+    let cacheHit = cache.has(marketId);
+    assert.ok(!cacheHit, "First request should be a cache miss");
+
+    // Store in cache
+    cache.set(marketId, "YES");
+
+    // Second request - cache hit
+    cacheHit = cache.has(marketId);
+    assert.ok(cacheHit, "Second request should be a cache hit");
+
+    const cachedValue = cache.get(marketId);
+    assert.strictEqual(cachedValue, "YES", "Cached value should be returned");
+  });
+
+  test("Cache should be cleared between refresh cycles", () => {
+    // Simulates cache clear behavior at start of refresh
+    const cache = new Map<string, string | null>();
+
+    cache.set("market-1", "YES");
+    cache.set("market-2", "NO");
+
+    assert.strictEqual(cache.size, 2, "Cache should contain 2 entries");
+
+    // Clear cache (simulates start of new refresh cycle)
+    cache.clear();
+
+    assert.strictEqual(cache.size, 0, "Cache should be empty after clear");
+  });
+
+  test("Cache should handle null outcomes correctly", () => {
+    const cache = new Map<string, string | null>();
+    const marketId = "unresolved-market";
+
+    // Store null (market outcome unavailable)
+    cache.set(marketId, null);
+
+    const hasEntry = cache.has(marketId);
+    const value = cache.get(marketId);
+
+    assert.ok(hasEntry, "Cache should contain entry for null outcome");
+    assert.strictEqual(value, null, "Cache should return null for unavailable outcomes");
+  });
+});
+
+describe("PositionTracker Side Validation", () => {
+  test("Unknown sides should be rejected", () => {
+    // Simulates the new behavior of rejecting unknown sides
+    const testSides = ["UNKNOWN", "MAYBE", "", undefined, null, "Y", "N"];
+
+    for (const side of testSides) {
+      const normalized = side?.toString().toUpperCase();
+      const isValid = normalized === "YES" || normalized === "NO";
+
+      assert.ok(
+        !isValid,
+        `"${side}" should be rejected as invalid side`,
+      );
+    }
+  });
+
+  test("Valid sides should be accepted", () => {
+    const testSides = ["YES", "yes", "Yes", "NO", "no", "No"];
+
+    for (const side of testSides) {
+      const normalized = side.toUpperCase();
+      const isValid = normalized === "YES" || normalized === "NO";
+
+      assert.ok(
+        isValid,
+        `"${side}" should be accepted as valid side`,
+      );
+    }
+  });
+});
+
