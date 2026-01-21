@@ -408,12 +408,6 @@ export const checkFundsAndAllowance = async (
     (params.client as { onchainApprovalsVerified?: boolean })
       .onchainApprovalsVerified ?? false;
 
-  if (trustOnchainApprovals && onchainApprovalsVerified) {
-    params.logger.info(
-      `[CLOB][TrustMode] Bypassing CLOB allowance check - trusting on-chain approvals verified in preflight. signer=${signerAddress} collateral=${collateralLabel}`,
-    );
-  }
-
   try {
     let refreshed = false;
     let collateralSnapshot = await fetchBalanceAllowance(
@@ -469,37 +463,44 @@ export const checkFundsAndAllowance = async (
         ? conditionalSnapshot
         : null;
 
-    // In trust mode, only check balance - ignore CLOB's broken allowance check
-    const shouldCheckAllowance = !(trustOnchainApprovals && onchainApprovalsVerified);
-    
     if (insufficientSnapshot) {
-      // In trust mode, only check balance - ignore allowance
-      const balanceSufficient = insufficientSnapshot.balanceUsd >= requiredUsd;
-      const allowanceSufficient = insufficientSnapshot.allowanceUsd >= requiredUsd;
+      // Always refresh cache on first insufficient check to ensure we have fresh data
+      await refreshAndRetry();
       
-      // If in trust mode and balance is sufficient, ignore allowance issue
-      if (!shouldCheckAllowance && balanceSufficient && !allowanceSufficient) {
-        params.logger.info(
-          `[CLOB][TrustMode] Proceeding with trade despite CLOB allowance=0 (known bug). Balance sufficient and on-chain approvals verified. need=${formatUsd(requiredUsd)} have=${formatUsd(insufficientSnapshot.balanceUsd)} allowance=${formatUsd(insufficientSnapshot.allowanceUsd)}`,
-        );
-        // In trust mode, skip the error return and continue with ERC1155 approval checks
-        // The code will fall through to the approvedForAll check below (line 607)
-      } else {
-        // Need to refresh if this is the first check
-        await refreshAndRetry();
+      // Re-check after refresh
+      const refreshedInsufficient = !isSnapshotSufficient(
+        collateralSnapshot,
+        requiredUsd,
+      )
+        ? collateralSnapshot
+        : conditionalSnapshot &&
+            !isSnapshotSufficient(conditionalSnapshot, requiredUsd)
+          ? conditionalSnapshot
+          : null;
+      
+      if (refreshedInsufficient) {
+        const balanceSufficient = refreshedInsufficient.balanceUsd >= requiredUsd;
+        const allowanceSufficient = refreshedInsufficient.allowanceUsd >= requiredUsd;
         
-        // Re-check after refresh
-        const refreshedInsufficient = !isSnapshotSufficient(
-          collateralSnapshot,
-          requiredUsd,
-        )
-          ? collateralSnapshot
-          : conditionalSnapshot &&
-              !isSnapshotSufficient(conditionalSnapshot, requiredUsd)
-            ? conditionalSnapshot
-            : null;
+        // Trust mode bypass: Only applies to COLLATERAL tokens (USDC) when:
+        // 1. Trust mode is enabled (TRUST_ONCHAIN_APPROVALS=true)
+        // 2. Preflight verified on-chain approvals
+        // 3. Balance is sufficient (only allowance is the issue)
+        // 4. This is a collateral token (not conditional)
+        // This bypasses CLOB's broken allowance=0 response for USDC approvals only.
+        const canBypassAllowanceCheck =
+          trustOnchainApprovals &&
+          onchainApprovalsVerified &&
+          balanceSufficient &&
+          !allowanceSufficient &&
+          refreshedInsufficient.assetType === AssetType.COLLATERAL;
         
-        if (refreshedInsufficient) {
+        if (canBypassAllowanceCheck) {
+          params.logger.info(
+            `[CLOB][TrustMode] Bypassing CLOB allowance check for COLLATERAL (known bug). Balance sufficient and on-chain approvals verified. need=${formatUsd(requiredUsd)} have=${formatUsd(refreshedInsufficient.balanceUsd)} allowance=${formatUsd(refreshedInsufficient.allowanceUsd)}`,
+          );
+          // Skip the error return and continue with ERC1155 approval checks below
+        } else {
           const reason = "INSUFFICIENT_BALANCE_OR_ALLOWANCE";
           const assetLabel = formatAssetLabel(refreshedInsufficient);
           params.logger.warn(
