@@ -32,7 +32,7 @@ Successfully improved CLOB preflight UNKNOWN_ERROR logging with minimal, surgica
 ### After (Clear)
 ```
 [WARN] [CLOB][Preflight] FAIL stage=auth status=none code=none message=unknown_error
-[WARN] [CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed. Details: status=undefined severity=NON_FATAL issue=UNKNOWN responseType=object keys=data,allowance
+[WARN] [CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed. Details: status=undefined severity=NON_FATAL issue=UNKNOWN responseType=object hasData=true hasError=false keys=data,allowance
 [WARN] [CLOB] Auth preflight NON_FATAL issue detected - credentials are valid, trading continues normally. status=undefined
 ```
 
@@ -92,7 +92,7 @@ errorTextShort:
 
 - ✅ Extracted repeated type checks into `isObject` variable
 - ✅ Added explicit null check (`response !== null`) since `typeof null === "object"` in JS
-- ✅ Combined multiple log calls to reduce noise
+- ✅ Enhanced log message with additional diagnostic information (hasData, hasError)
 - ✅ Added comprehensive inline comments explaining the UNKNOWN_ERROR case
 
 ---

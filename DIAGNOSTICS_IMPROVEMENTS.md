@@ -41,12 +41,11 @@ const responseKeys = response && typeof response === "object"
   ? Object.keys(response).join(",")
   : "none";
 
-// Improved log messages
+// Improved log message (single combined statement)
 params.logger.warn(
-  `[CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed`,
-);
-params.logger.warn(
-  `[CLOB][Preflight] Details: status=${status ?? "undefined"} severity=${severity} issue=${issue} responseType=${responseType} keys=${responseKeys}`,
+  `[CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed. ` +
+    `Details: status=${status ?? "undefined"} severity=${severity} issue=${issue} ` +
+    `responseType=${responseType} hasData=${hasData} hasError=${hasError} keys=${responseKeys}`,
 );
 ```
 
@@ -104,8 +103,7 @@ errorTextShort:
 ### After
 ```
 [WARN] [CLOB][Preflight] FAIL stage=auth status=none code=none message=unknown_error
-[WARN] [CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed
-[WARN] [CLOB][Preflight] Details: status=undefined severity=NON_FATAL issue=UNKNOWN responseType=object keys=data,allowance
+[WARN] [CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed. Details: status=undefined severity=NON_FATAL issue=UNKNOWN responseType=object hasData=true hasError=false keys=data,allowance
 [WARN] [CLOB] Auth preflight NON_FATAL issue detected - credentials are valid, trading continues normally. status=undefined
 ```
 

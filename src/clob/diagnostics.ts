@@ -1049,7 +1049,7 @@ export const runClobAuthPreflight = async (params: {
       });
     } else {
       params.logger.warn(
-        `[CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed. Details: status=${status ?? "undefined"} severity=${severity} issue=${issue} responseType=${responseType} keys=${responseKeys}`,
+        `[CLOB][Preflight] BENIGN: response without HTTP status - credentials OK, trading allowed. Details: status=${status ?? "undefined"} severity=${severity} issue=${issue} responseType=${responseType} hasData=${hasData} hasError=${hasError} keys=${responseKeys}`,
       );
     }
 
