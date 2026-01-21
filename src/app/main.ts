@@ -147,7 +147,7 @@ async function main(): Promise<void> {
       logger.info(
         "=====================================================================",
       );
-      logger.info("✅ MEMPOOL TRADING ENABLED - Bot will submit orders");
+      logger.info("✅ MEMPOOL MONITOR TRADING ENABLED - Bot will submit orders");
       logger.info(
         "=====================================================================",
       );
