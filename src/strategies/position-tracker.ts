@@ -84,6 +84,9 @@ export class PositionTracker {
     this.isRefreshing = true;
 
     try {
+      // Clear market outcome cache at the start of each refresh cycle
+      this.marketOutcomeCache.clear();
+      
       // Get current positions from Data API and enrich with current market prices
       this.logger.debug("[PositionTracker] Refreshing positions");
 
@@ -201,7 +204,7 @@ export class PositionTracker {
 
       const apiPositions = await httpGet<ApiPosition[]>(
         POLYMARKET_API.POSITIONS_ENDPOINT(walletAddress),
-        { timeout: 10000 },
+        { timeout: PositionTracker.API_TIMEOUT_MS },
       );
 
       if (!apiPositions || apiPositions.length === 0) {
@@ -250,18 +253,48 @@ export class PositionTracker {
                 return null;
               }
 
+              // Determine position side early (needed for both redeemable and active positions)
+              const sideValue = apiPos.outcome ?? apiPos.side;
+              const sideUpperCase = sideValue?.toUpperCase();
+              
+              if (sideUpperCase !== "YES" && sideUpperCase !== "NO") {
+                // Unknown side/outcome - skip this position to avoid incorrect P&L calculation
+                const reason = `Unknown side/outcome value "${sideValue}" for tokenId ${tokenId}`;
+                skippedPositions.push({ reason, data: apiPos });
+                this.logger.warn(`[PositionTracker] ${reason}`);
+                return null;
+              }
+              
+              const side: "YES" | "NO" = sideUpperCase;
+
               // Skip orderbook fetch for resolved/closed markets (no orderbook available)
               let currentPrice: number;
               const isRedeemable = apiPos.redeemable === true;
 
               if (isRedeemable) {
-                // Market is resolved - we cannot reliably determine the settlement price
-                // without fetching the actual market resolution outcome.
-                // Skipping this position as we cannot determine if it won (1.0) or lost (0.0).
-                const reason = `Position is redeemable (market resolved) - cannot determine settlement price for tokenId: ${tokenId}`;
-                skippedPositions.push({ reason, data: apiPos });
-                this.logger.debug(`[PositionTracker] ${reason}`);
-                return null;
+                // Market is resolved - fetch the actual market outcome to determine settlement price
+                // Use cache to avoid redundant API calls for the same market
+                let winningOutcome = this.marketOutcomeCache.get(marketId);
+                
+                if (winningOutcome === undefined) {
+                  winningOutcome = await this.fetchMarketOutcome(marketId);
+                  this.marketOutcomeCache.set(marketId, winningOutcome);
+                }
+
+                if (!winningOutcome) {
+                  // Cannot determine outcome - skip this position
+                  const reason = `Position is redeemable (market resolved) - cannot determine settlement price for tokenId: ${tokenId} (market outcome unavailable)`;
+                  skippedPositions.push({ reason, data: apiPos });
+                  this.logger.debug(`[PositionTracker] ${reason}`);
+                  return null;
+                }
+
+                // Calculate settlement price based on whether position won or lost
+                currentPrice = side === winningOutcome ? 1.0 : 0.0;
+
+                this.logger.debug(
+                  `[PositionTracker] Resolved position: tokenId=${tokenId}, side=${side}, winner=${winningOutcome}, settlementPrice=${currentPrice}`,
+                );
               } else {
                 // Active market - fetch current orderbook with fallback to price API
                 try {
@@ -320,14 +353,6 @@ export class PositionTracker {
               // Calculate P&L
               const pnlUsd = (currentPrice - entryPrice) * size;
               const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
-
-              // Try new API field first, then fall back to legacy field
-              const sideValue = apiPos.outcome ?? apiPos.side;
-              const side =
-                sideValue?.toUpperCase() === "YES" ||
-                sideValue?.toUpperCase() === "NO"
-                  ? (sideValue.toUpperCase() as "YES" | "NO")
-                  : "YES"; // Default to YES if unknown
 
               return {
                 marketId,
@@ -441,6 +466,151 @@ export class PositionTracker {
     }
 
     return 0;
+  }
+
+  /**
+   * Fetch market resolution/outcome data from Gamma API.
+   * Returns the winning outcome side ("YES" or "NO") or null if the outcome
+   * cannot be determined (e.g. market unresolved, API/network error, or malformed response).
+   */
+  private async fetchMarketOutcome(
+    marketId: string,
+  ): Promise<"YES" | "NO" | null> {
+    try {
+      const { httpGet } = await import("../utils/fetch-data.util");
+      const { POLYMARKET_API } =
+        await import("../constants/polymarket.constants");
+
+      // Fetch market details from Gamma API
+      interface GammaMarketResponse {
+        tokens?: Array<{
+          outcome?: string;
+          winner?: boolean;
+        }>;
+        resolvedOutcome?: string;
+        resolved_outcome?: string;
+        winningOutcome?: string;
+        winning_outcome?: string;
+        closed?: boolean;
+        resolved?: boolean;
+      }
+
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets/${marketId}`;
+
+      this.logger.debug(
+        `[PositionTracker] Fetching market outcome from ${url}`,
+      );
+
+      const market = await httpGet<GammaMarketResponse>(url, {
+        timeout: PositionTracker.API_TIMEOUT_MS,
+      });
+
+      if (!market) {
+        this.logger.debug(
+          `[PositionTracker] No market data returned for ${marketId}`,
+        );
+        return null;
+      }
+
+      // Check for explicit winning outcome field
+      const winningOutcome =
+        market.resolvedOutcome ??
+        market.resolved_outcome ??
+        market.winningOutcome ??
+        market.winning_outcome;
+
+      if (winningOutcome) {
+        const normalized = winningOutcome.trim().toUpperCase();
+        if (normalized === "YES" || normalized === "NO") {
+          this.logger.debug(
+            `[PositionTracker] Market ${marketId} resolved with outcome: ${normalized}`,
+          );
+          return normalized as "YES" | "NO";
+        }
+      }
+
+      // Check tokens for winner flag
+      if (market.tokens && Array.isArray(market.tokens)) {
+        for (const token of market.tokens) {
+          if (token.winner === true && token.outcome) {
+            const normalized = token.outcome.trim().toUpperCase();
+            if (normalized === "YES" || normalized === "NO") {
+              this.logger.debug(
+                `[PositionTracker] Market ${marketId} resolved with winning token: ${normalized}`,
+              );
+              return normalized as "YES" | "NO";
+            }
+          }
+        }
+      }
+
+      // If market is closed/resolved but no winner info, cannot determine
+      if (market.closed || market.resolved) {
+        this.logger.debug(
+          `[PositionTracker] Market ${marketId} is closed/resolved but winning outcome not available`,
+        );
+      }
+
+      return null;
+    } catch (err: unknown) {
+      const anyErr = err as any;
+      const message = err instanceof Error ? err.message : String(err);
+      const status: number | undefined =
+        typeof anyErr?.status === "number"
+          ? anyErr.status
+          : typeof anyErr?.statusCode === "number"
+            ? anyErr.statusCode
+            : typeof anyErr?.response?.status === "number"
+              ? anyErr.response.status
+              : undefined;
+      const code: string | undefined =
+        typeof anyErr?.code === "string" ? anyErr.code : undefined;
+
+      if (status === 404) {
+        this.logger.warn(
+          `[PositionTracker] Market ${marketId} not found (404) while fetching outcome: ${message}`,
+        );
+      } else if (status !== undefined && status >= 400 && status < 500) {
+        this.logger.warn(
+          `[PositionTracker] Client error (${status}) fetching market outcome for ${marketId}: ${message}`,
+        );
+      } else if (status !== undefined && status >= 500) {
+        this.logger.error(
+          `[PositionTracker] Server error (${status}) fetching market outcome for ${marketId}: ${message}`,
+        );
+      } else if (
+        code === "ETIMEDOUT" ||
+        code === "ECONNREFUSED" ||
+        code === "ECONNRESET"
+      ) {
+        this.logger.error(
+          `[PositionTracker] Network error (${code}) fetching market outcome for ${marketId}: ${message}`,
+        );
+      } else {
+        this.logger.error(
+          `[PositionTracker] Unexpected error fetching market outcome for ${marketId}: ${message}`,
+        );
+      }
+
+      // Log raw error at debug level for troubleshooting (limited depth to avoid performance issues)
+      if (anyErr && typeof anyErr === "object") {
+        const errorSummary = {
+          message: anyErr.message || message,
+          code: anyErr.code,
+          status: anyErr.status || anyErr.statusCode || anyErr.response?.status,
+          name: anyErr.name,
+        };
+        this.logger.debug(
+          `[PositionTracker] Raw error while fetching market outcome for ${marketId}: ${JSON.stringify(errorSummary)}`,
+        );
+      } else {
+        this.logger.debug(
+          `[PositionTracker] Raw error while fetching market outcome for ${marketId}: ${String(anyErr)}`,
+        );
+      }
+
+      return null;
+    }
   }
 
   /**
