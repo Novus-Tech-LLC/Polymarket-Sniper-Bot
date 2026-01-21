@@ -31,6 +31,7 @@ export class PositionTracker {
   private refreshIntervalMs: number;
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
+  private missingOrderbooks = new Set<string>(); // Cache tokenIds with no orderbook to avoid repeated API calls
 
   constructor(config: PositionTrackerConfig) {
     this.client = config.client;
@@ -257,35 +258,56 @@ export class PositionTracker {
                 this.logger.debug(`[PositionTracker] ${reason}`);
                 return null;
               } else {
-                // Active market - fetch current orderbook
+                // Active market - fetch current orderbook with fallback to price API
                 try {
-                  const orderbook = await this.client.getOrderBook(tokenId);
-
-                  if (!orderbook.bids?.[0] || !orderbook.asks?.[0]) {
-                    const reason = `No orderbook data for tokenId: ${tokenId}`;
-                    skippedPositions.push({ reason, data: apiPos });
-                    this.logger.debug(`[PositionTracker] ${reason}`);
-                    return null;
-                  }
-
-                  const bestBid = parseFloat(orderbook.bids[0].price);
-                  const bestAsk = parseFloat(orderbook.asks[0].price);
-                  currentPrice = (bestBid + bestAsk) / 2;
-                } catch (err) {
-                  // If orderbook fetch fails, we cannot safely assume a favorable settlement
-                  const errMsg = err instanceof Error ? err.message : String(err);
-                  if (errMsg.includes("404") || errMsg.includes("not found")) {
-                    const reason = `Orderbook not found for tokenId: ${tokenId} (404/not found) - skipping position due to ambiguous resolution`;
-                    skippedPositions.push({ reason, data: apiPos });
-                    this.logger.debug(`[PositionTracker] ${reason}`);
-                    return null;
+                  // Skip orderbook fetch if we know it's missing (cached)
+                  if (this.missingOrderbooks.has(tokenId)) {
+                    currentPrice = await this.fetchPriceFallback(tokenId);
                   } else {
-                    // Other error - skip this position
-                    const reason = `Failed to fetch orderbook: ${errMsg}`;
-                    skippedPositions.push({ reason, data: apiPos });
-                    this.logger.debug(`[PositionTracker] ${reason}`);
-                    return null;
+                    try {
+                      const orderbook = await this.client.getOrderBook(tokenId);
+
+                      if (!orderbook.bids?.[0] || !orderbook.asks?.[0]) {
+                        // Orderbook is empty - cache and use fallback
+                        this.missingOrderbooks.add(tokenId);
+                        this.logger.debug(
+                          `[PositionTracker] Empty orderbook for tokenId: ${tokenId}, using fallback price API`,
+                        );
+                        currentPrice = await this.fetchPriceFallback(tokenId);
+                      } else {
+                        const bestBid = parseFloat(orderbook.bids[0].price);
+                        const bestAsk = parseFloat(orderbook.asks[0].price);
+                        currentPrice = (bestBid + bestAsk) / 2;
+                      }
+                    } catch (orderbookErr) {
+                      const orderbookErrMsg =
+                        orderbookErr instanceof Error
+                          ? orderbookErr.message
+                          : String(orderbookErr);
+                      if (
+                        orderbookErrMsg.includes("404") ||
+                        orderbookErrMsg.includes("not found") ||
+                        orderbookErrMsg.includes("No orderbook exists")
+                      ) {
+                        // 404 or not found - cache and use fallback
+                        this.missingOrderbooks.add(tokenId);
+                        this.logger.debug(
+                          `[PositionTracker] Orderbook not found for tokenId: ${tokenId}, using fallback price API`,
+                        );
+                        currentPrice = await this.fetchPriceFallback(tokenId);
+                      } else {
+                        // Other error - rethrow
+                        throw orderbookErr;
+                      }
+                    }
                   }
+                } catch (err) {
+                  // If all pricing methods fail, skip this position
+                  const errMsg = err instanceof Error ? err.message : String(err);
+                  const reason = `Failed to fetch price data: ${errMsg}`;
+                  skippedPositions.push({ reason, data: apiPos });
+                  this.logger.debug(`[PositionTracker] ${reason}`);
+                  return null;
                 }
               }
 
@@ -421,5 +443,50 @@ export class PositionTracker {
   getPositionEntryTime(marketId: string, tokenId: string): number | undefined {
     const key = `${marketId}-${tokenId}`;
     return this.positionEntryTimes.get(key);
+  }
+
+  /**
+   * Fetch price from CLOB API /price endpoint as fallback when orderbook is unavailable
+   * Uses mid-price between BUY and SELL sides
+   */
+  private async fetchPriceFallback(tokenId: string): Promise<number> {
+    const { httpGet } = await import("../utils/fetch-data.util");
+    const { POLYMARKET_API } =
+      await import("../constants/polymarket.constants");
+
+    try {
+      // Fetch both BUY and SELL prices to calculate mid-price
+      const [buyPriceData, sellPriceData] = await Promise.all([
+        httpGet<{ price: string }>(
+          `${POLYMARKET_API.BASE_URL}/price?token_id=${tokenId}&side=BUY`,
+          { timeout: 5000 },
+        ),
+        httpGet<{ price: string }>(
+          `${POLYMARKET_API.BASE_URL}/price?token_id=${tokenId}&side=SELL`,
+          { timeout: 5000 },
+        ),
+      ]);
+
+      const buyPrice = parseFloat(buyPriceData.price);
+      const sellPrice = parseFloat(sellPriceData.price);
+
+      if (!Number.isFinite(buyPrice) || !Number.isFinite(sellPrice)) {
+        throw new Error(
+          `Invalid price data from fallback API: buy=${buyPrice}, sell=${sellPrice}`,
+        );
+      }
+
+      // Return mid-price as best estimate of current value
+      const midPrice = (buyPrice + sellPrice) / 2;
+      this.logger.debug(
+        `[PositionTracker] Fallback price for ${tokenId}: ${(midPrice * 100).toFixed(2)}¢ (buy: ${(buyPrice * 100).toFixed(2)}¢, sell: ${(sellPrice * 100).toFixed(2)}¢)`,
+      );
+      return midPrice;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to fetch fallback price for tokenId ${tokenId}: ${errMsg}`,
+      );
+    }
   }
 }
