@@ -11,6 +11,7 @@ import type { RelayerContext } from "../polymarket/relayer";
 import { buildSignedPath } from "./query-string.util";
 import type { Logger } from "./logger.util";
 import { sanitizeErrorMessage } from "./sanitize-axios-error.util";
+import { isLiveTradingEnabled } from "./live-trading.util";
 
 const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
@@ -521,8 +522,7 @@ export const checkFundsAndAllowance = async (
                 );
               } else {
                 const approvalsConfig = readApprovalsConfig();
-                const liveTradingEnabled =
-                  process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+                const liveTradingEnabled = isLiveTradingEnabled();
                 if (!liveTradingEnabled || approvalsConfig.mode !== "true") {
                   params.logger.warn(
                     `[CLOB] Auto-approve blocked (live trading disabled or APPROVALS_AUTO!=true). signer=${signerAddress} collateral=${collateralLabel}`,
@@ -615,8 +615,7 @@ export const checkFundsAndAllowance = async (
         const wallet = (params.client as { wallet?: Wallet }).wallet;
         if (wallet) {
           const approvalsConfig = readApprovalsConfig();
-          const liveTradingEnabled =
-            process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+          const liveTradingEnabled = isLiveTradingEnabled();
           if (liveTradingEnabled && approvalsConfig.mode === "true") {
             const approvalKey = `${tradingAddress}:erc1155`;
             const lastAttempt = approvalAttemptCooldown.get(approvalKey) ?? 0;

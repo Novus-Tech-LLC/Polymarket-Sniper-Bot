@@ -72,7 +72,8 @@ async function main() {
     logger.info("=".repeat(70));
     logger.info("To enable on-chain trading, set in your .env:");
     logger.info("  TRADE_MODE=onchain");
-    logger.info("  ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS");
+    logger.info("  LIVE_TRADING=I_UNDERSTAND_THE_RISKS");
+    logger.info("  (or ARB_LIVE_TRADING=I_UNDERSTAND_THE_RISKS)");
     logger.info("=".repeat(70));
   } catch (error) {
     logger.error("Failed to check on-chain status:");

@@ -24,6 +24,7 @@ import {
   resolveSignerAddress,
 } from "../../utils/funds-allowance.util";
 import { readApprovalsConfig } from "../../polymarket/preflight";
+import { isLiveTradingEnabled } from "../../utils/live-trading.util";
 
 const ERC20_ABI = [
   "function allowance(address owner, address spender) view returns (uint256)",
@@ -82,8 +83,7 @@ class AllowanceManager {
     }
 
     const approvalsConfig = readApprovalsConfig();
-    const liveTradingEnabled =
-      process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+    const liveTradingEnabled = isLiveTradingEnabled();
     if (!liveTradingEnabled || approvalsConfig.mode !== "true") {
       this.logger.warn(
         "[ARB] Approval blocked (live trading disabled or APPROVALS_AUTO!=true).",

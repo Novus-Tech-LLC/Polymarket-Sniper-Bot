@@ -27,6 +27,7 @@ import {
   type StructuredLogger,
   generateRunId,
 } from "../utils/structured-logger";
+import { isLiveTradingEnabled } from "../utils/live-trading.util";
 
 export { readApprovalsConfig };
 
@@ -63,9 +64,6 @@ const parseBool = (raw: string | undefined, fallback: boolean): boolean => {
   if (!raw) return fallback;
   return String(raw).toLowerCase() === "true";
 };
-
-const isLiveTradingEnabled = (): boolean =>
-  readEnv("ARB_LIVE_TRADING") === "I_UNDERSTAND_THE_RISKS";
 
 const formatUnitsValue = (value: BigNumberish, decimals: number): string =>
   Number(formatUnits(value, decimals)).toFixed(2);
@@ -463,43 +461,6 @@ export const ensureTradingReady = async (
   params.logger.info(
     `[Preflight] contracts usdc=${contracts.usdcAddress} ctf=${contracts.ctfAddress ?? "n/a"} ctf_exchange=${contracts.ctfExchangeAddress ?? "n/a"} neg_risk_exchange=${contracts.negRiskExchangeAddress ?? "n/a"} neg_risk_adapter=${contracts.negRiskAdapterAddress ?? "n/a"}`,
   );
-
-  if (!liveTradingEnabled) {
-    params.logger.info(
-      "[Preflight] READY_TO_TRADE=false reason=LIVE_TRADING_DISABLED",
-    );
-    const tradingAddress =
-      relayer.tradingAddress ??
-      params.client.effectivePolyAddress ??
-      derivedSignerAddress;
-    params.logger.info(
-      `[Preflight] signer=${derivedSignerAddress} effective_trading_address=${tradingAddress} public_key=${params.configuredPublicKey ?? "none"}`,
-    );
-    logPreflightSummary({
-      logger: params.logger,
-      signer: derivedSignerAddress,
-      effectiveTradingAddress: tradingAddress,
-      relayerEnabled: relayer.enabled,
-      approvalsOk: false,
-      authOk,
-      readyToTrade: false,
-    });
-
-    // Set final result and print auth story summary
-    authStory.setFinalResult({
-      authOk,
-      readyToTrade: false,
-      reason: "LIVE_TRADING_DISABLED",
-    });
-    authStory.printSummary();
-
-    (
-      params.client as ClobClient & {
-        relayerContext?: ReturnType<typeof createRelayerContext>;
-      }
-    ).relayerContext = relayer;
-    return { detectOnly: true, authOk, approvalsOk: false, geoblockPassed };
-  }
 
   // Log warning if bypass is enabled
   const allowTradingWithoutPreflight = parseBool(

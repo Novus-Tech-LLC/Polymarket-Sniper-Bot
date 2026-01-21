@@ -6,6 +6,7 @@ import {
   calculateNetProfit,
   isProfitableAfterFees,
 } from "./constants";
+import { isLiveTradingEnabled } from "../utils/live-trading.util";
 
 export interface EndgameSweepConfig {
   enabled: boolean;
@@ -357,8 +358,8 @@ export class EndgameSweepStrategy {
         return;
       }
       
-      // Check LIVE_TRADING is enabled
-      const liveTradingEnabled = process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+      // Check LIVE_TRADING is enabled (supports both ARB_LIVE_TRADING and LIVE_TRADING)
+      const liveTradingEnabled = isLiveTradingEnabled();
       if (!liveTradingEnabled) {
         this.logger.warn(
           `[EndgameSweep] Would buy ${positionSize.toFixed(2)} shares at ${(bestAsk * 100).toFixed(1)}¢ ($${sizeUsd.toFixed(2)}) - LIVE TRADING DISABLED`

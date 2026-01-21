@@ -14,6 +14,7 @@ import {
   formatCollateralLabel,
   resolveSignerAddress,
 } from "./funds-allowance.util";
+import { isLiveTradingEnabled } from "./live-trading.util";
 
 // On-chain trading support
 import type { Wallet } from "ethers";
@@ -95,8 +96,7 @@ async function postOrderOnChain(
     logger,
   } = input;
 
-  const liveTradingEnabled =
-    process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+  const liveTradingEnabled = isLiveTradingEnabled();
   if (!liveTradingEnabled) {
     logger.warn("[ONCHAIN] Live trading disabled; skipping order submission.");
     return { status: "skipped", reason: "LIVE_TRADING_DISABLED" };
@@ -167,8 +167,7 @@ async function postOrderClob(
     maxAcceptablePrice,
     logger,
   } = input;
-  const liveTradingEnabled =
-    process.env.ARB_LIVE_TRADING === "I_UNDERSTAND_THE_RISKS";
+  const liveTradingEnabled = isLiveTradingEnabled();
   if (!liveTradingEnabled) {
     logger.warn("[CLOB] Live trading disabled; skipping order submission.");
     return { status: "skipped", reason: "LIVE_TRADING_DISABLED" };
