@@ -16,12 +16,114 @@
 
 ## ✨ What's New
 
+- ⛓️ **On-Chain Trading Mode** - Bypass CLOB API entirely and trade directly on Polygon blockchain
 - 🦀 **Rust SDK Integration** - Optional use of official Polymarket Rust SDK for more reliable authentication
 - 🧠 **Adaptive Learning System** - Learns from trade outcomes to prevent bad trades
 - 🔐 **Simplified Authentication** - Uses `createOrDeriveApiKey()` for clean credential management
 - 📊 **Clean Logging** - ✅ for success, ❌ for failures - easy to troubleshoot
 - 🛡️ **Rate-Limited Error Logs** - No more log spam on repeated auth failures
 - ⚡ **Single-Flight Derivation** - Prevents concurrent credential derivation attempts
+
+## ⛓️ On-Chain Trading Mode (New - Framework Ready)
+
+Trade directly on the Polygon blockchain without CLOB API dependencies. The complete infrastructure is implemented - only the final order matching component needs additional integration.
+
+### Current Status
+
+**✅ Complete Infrastructure**:
+- Configuration system with TRADE_MODE switching
+- Balance and allowance verification
+- Automatic USDC approval
+- Price protection and validation
+- Comprehensive error handling
+- Status checking CLI command
+
+**⚠️ Needs Integration**: Direct order filling requires access to signed maker orders (not available in public orderbook endpoint).
+
+### What Works Now
+
+```bash
+# Check your on-chain trading readiness
+npm run onchain:status
+
+# Shows:
+# - Wallet address and balance
+# - USDC balance
+# - Exchange approval status
+# - Network information
+```
+
+### Path to Production
+
+To enable live on-chain trading, integrate with one of:
+
+1. **CLOB Order API**: Access authenticated `/orders` endpoint for signed maker orders
+2. **Market Making**: Create and match your own counter-orders on-chain  
+3. **Aggregator Pattern**: Build orders from on-chain events
+
+See `src/trading/onchain-executor.ts` for detailed implementation options.
+
+### Mode Comparison
+
+| Feature | CLOB Mode (default) | On-Chain Mode |
+|---------|-------------------|--------------|
+| **API Credentials** | Required (or derived) | ❌ Not needed |
+| **Rate Limits** | Yes (36k orders/10min) | ❌ None (only gas) |
+| **Authentication** | Complex (EOA/Proxy/Safe) | ✅ Simple (just wallet) |
+| **Execution** | Via CLOB API | ✅ Direct blockchain |
+| **Transparency** | Order IDs | ✅ Transaction hashes |
+| **Setup Complexity** | Moderate | ✅ Minimal |
+| **Best For** | High-frequency trading | Simple reliable trades |
+
+### Technical Details
+
+On-chain mode uses Polymarket's CTF Exchange smart contracts directly:
+
+- **CTF Exchange**: `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E`
+- **Neg Risk Exchange**: `0xC5d563A36AE78145C45a50134d48A1215220f80a`
+- **CTF Contract**: `0x4d97dcd97ec945f40cf65f87097ace5ea0476045`
+- **USDC.e**: `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`
+
+The bot:
+1. Fetches orderbook from CLOB API (read-only, no auth)
+2. Calculates optimal trade parameters
+3. Builds and signs transaction locally with ethers.js
+4. Submits directly to Polygon network
+5. Returns transaction hash for tracking
+
+### Configuration
+
+```bash
+# Trade Mode (on-chain is DEFAULT - no need to set unless switching to CLOB)
+# TRADE_MODE=onchain         # Default - trades directly on blockchain
+# TRADE_MODE=clob            # Alternative - uses Polymarket API
+
+# Required for on-chain mode (which is the default)
+PRIVATE_KEY=0x...           # Your wallet private key
+RPC_URL=https://polygon-rpc.com
+
+# Optional overrides
+COLLATERAL_TOKEN_ADDRESS=0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
+```
+
+### When to Use Each Mode
+
+**On-Chain Mode (DEFAULT):**
+- Simple setup - just PRIVATE_KEY and RPC_URL
+- No API credentials needed
+- Direct blockchain transactions
+- Transparent and reliable
+- No rate limits (just gas costs)
+- **Recommended for most users**
+
+**CLOB Mode (Alternative):**
+- High-frequency trading (>1 trade/minute)
+- Advanced order types
+- Instant order book updates
+- Requires API credentials or derivation
+- Subject to rate limits
+
 
 ## 🦀 Rust CLOB Bridge (New)
 
@@ -84,6 +186,9 @@ Feel free to reach out for implementation assistance or integration support.
 ## 📋 Table of Contents
 
 - [Overview](#-overview)
+- [What's New](#-whats-new)
+- [On-Chain Trading Mode](#️-on-chain-trading-mode-new)
+- [Rust CLOB Bridge](#-rust-clob-bridge-new)
 - [Features](#-features)
 - [Adaptive Learning](#-adaptive-learning)
 - [Architecture](#-architecture)

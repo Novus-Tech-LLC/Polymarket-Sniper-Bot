@@ -11,6 +11,8 @@ import {
   MONITOR_PRESETS,
 } from "./presets";
 
+export type TradeMode = "clob" | "onchain";
+
 export type MonitorRuntimeConfig = {
   presetName: string;
   enabled: boolean;
@@ -20,6 +22,7 @@ export type MonitorRuntimeConfig = {
   mongoUri?: string;
   rpcUrl: string;
   detectOnly: boolean;
+  tradeMode: TradeMode;
   clobCredsComplete: boolean;
   clobDeriveEnabled: boolean;
   clobCredsChecklist: ClobCredsChecklist;
@@ -87,6 +90,7 @@ const ARB_OVERRIDE_ALLOWLIST = new Set([
   "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
   "CLOUDFLARE_COOLDOWN_SECONDS",
   "CLOB_AUTH_COOLDOWN_SECONDS",
+  "TRADE_MODE",
 ]);
 
 const MONITOR_OVERRIDE_ALLOWLIST = new Set([
@@ -104,6 +108,7 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
   "CLOUDFLARE_COOLDOWN_SECONDS",
   "CLOB_AUTH_COOLDOWN_SECONDS",
+  "TRADE_MODE",
 ]);
 
 const LEGACY_MIN_TRADE_KEYS = [
@@ -135,6 +140,7 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   minPolGas: 3,
   approveUnlimited: false,
   detectOnly: false,
+  tradeMode: DEFAULT_CONFIG.TRADE_MODE,
   clobCredsComplete: false,
   clobDeriveEnabled: true, // Default to true (pmxt-style: just need private key)
   stateDir: "/data",
@@ -186,6 +192,7 @@ const MONITOR_LEGACY_DEFAULTS = {
     DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
   authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
+  tradeMode: DEFAULT_CONFIG.TRADE_MODE,
 };
 
 type EnvParser<T> = (raw: string) => T | undefined;
@@ -203,6 +210,18 @@ const parseBool: EnvParser<boolean> = (raw) => {
 };
 
 const parseString: EnvParser<string> = (raw) => raw;
+
+const parseTradeMode: EnvParser<TradeMode> = (raw) => {
+  if (raw === "") return undefined;
+  const normalized = String(raw).toLowerCase();
+  if (normalized === "clob" || normalized === "onchain") {
+    return normalized as TradeMode;
+  }
+  // Invalid value - log warning and return default
+  // Note: Using process.stderr since logger isn't available in config loading phase
+  process.stderr.write(`[Config] Invalid TRADE_MODE="${raw}", defaulting to "onchain". Valid values: "clob", "onchain"\n`);
+  return "onchain";
+};
 
 const derivePublicKey = (
   privateKey: string | undefined,
@@ -284,6 +303,7 @@ const ARB_ENV_MAP = {
     key: "authCooldownSeconds",
     parse: parseNumber,
   },
+  TRADE_MODE: { key: "tradeMode", parse: parseTradeMode },
 } as const satisfies Record<
   string,
   { key: keyof ArbConfig; parse: EnvParser<unknown> }
@@ -333,6 +353,7 @@ const MONITOR_ENV_MAP = {
     key: "authCooldownSeconds",
     parse: parseNumber,
   },
+  TRADE_MODE: { key: "tradeMode", parse: parseTradeMode },
 } as const satisfies Record<
   string,
   { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }
@@ -902,6 +923,7 @@ export function loadMonitorConfig(
     cloudflareCooldownSeconds:
       MONITOR_LEGACY_DEFAULTS.cloudflareCooldownSeconds,
     authCooldownSeconds: MONITOR_LEGACY_DEFAULTS.authCooldownSeconds,
+    tradeMode: MONITOR_LEGACY_DEFAULTS.tradeMode,
     overridesApplied: [],
     ignoredOverrides: [],
     unsafeOverridesApplied: [],

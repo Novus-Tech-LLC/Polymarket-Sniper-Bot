@@ -1,3 +1,5 @@
+import type { TradeMode } from "../config/loadConfig";
+
 export type SizeScalingMode = "linear" | "sqrt" | "log";
 
 export type ArbConfig = {
@@ -23,6 +25,7 @@ export type ArbConfig = {
   minPolGas: number;
   approveUnlimited: boolean;
   detectOnly: boolean;
+  tradeMode: TradeMode;
   clobCredsComplete: boolean;
   clobDeriveEnabled: boolean;
   stateDir: string;

@@ -14,6 +14,7 @@ export type OrderSubmissionResult = {
   status: "submitted" | "skipped" | "failed";
   reason?: string;
   orderId?: string;
+  transactionHash?: string; // For on-chain mode
   statusCode?: number;
   blockedUntil?: number;
 };
