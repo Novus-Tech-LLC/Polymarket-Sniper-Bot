@@ -37,7 +37,13 @@ export class PositionTracker {
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
   private missingOrderbooks = new Set<string>(); // Cache tokenIds with no orderbook to avoid repeated API calls
-  private marketOutcomeCache: Map<string, string | null> = new Map(); // Cache market outcomes to avoid redundant API calls
+  // Cache market outcomes persistently across refresh cycles. Resolved markets cannot change their outcome,
+  // so caching is safe and prevents redundant Gamma API calls on every 30-second refresh.
+  // Note: Only successful outcomes are cached; null values from transient errors are not cached.
+  // Maximum cache size is enforced to prevent unbounded memory growth in long-running processes.
+  private marketOutcomeCache: Map<string, string> = new Map();
+  private static readonly MAX_OUTCOME_CACHE_SIZE = 1000; // Maximum number of cached market outcomes
+  private lastRefreshStats: { resolved: number; active: number; skipped: number } = { resolved: 0, active: 0, skipped: 0 }; // Track stats for summary logging
 
   // API timeout constant for external API calls
   private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
@@ -74,7 +80,20 @@ export class PositionTracker {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+    // Clear caches to release memory
+    this.marketOutcomeCache.clear();
+    this.missingOrderbooks.clear();
     this.logger.info("[PositionTracker] Stopped position tracking");
+  }
+
+  /**
+   * Get statistics about the current refresh cycle
+   */
+  getStats(): { resolved: number; active: number; skipped: number; cachedMarkets: number } {
+    return {
+      ...this.lastRefreshStats,
+      cachedMarkets: this.marketOutcomeCache.size,
+    };
   }
 
   /**
@@ -92,8 +111,8 @@ export class PositionTracker {
     this.isRefreshing = true;
 
     try {
-      // Clear market outcome cache at the start of each refresh cycle
-      this.marketOutcomeCache.clear();
+      // Note: We no longer clear marketOutcomeCache here to avoid redundant Gamma API calls
+      // Resolved markets don't change their outcome, so caching is safe across refreshes
       
       // Get current positions from Data API and enrich with current market prices
       this.logger.debug("[PositionTracker] Refreshing positions");
@@ -228,6 +247,11 @@ export class PositionTracker {
       const positions: Position[] = [];
       const skippedPositions: Array<{ reason: string; data: ApiPosition }> = [];
       const maxConcurrent = 5; // Rate limit concurrent orderbook fetches
+      
+      // Track stats for summary logging
+      let resolvedCount = 0;
+      let activeCount = 0;
+      let newlyCachedMarkets = 0;
 
       for (let i = 0; i < apiPositions.length; i += maxConcurrent) {
         const batch = apiPositions.slice(i, i + maxConcurrent);
@@ -283,11 +307,24 @@ export class PositionTracker {
                 // Market is resolved - fetch the actual market outcome to determine settlement price
                 // Use marketId as cache key since all tokens in the same market share the same outcome
                 // This avoids redundant Gamma API calls for multi-outcome markets
-                let winningOutcome = this.marketOutcomeCache.get(marketId);
+                let winningOutcome: string | null | undefined = this.marketOutcomeCache.get(marketId);
+                const wasCached = winningOutcome !== undefined;
                 
-                if (winningOutcome === undefined) {
+                if (!wasCached) {
                   winningOutcome = await this.fetchMarketOutcome(tokenId);
-                  this.marketOutcomeCache.set(marketId, winningOutcome);
+                  // Only cache definite outcomes; avoid caching null/undefined that may come from transient API errors
+                  if (winningOutcome !== null && winningOutcome !== undefined) {
+                    // Enforce maximum cache size to prevent unbounded memory growth
+                    if (this.marketOutcomeCache.size >= PositionTracker.MAX_OUTCOME_CACHE_SIZE) {
+                      // Remove oldest entry (first key in Map iteration order)
+                      const firstKey = this.marketOutcomeCache.keys().next().value;
+                      if (firstKey) {
+                        this.marketOutcomeCache.delete(firstKey);
+                      }
+                    }
+                    this.marketOutcomeCache.set(marketId, winningOutcome);
+                    newlyCachedMarkets++;
+                  }
                 }
 
                 if (!winningOutcome) {
@@ -300,10 +337,14 @@ export class PositionTracker {
 
                 // Calculate settlement price based on whether position won or lost
                 currentPrice = side === winningOutcome ? 1.0 : 0.0;
+                resolvedCount++;
 
-                this.logger.debug(
-                  `[PositionTracker] Resolved position: tokenId=${tokenId}, side=${side}, winner=${winningOutcome}, settlementPrice=${currentPrice}`,
-                );
+                // Only log on first resolution (not cached) to reduce noise
+                if (!wasCached) {
+                  this.logger.debug(
+                    `[PositionTracker] Resolved position: tokenId=${tokenId}, side=${side}, winner=${winningOutcome}, settlementPrice=${currentPrice}`,
+                  );
+                }
               } else {
                 // Active market - fetch current orderbook with fallback to price API
                 try {
@@ -357,6 +398,8 @@ export class PositionTracker {
                   this.logger.debug(`[PositionTracker] ${reason}`);
                   return null;
                 }
+                // Increment activeCount only after successful pricing
+                activeCount++;
               }
 
               // Calculate P&L
@@ -401,10 +444,21 @@ export class PositionTracker {
       const skippedCount = skippedPositions.length;
       const totalCount = apiPositions.length;
 
+      // Store stats for external access
+      this.lastRefreshStats = { resolved: resolvedCount, active: activeCount, skipped: skippedCount };
+
       if (successCount > 0) {
-        this.logger.info(
-          `[PositionTracker] ✓ Successfully processed ${successCount}/${totalCount} positions`,
-        );
+        // Only log detailed breakdown if there are new market lookups or if it's the first time
+        if (newlyCachedMarkets > 0) {
+          this.logger.info(
+            `[PositionTracker] ✓ Processed ${successCount}/${totalCount} positions (${resolvedCount} resolved, ${activeCount} active, ${newlyCachedMarkets} new market lookups)`,
+          );
+        } else {
+          // Quieter log for steady-state operation (all markets already cached)
+          this.logger.debug(
+            `[PositionTracker] ✓ Processed ${successCount} positions (${resolvedCount} resolved, ${activeCount} active) - all outcomes cached`,
+          );
+        }
       }
 
       if (skippedCount > 0) {
