@@ -277,12 +277,12 @@ export class PositionTracker {
 
               if (isRedeemable) {
                 // Market is resolved - fetch the actual market outcome to determine settlement price
-                // Use cache to avoid redundant API calls for the same market
-                let winningOutcome = this.marketOutcomeCache.get(marketId);
+                // Use tokenId as cache key since we query by clob_token_ids
+                let winningOutcome = this.marketOutcomeCache.get(tokenId);
                 
                 if (winningOutcome === undefined) {
-                  winningOutcome = await this.fetchMarketOutcome(marketId);
-                  this.marketOutcomeCache.set(marketId, winningOutcome);
+                  winningOutcome = await this.fetchMarketOutcome(tokenId);
+                  this.marketOutcomeCache.set(tokenId, winningOutcome);
                 }
 
                 if (!winningOutcome) {
@@ -473,22 +473,28 @@ export class PositionTracker {
   }
 
   /**
-   * Fetch market resolution/outcome data from Gamma API.
+   * Fetch market resolution/outcome data from Gamma API using the tokenId.
    * Returns the winning outcome (e.g., "YES", "NO", "Medjedovic", "Under") or null if the outcome
    * cannot be determined (e.g. market unresolved, API/network error, or malformed response).
    * 
    * Supports both binary markets (YES/NO) and multi-outcome markets.
+   * 
+   * Uses the `clob_token_ids` query parameter to find the market, then parses
+   * the `outcomePrices` array to determine which outcome won (price = 1 or ~1).
    */
   private async fetchMarketOutcome(
-    marketId: string,
+    tokenId: string,
   ): Promise<string | null> {
     try {
       const { httpGet } = await import("../utils/fetch-data.util");
       const { POLYMARKET_API } =
         await import("../constants/polymarket.constants");
 
-      // Fetch market details from Gamma API
+      // Fetch market details from Gamma API using clob_token_ids query
+      // This correctly finds the market containing this token
       interface GammaMarketResponse {
+        outcomes?: string; // JSON string like '["Yes", "No"]' or '["Medjedovic", "Minaur"]'
+        outcomePrices?: string; // JSON string like '["0", "1"]' where 1 = winner
         tokens?: Array<{
           outcome?: string;
           winner?: boolean;
@@ -501,24 +507,69 @@ export class PositionTracker {
         resolved?: boolean;
       }
 
-      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets/${marketId}`;
+      // Encode tokenId for URL safety
+      const encodedTokenId = encodeURIComponent(tokenId);
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets?clob_token_ids=${encodedTokenId}`;
 
       this.logger.debug(
         `[PositionTracker] Fetching market outcome from ${url}`,
       );
 
-      const market = await httpGet<GammaMarketResponse>(url, {
+      const markets = await httpGet<GammaMarketResponse[]>(url, {
         timeout: PositionTracker.API_TIMEOUT_MS,
       });
 
-      if (!market) {
+      if (!markets || !Array.isArray(markets) || markets.length === 0) {
         this.logger.debug(
-          `[PositionTracker] No market data returned for ${marketId}`,
+          `[PositionTracker] No market data returned for tokenId ${tokenId}`,
         );
         return null;
       }
 
-      // Check for explicit winning outcome field
+      const market = markets[0];
+
+      // Primary method: Parse outcomePrices to find winner
+      // The winning outcome has price = "1" or very close to 1 (e.g., "0.9999...")
+      if (market.outcomes && market.outcomePrices) {
+        try {
+          const outcomes: string[] = JSON.parse(market.outcomes);
+          const prices: string[] = JSON.parse(market.outcomePrices);
+
+          if (outcomes.length > 0 && outcomes.length === prices.length) {
+            // Find the index with price closest to 1 (winner)
+            let winnerIndex = -1;
+            let highestPrice = 0;
+            const WINNER_THRESHOLD = 0.5; // Price > 0.5 indicates likely winner
+
+            for (let i = 0; i < prices.length; i++) {
+              const price = parseFloat(prices[i]);
+              if (Number.isFinite(price) && price > highestPrice) {
+                highestPrice = price;
+                winnerIndex = i;
+              }
+            }
+
+            // Only consider it a winner if price is significantly above threshold
+            if (winnerIndex >= 0 && highestPrice > WINNER_THRESHOLD) {
+              const winner = outcomes[winnerIndex].trim();
+              this.logger.debug(
+                `[PositionTracker] Resolved market for tokenId ${tokenId}: winner="${winner}" (price=${highestPrice.toFixed(4)})`,
+              );
+              return winner;
+            }
+
+            this.logger.debug(
+              `[PositionTracker] Market for tokenId ${tokenId} has no clear winner (highestPrice=${highestPrice.toFixed(4)})`,
+            );
+          }
+        } catch (parseErr) {
+          this.logger.debug(
+            `[PositionTracker] Failed to parse outcomes/prices for tokenId ${tokenId}: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+          );
+        }
+      }
+
+      // Fallback: Check for explicit winning outcome field
       const winningOutcome =
         market.resolvedOutcome ??
         market.resolved_outcome ??
@@ -529,20 +580,20 @@ export class PositionTracker {
         const trimmed = winningOutcome.trim();
         if (trimmed) {
           this.logger.debug(
-            `[PositionTracker] Market ${marketId} resolved with outcome: ${trimmed}`,
+            `[PositionTracker] Market for tokenId ${tokenId} resolved with explicit outcome: ${trimmed}`,
           );
           return trimmed;
         }
       }
 
-      // Check tokens for winner flag (supports multi-outcome markets)
+      // Fallback: Check tokens for winner flag (supports multi-outcome markets)
       if (market.tokens && Array.isArray(market.tokens)) {
         for (const token of market.tokens) {
           if (token.winner === true && token.outcome) {
             const trimmed = token.outcome.trim();
             if (trimmed) {
               this.logger.debug(
-                `[PositionTracker] Market ${marketId} resolved with winning token: ${trimmed}`,
+                `[PositionTracker] Market for tokenId ${tokenId} resolved with winning token: ${trimmed}`,
               );
               return trimmed;
             }
@@ -553,7 +604,7 @@ export class PositionTracker {
       // If market is closed/resolved but no winner info, cannot determine
       if (market.closed || market.resolved) {
         this.logger.debug(
-          `[PositionTracker] Market ${marketId} is closed/resolved but winning outcome not available`,
+          `[PositionTracker] Market for tokenId ${tokenId} is closed/resolved but winning outcome not available`,
         );
       }
 
@@ -574,15 +625,15 @@ export class PositionTracker {
 
       if (status === 404) {
         this.logger.warn(
-          `[PositionTracker] Market ${marketId} not found (404) while fetching outcome: ${message}`,
+          `[PositionTracker] Market not found (404) for tokenId ${tokenId}: ${message}`,
         );
       } else if (status !== undefined && status >= 400 && status < 500) {
         this.logger.warn(
-          `[PositionTracker] Client error (${status}) fetching market outcome for ${marketId}: ${message}`,
+          `[PositionTracker] Client error (${status}) fetching market outcome for tokenId ${tokenId}: ${message}`,
         );
       } else if (status !== undefined && status >= 500) {
         this.logger.error(
-          `[PositionTracker] Server error (${status}) fetching market outcome for ${marketId}: ${message}`,
+          `[PositionTracker] Server error (${status}) fetching market outcome for tokenId ${tokenId}: ${message}`,
         );
       } else if (
         code === "ETIMEDOUT" ||
@@ -590,11 +641,11 @@ export class PositionTracker {
         code === "ECONNRESET"
       ) {
         this.logger.error(
-          `[PositionTracker] Network error (${code}) fetching market outcome for ${marketId}: ${message}`,
+          `[PositionTracker] Network error (${code}) fetching market outcome for tokenId ${tokenId}: ${message}`,
         );
       } else {
         this.logger.error(
-          `[PositionTracker] Unexpected error fetching market outcome for ${marketId}: ${message}`,
+          `[PositionTracker] Unexpected error fetching market outcome for tokenId ${tokenId}: ${message}`,
         );
       }
 
@@ -607,11 +658,11 @@ export class PositionTracker {
           name: anyErr.name,
         };
         this.logger.debug(
-          `[PositionTracker] Raw error while fetching market outcome for ${marketId}: ${JSON.stringify(errorSummary)}`,
+          `[PositionTracker] Raw error while fetching market outcome for tokenId ${tokenId}: ${JSON.stringify(errorSummary)}`,
         );
       } else {
         this.logger.debug(
-          `[PositionTracker] Raw error while fetching market outcome for ${marketId}: ${String(anyErr)}`,
+          `[PositionTracker] Raw error while fetching market outcome for tokenId ${tokenId}: ${String(anyErr)}`,
         );
       }
 

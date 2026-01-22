@@ -341,3 +341,133 @@ describe("PositionTracker Multi-Outcome Market Support", () => {
   });
 });
 
+describe("PositionTracker Gamma API Outcome Parsing", () => {
+  test("Parse outcomePrices to find winner - binary YES wins", () => {
+    // Simulates Gamma API response where YES won (price = 1)
+    const outcomes = JSON.parse('["Yes", "No"]');
+    const prices = JSON.parse('["1", "0"]');
+
+    let winnerIndex = -1;
+    let highestPrice = 0;
+    const WINNER_THRESHOLD = 0.5;
+
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+        winnerIndex = i;
+      }
+    }
+
+    assert.strictEqual(winnerIndex, 0, "Winner should be index 0 (Yes)");
+    assert.ok(highestPrice > WINNER_THRESHOLD, "Winner price should exceed threshold");
+    assert.strictEqual(outcomes[winnerIndex], "Yes", "Winner should be 'Yes'");
+  });
+
+  test("Parse outcomePrices to find winner - binary NO wins", () => {
+    // Simulates Gamma API response where NO won (price = 1)
+    const outcomes = JSON.parse('["Yes", "No"]');
+    const prices = JSON.parse('["0", "1"]');
+
+    let winnerIndex = -1;
+    let highestPrice = 0;
+
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+        winnerIndex = i;
+      }
+    }
+
+    assert.strictEqual(winnerIndex, 1, "Winner should be index 1 (No)");
+    assert.strictEqual(outcomes[winnerIndex], "No", "Winner should be 'No'");
+  });
+
+  test("Parse outcomePrices to find winner - multi-outcome market", () => {
+    // Simulates Gamma API response for a multi-outcome market (e.g., tennis match)
+    const outcomes = JSON.parse('["Medjedovic", "Minaur"]');
+    const prices = JSON.parse('["0", "1"]');
+
+    let winnerIndex = -1;
+    let highestPrice = 0;
+
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+        winnerIndex = i;
+      }
+    }
+
+    assert.strictEqual(winnerIndex, 1, "Winner should be index 1 (Minaur)");
+    assert.strictEqual(outcomes[winnerIndex], "Minaur", "Winner should be 'Minaur'");
+  });
+
+  test("Parse outcomePrices - high precision values near 1", () => {
+    // Simulates Gamma API response with high-precision decimal prices
+    const outcomes = JSON.parse('["Yes", "No"]');
+    const prices = JSON.parse('["0.9999989889179474774585826918585313", "0.000001011082052522541417308141468657552"]');
+
+    let winnerIndex = -1;
+    let highestPrice = 0;
+    const WINNER_THRESHOLD = 0.5;
+
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+        winnerIndex = i;
+      }
+    }
+
+    assert.strictEqual(winnerIndex, 0, "Winner should be index 0 (Yes)");
+    assert.ok(highestPrice > WINNER_THRESHOLD, "Winner price should exceed threshold");
+    assert.ok(Math.abs(highestPrice - 1.0) < 0.001, "Winner price should be very close to 1");
+    assert.strictEqual(outcomes[winnerIndex], "Yes", "Winner should be 'Yes'");
+  });
+
+  test("Parse outcomePrices - 5-outcome market", () => {
+    // Simulates Gamma API response for a 5-outcome market (e.g., tweets prediction)
+    const outcomes = JSON.parse('["39 or less", "40-49", "50-59", "60-69", "70 or more"]');
+    const prices = JSON.parse('["0.000005275650370577064615954030495707515", "0.000005340405636688357816234795706832118", "0.000005425344774813496669289527006419526", "0.000006462611087563460063700913082470326", "0.9999774959881303576208348207337085"]');
+
+    let winnerIndex = -1;
+    let highestPrice = 0;
+    const WINNER_THRESHOLD = 0.5;
+
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+        winnerIndex = i;
+      }
+    }
+
+    assert.strictEqual(winnerIndex, 4, "Winner should be index 4 (70 or more)");
+    assert.ok(highestPrice > WINNER_THRESHOLD, "Winner price should exceed threshold");
+    assert.strictEqual(outcomes[winnerIndex], "70 or more", "Winner should be '70 or more'");
+  });
+
+  test("No clear winner when all prices are near 0", () => {
+    // Simulates Gamma API response where market is closed but not yet resolved
+    const outcomes = JSON.parse('["Yes", "No"]');
+    const prices = JSON.parse('["0", "0"]');
+
+    let winnerIndex = -1;
+    let highestPrice = 0;
+    const WINNER_THRESHOLD = 0.5;
+
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+        winnerIndex = i;
+      }
+    }
+
+    assert.ok(highestPrice <= WINNER_THRESHOLD, "Should not have clear winner");
+    // In actual code, this would result in returning null
+  });
+});
+
