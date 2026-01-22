@@ -1112,6 +1112,11 @@ export type StrategyConfig = {
   autoRedeemEnabled: boolean;
   autoRedeemMinPositionUsd: number;
   autoRedeemCheckIntervalMs: number;
+  // Smart Hedging settings (replaces stop-loss for risky tier positions)
+  smartHedgingEnabled: boolean;
+  smartHedgingTriggerLossPct: number;
+  smartHedgingMaxHedgeUsd: number;
+  smartHedgingReservePct: number;
   minOrderUsd: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
@@ -1210,6 +1215,42 @@ export function loadStrategyConfig(
     autoRedeemCheckIntervalMs:
       parseNumber(readEnv("AUTO_REDEEM_CHECK_INTERVAL_MS", overrides) ?? "") ??
       30000, // 30 seconds default
+    /**
+     * SMART HEDGING SETTINGS
+     * Instead of selling risky positions (<60¢ entry) at a loss,
+     * hedge by buying the opposing side to cap maximum loss at the spread
+     */
+    // SMART_HEDGING_ENABLED: enabled by default to minimize losses
+    smartHedgingEnabled:
+      parseBool(readEnv("SMART_HEDGING_ENABLED", overrides) ?? "") ??
+      ("SMART_HEDGING_ENABLED" in preset
+        ? (preset as { SMART_HEDGING_ENABLED: boolean }).SMART_HEDGING_ENABLED
+        : undefined) ??
+      true, // Enabled by default - make money, not lose it!
+    // SMART_HEDGING_TRIGGER_LOSS_PCT: loss percentage to trigger hedging
+    smartHedgingTriggerLossPct:
+      parseNumber(readEnv("SMART_HEDGING_TRIGGER_LOSS_PCT", overrides) ?? "") ??
+      ("SMART_HEDGING_TRIGGER_LOSS_PCT" in preset
+        ? (preset as { SMART_HEDGING_TRIGGER_LOSS_PCT: number })
+            .SMART_HEDGING_TRIGGER_LOSS_PCT
+        : undefined) ??
+      20, // Default: hedge at 20% loss
+    // SMART_HEDGING_MAX_HEDGE_USD: maximum USD per hedge position
+    smartHedgingMaxHedgeUsd:
+      parseNumber(readEnv("SMART_HEDGING_MAX_HEDGE_USD", overrides) ?? "") ??
+      ("SMART_HEDGING_MAX_HEDGE_USD" in preset
+        ? (preset as { SMART_HEDGING_MAX_HEDGE_USD: number })
+            .SMART_HEDGING_MAX_HEDGE_USD
+        : undefined) ??
+      10, // Default: max $10 per hedge
+    // SMART_HEDGING_RESERVE_PCT: percentage of wallet to reserve for hedging
+    smartHedgingReservePct:
+      parseNumber(readEnv("SMART_HEDGING_RESERVE_PCT", overrides) ?? "") ??
+      ("SMART_HEDGING_RESERVE_PCT" in preset
+        ? (preset as { SMART_HEDGING_RESERVE_PCT: number })
+            .SMART_HEDGING_RESERVE_PCT
+        : undefined) ??
+      20, // Default: keep 20% in reserve
     // MIN_ORDER_USD: respect env override > preset > default
     minOrderUsd:
       parseNumber(readEnv("MIN_ORDER_USD", overrides) ?? "") ??
