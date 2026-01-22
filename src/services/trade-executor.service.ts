@@ -81,12 +81,15 @@ export class TradeExecutorService {
       logger.info(
         `[Frontrun] 🔍 Detected trade: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD by other trader`,
       );
-      if (sizing.wasCapped) {
-        const capSource = sizing.cappedByEndgame
-          ? "MAX_POSITION_USD"
-          : "FRONTRUN_MAX_SIZE_USD";
+      if (sizing.usedFixedSize) {
+        // MAX_POSITION_USD is set and is being used as the fixed order size
         logger.info(
-          `[Frontrun] 📊 Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (capped from ${calculatedSize.toFixed(2)} USD by ${capSource}=${sizing.maxSize})`,
+          `[Frontrun] 📊 Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (fixed by MAX_POSITION_USD=${sizing.maxSize})`,
+        );
+      } else if (sizing.wasCapped) {
+        // FRONTRUN_MAX_SIZE_USD is capping the calculated size
+        logger.info(
+          `[Frontrun] 📊 Our order: ${signal.side} ${frontrunSize.toFixed(2)} USD (capped from ${calculatedSize.toFixed(2)} USD by FRONTRUN_MAX_SIZE_USD=${sizing.maxSize})`,
         );
       } else {
         logger.info(
@@ -192,7 +195,12 @@ export class TradeExecutorService {
     wasCapped: boolean;
     cappedByEndgame: boolean;
     effectiveMinOrderUsd: number;
+    usedFixedSize: boolean;
   } {
+    // Check if MAX_POSITION_USD is set - this is the user's intended fixed position size
+    const endgameMax = Number(process.env.MAX_POSITION_USD);
+    const hasEndgameCap = Number.isFinite(endgameMax) && endgameMax > 0;
+    
     // Frontrun with a percentage of the target size
     // This can be configured via env variable
     const multiplier =
@@ -200,16 +208,20 @@ export class TradeExecutorService {
     const calculatedSize = targetSize * multiplier;
 
     // Cap at max frontrun size if configured
-    // Also respect MAX_POSITION_USD from environment as an additional cap
     const frontrunMax =
       env.frontrunMaxSizeUsd || DEFAULT_CONFIG.FRONTRUN_MAX_SIZE_USD;
-    const endgameMax = Number(process.env.MAX_POSITION_USD);
-    const hasEndgameCap = Number.isFinite(endgameMax) && endgameMax > 0;
+    
     const maxSize = hasEndgameCap
       ? Math.min(frontrunMax, endgameMax)
       : frontrunMax;
-    const wasCapped = calculatedSize > maxSize;
+    
+    // Determine which constraint is active:
+    // - usedFixedSize: MAX_POSITION_USD is the actual limiting factor (smaller than both calculated and frontrunMax)
+    // - wasCapped: FRONTRUN_MAX_SIZE_USD is the limiting factor (without MAX_POSITION_USD being more restrictive)
+    const usedFixedSize = hasEndgameCap && endgameMax < calculatedSize && endgameMax <= frontrunMax;
+    const wasCapped = calculatedSize > frontrunMax && !usedFixedSize;
     const cappedByEndgame = hasEndgameCap && endgameMax < frontrunMax;
+    
     const size = Math.min(calculatedSize, maxSize);
 
     // Auto-adjust MIN_ORDER_USD if any position size cap (FRONTRUN_MAX_SIZE_USD or MAX_POSITION_USD) is lower to avoid impossible conditions
@@ -218,7 +230,7 @@ export class TradeExecutorService {
     const effectiveMinOrderUsd =
       configuredMinOrderUsd > maxSize ? maxSize : configuredMinOrderUsd;
 
-    return { size, multiplier, maxSize, wasCapped, cappedByEndgame, effectiveMinOrderUsd };
+    return { size, multiplier, maxSize, wasCapped, cappedByEndgame, effectiveMinOrderUsd, usedFixedSize };
   }
 
   // Keep copyTrade for backward compatibility, but redirect to frontrun

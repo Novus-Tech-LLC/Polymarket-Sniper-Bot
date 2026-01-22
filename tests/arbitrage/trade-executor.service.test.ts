@@ -211,7 +211,7 @@ test("frontrun executes trade when MAX_POSITION_USD is set below MIN_ORDER_USD",
       logger,
     });
 
-    // Target trade of 100 USD with 0.1 multiplier = 10 USD, capped to 5 USD by MAX_POSITION_USD
+    // Target trade of 100 USD with 0.1 multiplier = 10 USD, but MAX_POSITION_USD=5 is used as fixed size
     // With the fix, this should execute because the effective minimum is adjusted to match MAX_POSITION_USD
     await executor.frontrunTrade({
       trader: "0xabc",
@@ -226,8 +226,8 @@ test("frontrun executes trade when MAX_POSITION_USD is set below MIN_ORDER_USD",
 
     // Verify the order was executed (not skipped due to MIN_ORDER_USD conflict)
     assert.ok(
-      logs.some((line) => line.includes("capped from") && line.includes("MAX_POSITION_USD")),
-      "Should log that order was capped by MAX_POSITION_USD",
+      logs.some((line) => line.includes("fixed by MAX_POSITION_USD")),
+      "Should log that order uses fixed MAX_POSITION_USD size",
     );
     assert.ok(
       postOrderCalled,
