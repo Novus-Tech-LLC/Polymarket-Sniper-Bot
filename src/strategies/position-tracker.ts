@@ -37,6 +37,7 @@ export class PositionTracker {
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
   private missingOrderbooks = new Set<string>(); // Cache tokenIds with no orderbook to avoid repeated API calls
+  private loggedFallbackPrices = new Set<string>(); // Cache tokenIds for which we've already logged fallback price (suppress repeated logs)
   // Cache market outcomes persistently across refresh cycles. Resolved markets cannot change their outcome,
   // so caching is safe and prevents redundant Gamma API calls on every 30-second refresh.
   // Note: Only successful outcomes are cached; null values from transient errors are not cached.
@@ -60,10 +61,17 @@ export class PositionTracker {
 
   /**
    * Start tracking positions
+   * Note: Initial refresh runs in background to avoid blocking trading startup.
+   * Strategies will see empty/partial position data until first refresh completes.
    */
   async start(): Promise<void> {
     this.logger.info("[PositionTracker] Starting position tracking");
-    await this.refresh();
+    
+    // Start initial refresh in background (non-blocking) to allow trading to start immediately
+    // This prevents slow API calls from delaying the entire orchestrator startup
+    this.refresh().catch((err) => {
+      this.logger.error("[PositionTracker] Initial refresh failed", err as Error);
+    });
 
     this.refreshTimer = setInterval(() => {
       this.refresh().catch((err) => {
@@ -83,6 +91,7 @@ export class PositionTracker {
     // Clear caches to release memory
     this.marketOutcomeCache.clear();
     this.missingOrderbooks.clear();
+    this.loggedFallbackPrices.clear();
     this.logger.info("[PositionTracker] Stopped position tracking");
   }
 
@@ -115,7 +124,7 @@ export class PositionTracker {
       // Resolved markets don't change their outcome, so caching is safe across refreshes
       
       // Get current positions from Data API and enrich with current market prices
-      this.logger.debug("[PositionTracker] Refreshing positions");
+      // Note: "Refreshing positions" log removed to reduce noise - the summary log provides refresh status
 
       // Fetch and process positions with current market data
       const positions = await this.fetchPositionsFromAPI();
@@ -140,10 +149,7 @@ export class PositionTracker {
       // Note: Positions that temporarily disappear are handled by keeping their
       // entry times in positionEntryTimes Map. This provides resilience against
       // temporary API glitches. Cleanup happens in strategies that use this tracker.
-
-      this.logger.debug(
-        `[PositionTracker] Refreshed ${positions.length} positions`,
-      );
+      // Note: Removed redundant "Refreshed X positions" log - the summary log in fetchPositionsFromAPI provides this info
     } catch (err) {
       this.logger.error(
         "[PositionTracker] Failed to refresh positions",
@@ -782,9 +788,14 @@ export class PositionTracker {
 
       // Return mid-price as best estimate of current value
       const midPrice = (buyPrice + sellPrice) / 2;
-      this.logger.debug(
-        `[PositionTracker] Fallback price for ${tokenId}: ${(midPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢ (buy: ${(buyPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢, sell: ${(sellPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢)`,
-      );
+      
+      // Only log fallback price on first fetch for this token (suppress repetitive logs)
+      if (!this.loggedFallbackPrices.has(tokenId)) {
+        this.loggedFallbackPrices.add(tokenId);
+        this.logger.debug(
+          `[PositionTracker] Fallback price for ${tokenId}: ${(midPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢ (buy: ${(buyPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢, sell: ${(sellPrice * PRICE_TO_CENTS_MULTIPLIER).toFixed(2)}¢)`,
+        );
+      }
       return midPrice;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
