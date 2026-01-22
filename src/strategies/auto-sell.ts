@@ -11,11 +11,15 @@ export interface AutoSellConfig {
   /**
    * DISPUTE WINDOW EXIT SETTINGS
    * Positions near resolution ($0.99+) can get stuck in a 2-hour dispute window
-   * Better to sell at 99¢ and free up capital than wait 2 hours
+   * Better to sell at 99.9¢ and free up capital than wait 2 hours for settlement
+   * 
+   * When enabled, the strategy will:
+   * 1. Look for positions at 99.9¢ or higher (dispute hold price)
+   * 2. Sell immediately to exit without waiting for settlement
+   * 3. This allows recycling capital faster instead of waiting for dispute resolution
    */
-  disputeWindowExitEnabled?: boolean; // Enable early exit for positions nearing dispute window
-  disputeWindowExitThreshold?: number; // Price threshold for early exit (default: 0.99 = 99¢)
-  disputeWindowExitMinProfitPct?: number; // Minimum profit % to trigger exit (default: 90%)
+  disputeWindowExitEnabled?: boolean; // Enable early exit for positions in dispute window
+  disputeWindowExitPrice?: number; // Price to sell at for dispute exit (default: 0.999 = 99.9¢)
 }
 
 export interface AutoSellStrategyConfig {
@@ -64,6 +68,57 @@ export class AutoSellStrategy {
 
     let soldCount = 0;
 
+    // === DISPUTE WINDOW EXIT (99.9¢) ===
+    // Check for positions that can be sold at 99.9¢ to exit dispute hold
+    // This takes priority over normal auto-sell since it frees capital immediately
+    if (this.config.disputeWindowExitEnabled) {
+      const disputeExitPrice = this.config.disputeWindowExitPrice ?? 0.999;
+      const disputeExitPositions =
+        this.positionTracker.getPositionsNearResolution(disputeExitPrice);
+
+      for (const position of disputeExitPositions) {
+        const positionKey = `${position.marketId}-${position.tokenId}`;
+
+        // Skip if already sold
+        if (this.soldPositions.has(positionKey)) {
+          continue;
+        }
+
+        // For dispute exit, we don't need minimum hold time - we want to exit ASAP
+        // getPositionsNearResolution already filters for currentPrice >= disputeExitPrice
+        this.logger.info(
+          `[AutoSell] 🚨 DISPUTE EXIT: Position at ${(position.currentPrice * 100).toFixed(1)}¢ - selling to exit dispute hold: ${position.marketId}`,
+        );
+
+        try {
+          const sold = await this.sellPosition(
+            position.marketId,
+            position.tokenId,
+            position.size,
+          );
+
+          if (sold) {
+            this.soldPositions.add(positionKey);
+            soldCount++;
+
+            // Calculate tiny loss for exiting at 99.9¢ vs waiting for $1.00
+            const lossPerShare = 1.0 - position.currentPrice;
+            const totalLoss = lossPerShare * position.size;
+
+            this.logger.info(
+              `[AutoSell] ✅ DISPUTE EXIT: Freed $${(position.size * position.currentPrice).toFixed(2)} capital (cost: $${totalLoss.toFixed(3)} to avoid dispute hold wait)`,
+            );
+          }
+        } catch (err) {
+          this.logger.error(
+            `[AutoSell] Failed dispute exit for ${position.marketId}`,
+            err as Error,
+          );
+        }
+      }
+    }
+
+    // === STANDARD AUTO-SELL (normal threshold) ===
     // Get positions near resolution (price >= threshold)
     const nearResolutionPositions =
       this.positionTracker.getPositionsNearResolution(this.config.threshold);
@@ -71,7 +126,7 @@ export class AutoSellStrategy {
     for (const position of nearResolutionPositions) {
       const positionKey = `${position.marketId}-${position.tokenId}`;
 
-      // Skip if already sold
+      // Skip if already sold (including from dispute exit above)
       if (this.soldPositions.has(positionKey)) {
         continue;
       }
@@ -219,6 +274,7 @@ export class AutoSellStrategy {
         maxAcceptablePrice: bestBid * 0.9, // Accept up to 10% slippage for urgent exit
         logger: this.logger,
         priority: false,
+        skipDuplicatePrevention: true, // Auto-sell must bypass duplicate prevention for exits
         orderConfig: { minOrderUsd: 0 }, // Bypass minimum order size for all sells
       });
 

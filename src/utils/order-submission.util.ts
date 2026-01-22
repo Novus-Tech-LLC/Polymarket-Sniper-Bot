@@ -6,6 +6,7 @@ export type OrderSubmissionSettings = {
   minIntervalMs: number;
   maxPerHour: number;
   marketCooldownMs: number;
+  duplicatePreventionMs: number; // Token-level duplicate prevention cooldown
   cloudflareCooldownMs: number;
   authCooldownMs: number;
 };
@@ -31,6 +32,8 @@ const DEFAULT_SETTINGS: OrderSubmissionSettings = {
   minIntervalMs: DEFAULT_CONFIG.ORDER_SUBMIT_MIN_INTERVAL_MS,
   maxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
   marketCooldownMs: DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS * 1000,
+  duplicatePreventionMs:
+    DEFAULT_CONFIG.ORDER_DUPLICATE_PREVENTION_SECONDS * 1000,
   cloudflareCooldownMs: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS * 1000,
   authCooldownMs: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS * 1000,
 };
@@ -40,6 +43,7 @@ export type OrderSubmissionConfig = {
   orderSubmitMinIntervalMs?: number;
   orderSubmitMaxPerHour?: number;
   orderSubmitMarketCooldownSeconds?: number;
+  orderDuplicatePreventionSeconds?: number;
   cloudflareCooldownSeconds?: number;
   authCooldownSeconds?: number;
   balanceBufferBps?: number;
@@ -57,6 +61,9 @@ export const toOrderSubmissionSettings = (
   marketCooldownMs:
     (config.orderSubmitMarketCooldownSeconds ??
       DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS) * 1000,
+  duplicatePreventionMs:
+    (config.orderDuplicatePreventionSeconds ??
+      DEFAULT_CONFIG.ORDER_DUPLICATE_PREVENTION_SECONDS) * 1000,
   cloudflareCooldownMs:
     (config.cloudflareCooldownSeconds ??
       DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS) * 1000,
@@ -79,6 +86,13 @@ export class OrderSubmissionController {
   private lastFingerprintSubmit = new Map<string, number>();
   private fingerprintCooldownUntil = new Map<string, number>();
   private lastRayId?: string;
+  /**
+   * Token-level duplicate prevention: tracks last order submission time per token+side
+   * Key format: `${tokenId}:${side}` where side is BUY or SELL
+   * This prevents placing the same type of order on the same token within the cooldown window,
+   * independent of price/size - which prevents "order stacking".
+   */
+  private tokenSideLastSubmit = new Map<string, number>();
 
   constructor(settings: OrderSubmissionSettings) {
     this.settings = { ...settings };
@@ -92,7 +106,13 @@ export class OrderSubmissionController {
     sizeUsd: number;
     marketId?: string;
     tokenId?: string;
+    side?: "BUY" | "SELL"; // Order side for duplicate prevention
     orderFingerprint?: string;
+    /**
+     * Skip duplicate prevention check for this order.
+     * Use for hedging, stop-loss, or other critical operations.
+     */
+    skipDuplicatePrevention?: boolean;
     logger: Logger;
     submit: () => Promise<unknown>;
     now?: number;
@@ -105,7 +125,9 @@ export class OrderSubmissionController {
       sizeUsd: params.sizeUsd,
       marketId: params.marketId,
       tokenId: params.tokenId,
+      side: params.side,
       orderFingerprint: params.orderFingerprint,
+      skipDuplicatePrevention: params.skipDuplicatePrevention,
       logger: params.logger,
       now,
       skipRateLimit: params.skipRateLimit,
@@ -116,7 +138,7 @@ export class OrderSubmissionController {
       return preflight;
     }
 
-    this.recordAttempt(now, params.marketId, params.orderFingerprint);
+    this.recordAttempt(now, params.marketId, params.tokenId, params.side, params.orderFingerprint);
 
     try {
       const response = await params.submit();
@@ -215,7 +237,9 @@ export class OrderSubmissionController {
     sizeUsd: number;
     marketId?: string;
     tokenId?: string;
+    side?: "BUY" | "SELL";
     orderFingerprint?: string;
+    skipDuplicatePrevention?: boolean;
     logger: Logger;
     now: number;
     skipRateLimit?: boolean;
@@ -270,6 +294,39 @@ export class OrderSubmissionController {
         reason: "AUTH_BLOCK",
         blockedUntil: this.authBlockedUntil,
       };
+    }
+
+    // Token-level duplicate prevention check (price/size independent)
+    // This is the PRIMARY mechanism to prevent order stacking
+    // Skip if explicitly requested (for hedging, stop-loss, etc.)
+    if (
+      !params.skipRateLimit &&
+      !params.skipDuplicatePrevention &&
+      this.settings.duplicatePreventionMs > 0 &&
+      params.tokenId &&
+      params.side
+    ) {
+      const tokenSideKey = `${params.tokenId}:${params.side}`;
+      const lastTokenSideSubmit = this.tokenSideLastSubmit.get(tokenSideKey);
+      if (
+        lastTokenSideSubmit &&
+        params.now - lastTokenSideSubmit < this.settings.duplicatePreventionMs
+      ) {
+        const remainingSec = Math.ceil(
+          (lastTokenSideSubmit +
+            this.settings.duplicatePreventionMs -
+            params.now) /
+            1000,
+        );
+        params.logger.warn(
+          `[CLOB] Order skipped (DUPLICATE_ORDER_PREVENTION): ${params.side} on token ${params.tokenId.slice(0, 8)}... blocked for ${remainingSec}s (prevents order stacking)`,
+        );
+        return {
+          status: "skipped",
+          reason: "DUPLICATE_ORDER_PREVENTION",
+          blockedUntil: lastTokenSideSubmit + this.settings.duplicatePreventionMs,
+        };
+      }
     }
 
     if (this.settings.marketCooldownMs > 0 && params.orderFingerprint) {
@@ -344,6 +401,8 @@ export class OrderSubmissionController {
   private recordAttempt(
     now: number,
     marketId?: string,
+    tokenId?: string,
+    side?: "BUY" | "SELL",
     fingerprint?: string,
   ): void {
     this.lastSubmitAt = now;
@@ -353,6 +412,11 @@ export class OrderSubmissionController {
     }
     if (fingerprint) {
       this.lastFingerprintSubmit.set(fingerprint, now);
+    }
+    // Track token-side for duplicate prevention
+    if (tokenId && side) {
+      const tokenSideKey = `${tokenId}:${side}`;
+      this.tokenSideLastSubmit.set(tokenSideKey, now);
     }
   }
 

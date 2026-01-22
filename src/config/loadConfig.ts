@@ -51,6 +51,7 @@ export type MonitorRuntimeConfig = {
   orderSubmitMinIntervalMs: number;
   orderSubmitMaxPerHour: number;
   orderSubmitMarketCooldownSeconds: number;
+  orderDuplicatePreventionSeconds: number;
   cloudflareCooldownSeconds: number;
   authCooldownSeconds: number;
   overridesApplied: string[];
@@ -92,6 +93,7 @@ const ARB_OVERRIDE_ALLOWLIST = new Set([
   "ORDER_SUBMIT_MIN_INTERVAL_MS",
   "ORDER_SUBMIT_MAX_PER_HOUR",
   "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
+  "ORDER_DUPLICATE_PREVENTION_SECONDS",
   "CLOUDFLARE_COOLDOWN_SECONDS",
   "CLOB_AUTH_COOLDOWN_SECONDS",
   "TRADE_MODE",
@@ -112,6 +114,7 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   "ORDER_SUBMIT_MIN_INTERVAL_MS",
   "ORDER_SUBMIT_MAX_PER_HOUR",
   "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
+  "ORDER_DUPLICATE_PREVENTION_SECONDS",
   "CLOUDFLARE_COOLDOWN_SECONDS",
   "CLOB_AUTH_COOLDOWN_SECONDS",
   "TRADE_MODE",
@@ -173,6 +176,8 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
   orderSubmitMarketCooldownSeconds:
     DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
+  orderDuplicatePreventionSeconds:
+    DEFAULT_CONFIG.ORDER_DUPLICATE_PREVENTION_SECONDS,
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
   authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
 };
@@ -197,6 +202,8 @@ const MONITOR_LEGACY_DEFAULTS = {
   orderSubmitMaxPerHour: DEFAULT_CONFIG.ORDER_SUBMIT_MAX_PER_HOUR,
   orderSubmitMarketCooldownSeconds:
     DEFAULT_CONFIG.ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS,
+  orderDuplicatePreventionSeconds:
+    DEFAULT_CONFIG.ORDER_DUPLICATE_PREVENTION_SECONDS,
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
   authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
   tradeMode: DEFAULT_CONFIG.TRADE_MODE,
@@ -304,6 +311,10 @@ const ARB_ENV_MAP = {
     key: "orderSubmitMarketCooldownSeconds",
     parse: parseNumber,
   },
+  ORDER_DUPLICATE_PREVENTION_SECONDS: {
+    key: "orderDuplicatePreventionSeconds",
+    parse: parseNumber,
+  },
   CLOUDFLARE_COOLDOWN_SECONDS: {
     key: "cloudflareCooldownSeconds",
     parse: parseNumber,
@@ -358,6 +369,10 @@ const MONITOR_ENV_MAP = {
     key: "orderSubmitMarketCooldownSeconds",
     parse: parseNumber,
   },
+  ORDER_DUPLICATE_PREVENTION_SECONDS: {
+    key: "orderDuplicatePreventionSeconds",
+    parse: parseNumber,
+  },
   CLOUDFLARE_COOLDOWN_SECONDS: {
     key: "cloudflareCooldownSeconds",
     parse: parseNumber,
@@ -391,6 +406,7 @@ const MONITOR_LEGACY_KEYS = [
   "ORDER_SUBMIT_MIN_INTERVAL_MS",
   "ORDER_SUBMIT_MAX_PER_HOUR",
   "ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS",
+  "ORDER_DUPLICATE_PREVENTION_SECONDS",
   "CLOUDFLARE_COOLDOWN_SECONDS",
 ];
 
@@ -935,6 +951,8 @@ export function loadMonitorConfig(
     orderSubmitMaxPerHour: MONITOR_LEGACY_DEFAULTS.orderSubmitMaxPerHour,
     orderSubmitMarketCooldownSeconds:
       MONITOR_LEGACY_DEFAULTS.orderSubmitMarketCooldownSeconds,
+    orderDuplicatePreventionSeconds:
+      MONITOR_LEGACY_DEFAULTS.orderDuplicatePreventionSeconds,
     cloudflareCooldownSeconds:
       MONITOR_LEGACY_DEFAULTS.cloudflareCooldownSeconds,
     authCooldownSeconds: MONITOR_LEGACY_DEFAULTS.authCooldownSeconds,

@@ -37,6 +37,12 @@ export type PostOrderInput = {
   maxAcceptablePrice?: number;
   priority?: boolean; // For frontrunning - execute with higher priority
   targetGasPrice?: string; // Gas price of target transaction for frontrunning
+  /**
+   * Skip duplicate prevention check for this order.
+   * Use for hedging, stop-loss, or other operations that need to execute
+   * regardless of recent orders on the same token.
+   */
+  skipDuplicatePrevention?: boolean;
   logger: Logger;
   orderConfig?: OrderSubmissionConfig;
   now?: number;
@@ -305,7 +311,9 @@ async function postOrderClob(
       sizeUsd: orderValue,
       marketId,
       tokenId,
+      side, // Pass side for duplicate prevention
       orderFingerprint,
+      skipDuplicatePrevention: input.skipDuplicatePrevention,
       logger,
       now: input.now,
       skipRateLimit: retryCount > 0,

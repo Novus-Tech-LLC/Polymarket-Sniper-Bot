@@ -102,6 +102,9 @@ async function main(): Promise<void> {
         threshold: strategyConfig.autoSellThreshold,
         minHoldSeconds: strategyConfig.autoSellMinHoldSeconds,
         minOrderUsd: strategyConfig.minOrderUsd,
+        // Dispute window exit - sell at 99.9¢ to exit positions in dispute hold
+        disputeWindowExitEnabled: true, // Always enabled for faster capital recovery
+        disputeWindowExitPrice: 0.999, // Sell at 99.9¢ (others are doing this)
       },
       endgameSweepConfig: {
         enabled: strategyConfig.endgameSweepEnabled,

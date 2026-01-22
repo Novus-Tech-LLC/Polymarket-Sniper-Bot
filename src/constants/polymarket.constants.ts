@@ -37,6 +37,15 @@ export const DEFAULT_CONFIG = {
   ORDER_SUBMIT_MIN_INTERVAL_MS: 0, // No artificial delay
   ORDER_SUBMIT_MAX_PER_HOUR: 100000, // 100k/hour (well under Polymarket's 216k limit)
   ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 1, // 1 second per market (prevent spam on same market)
+  /**
+   * Token-level duplicate order prevention cooldown (in seconds)
+   * Prevents placing the same type of order (BUY/SELL) on the same token within this window.
+   * This prevents "order stacking" where multiple identical orders are placed on the same market.
+   * Independent of price/size - any BUY/SELL on the same tokenId within this window is blocked.
+   * Default: 300 seconds (5 minutes) - prevents duplicate orders within a 5 minute window.
+   * Set to 0 to disable.
+   */
+  ORDER_DUPLICATE_PREVENTION_SECONDS: 300,
   CLOUDFLARE_COOLDOWN_SECONDS: 3600,
   CLOB_AUTH_COOLDOWN_SECONDS: 300,
   TRADE_MODE: "clob" as "clob" | "onchain",

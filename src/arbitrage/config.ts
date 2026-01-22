@@ -51,6 +51,7 @@ export type ArbConfig = {
   orderSubmitMinIntervalMs: number;
   orderSubmitMaxPerHour: number;
   orderSubmitMarketCooldownSeconds: number;
+  orderDuplicatePreventionSeconds: number;
   cloudflareCooldownSeconds: number;
   authCooldownSeconds: number;
 };

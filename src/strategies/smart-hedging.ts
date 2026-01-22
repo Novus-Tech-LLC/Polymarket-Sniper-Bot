@@ -1027,6 +1027,7 @@ export class SmartHedgingStrategy {
         maxAcceptablePrice: bestBid * 0.95, // Accept up to 5% slippage
         logger: this.logger,
         priority: false,
+        skipDuplicatePrevention: true, // Hedging must bypass duplicate prevention
         orderConfig: { minOrderUsd: 0 },
       });
 
@@ -1267,6 +1268,7 @@ export class SmartHedgingStrategy {
         maxAcceptablePrice: opposingPrice * 1.05, // 5% slippage tolerance
         logger: this.logger,
         priority: true, // High priority for hedging
+        skipDuplicatePrevention: true, // Hedging must bypass duplicate prevention
         orderConfig: { minOrderUsd: 0 }, // Bypass minimum for hedging
       });
 
