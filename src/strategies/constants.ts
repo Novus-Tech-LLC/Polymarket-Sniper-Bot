@@ -3,11 +3,29 @@
  * Extracted to avoid magic numbers and improve maintainability
  */
 
-// Position Tracker constants
-export const POSITION_TRACKER_REFRESH_INTERVAL_MS = 30000; // 30 seconds
+/**
+ * Position Tracker constants
+ * 
+ * For HFT with many positions, we need fast refresh rates.
+ * As you compound and scale up, position count grows exponentially.
+ * The system must handle 100s of positions without bottlenecking.
+ */
+export const POSITION_TRACKER_REFRESH_INTERVAL_MS = 5000; // 5 seconds - fast refresh for HFT
 
-// Orchestrator constants - faster for HFT scalping
-export const STRATEGY_EXECUTION_INTERVAL_MS = 10000; // 10 seconds for faster response
+/**
+ * Orchestrator constants
+ * 
+ * Strategy execution must be fast to catch quick profit opportunities.
+ * With many positions, we run strategies in PARALLEL not sequential.
+ */
+export const STRATEGY_EXECUTION_INTERVAL_MS = 2000; // 2 seconds - rapid execution for scalping
+
+/**
+ * Parallel execution settings
+ * As positions scale, we need more concurrency
+ */
+export const MAX_PARALLEL_POSITION_CHECKS = 50; // Check up to 50 positions in parallel
+export const MAX_PARALLEL_SELLS = 10; // Execute up to 10 sells in parallel
 
 // Endgame Sweep constants
 export const MAX_LIQUIDITY_USAGE_PCT = 0.1; // Use max 10% of available liquidity

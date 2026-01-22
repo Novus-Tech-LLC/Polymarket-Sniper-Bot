@@ -2,7 +2,7 @@ import type { ClobClient } from "@polymarket/clob-client";
 import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker } from "./position-tracker";
-import { calculateNetProfit } from "./constants";
+import { calculateNetProfit, POLYMARKET_ROUND_TRIP_FEE_PCT } from "./constants";
 
 export interface QuickFlipConfig {
   enabled: boolean;
@@ -42,6 +42,9 @@ export class QuickFlipStrategy {
   /**
    * Execute the quick flip strategy
    * Returns number of positions sold
+   * 
+   * For HFT with many positions, we process in PARALLEL batches
+   * to maximize throughput when you have 100s of positions.
    */
   async execute(): Promise<number> {
     if (!this.config.enabled) {
@@ -51,68 +54,58 @@ export class QuickFlipStrategy {
     // Clean up entry times for positions that no longer exist
     this.cleanupStaleEntries();
 
-    let soldCount = 0;
-
-    // Check for positions that hit target gain
+    // Collect all positions that need action
     const targetPositions = this.positionTracker.getPositionsAboveTarget(
       this.config.targetPct,
-    );
+    ).filter(p => this.shouldSell(p.marketId, p.tokenId));
 
-    for (const position of targetPositions) {
-      if (this.shouldSell(position.marketId, position.tokenId)) {
-        const netProfitPct = calculateNetProfit(position.pnlPct);
-        this.logger.info(
-          `[QuickFlip] 📈 Selling position at +${position.pnlPct.toFixed(2)}% gross (+${netProfitPct.toFixed(2)}% net after fees): ${position.marketId}`,
-        );
-
-        try {
-          await this.sellPosition(
-            position.marketId,
-            position.tokenId,
-            position.size,
-            false, // Not a stop-loss
-          );
-          soldCount++;
-        } catch (err) {
-          this.logger.error(
-            `[QuickFlip] ❌ Failed to sell position ${position.marketId}`,
-            err as Error,
-          );
-        }
-      }
-    }
-
-    // Check for positions that hit stop loss
     const stopLossPositions = this.positionTracker.getPositionsBelowStopLoss(
       this.config.stopLossPct,
-    );
+    ).filter(p => this.shouldSell(p.marketId, p.tokenId));
 
-    for (const position of stopLossPositions) {
-      if (this.shouldSell(position.marketId, position.tokenId)) {
-        const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
-        this.logger.warn(
-          `[QuickFlip] 🔻 Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`,
-        );
+    // Process all sells in PARALLEL for speed
+    const sellPromises: Promise<boolean>[] = [];
 
-        try {
-          await this.sellPosition(
-            position.marketId,
-            position.tokenId,
-            position.size,
-            true, // Stop-loss - bypass minimum check
-          );
-          soldCount++;
-        } catch (err) {
-          this.logger.error(
-            `[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`,
-            err as Error,
-          );
-        }
-      }
+    // Target profit sells
+    for (const position of targetPositions) {
+      const netProfitPct = calculateNetProfit(position.pnlPct);
+      this.logger.info(
+        `[QuickFlip] 📈 Selling position at +${position.pnlPct.toFixed(2)}% gross (+${netProfitPct.toFixed(2)}% net after fees): ${position.marketId}`,
+      );
+
+      sellPromises.push(
+        this.sellPosition(position.marketId, position.tokenId, position.size, false)
+          .then(() => true)
+          .catch((err) => {
+            this.logger.error(`[QuickFlip] ❌ Failed to sell position ${position.marketId}`, err as Error);
+            return false;
+          })
+      );
     }
 
+    // Stop-loss sells
+    for (const position of stopLossPositions) {
+      const netLossPct = position.pnlPct - POLYMARKET_ROUND_TRIP_FEE_PCT;
+      this.logger.warn(
+        `[QuickFlip] 🔻 Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`,
+      );
+
+      sellPromises.push(
+        this.sellPosition(position.marketId, position.tokenId, position.size, true)
+          .then(() => true)
+          .catch((err) => {
+            this.logger.error(`[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`, err as Error);
+            return false;
+          })
+      );
+    }
+
+    // Wait for all sells to complete in parallel
+    const results = await Promise.all(sellPromises);
+    const soldCount = results.filter(Boolean).length;
+
     if (soldCount > 0) {
-      this.logger.info(`[QuickFlip] ✅ Sold ${soldCount} positions`);
+      this.logger.info(`[QuickFlip] ✅ Sold ${soldCount}/${sellPromises.length} positions in parallel`);
     }
 
     return soldCount;

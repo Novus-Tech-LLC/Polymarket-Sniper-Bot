@@ -28,15 +28,25 @@ export interface StrategyOrchestratorConfig {
 
 /**
  * Strategy Orchestrator
- * Executes strategies in priority order to maximize returns while managing risk
- *
- * Priority Order:
- * 1. Auto-Redeem (claim resolved positions - highest priority for capital recovery)
- * 2. Risk-Free Arb (existing YES/NO < $1.00)
- * 3. Endgame Sweep (buy 98-99¢)
- * 4. Auto-Sell near $1.00 (configurable threshold, frees up capital)
- * 5. Quick Flip (sell at +5% gain)
- * 6. Whale Copy (existing monitor strategy)
+ * 
+ * MULTI-STRATEGY SYSTEM - Runs ALL strategies in PARALLEL for maximum throughput
+ * 
+ * As you compound money and positions grow, the system scales:
+ * - All strategies execute concurrently (not sequentially)
+ * - Position tracking refreshes every 5 seconds
+ * - Strategy execution every 2 seconds
+ * - Parallel sell execution for Quick Flip / Auto-Sell
+ * 
+ * Strategy Priority (for capital allocation, but execution is parallel):
+ * 1. Auto-Redeem - Claim resolved positions (capital recovery)
+ * 2. Risk-Free Arb - YES + NO < $1.00 (runs in ARB engine loop)
+ * 3. Endgame Sweep - Buy 75-92¢ positions (scalping range)
+ * 4. Auto-Sell - Sell at threshold (free up capital)
+ * 5. Quick Flip - Take profits at target %
+ * 6. Whale Copy - Follow whale trades (runs in Monitor loop)
+ * 
+ * The ARB engine and Monitor service run in their own continuous loops
+ * alongside this orchestrator for maximum parallelism.
  */
 export class StrategyOrchestrator {
   private client: ClobClient;
@@ -169,77 +179,110 @@ export class StrategyOrchestrator {
 
   /**
    * Execute all strategies in priority order
+   * 
+   * For HFT with many positions, we run strategies in PARALLEL
+   * to maximize throughput and catch opportunities faster.
+   * 
+   * Priority still matters for capital allocation, but execution is concurrent.
    */
   private async executeStrategies(): Promise<void> {
-    this.logger.debug("[Orchestrator] Executing strategies");
+    this.logger.debug("[Orchestrator] Executing strategies in parallel");
 
     try {
-      // Priority 1: Auto-Redeem (claim resolved positions - highest priority for capital recovery)
-      const autoRedeemEnabled = this.autoRedeemStrategy.getStats().enabled;
-      this.logger.debug(
-        `[Orchestrator] Auto-Redeem is ${autoRedeemEnabled ? "active" : "disabled"} (Priority 1)`,
-      );
-      const redeemCount = await this.autoRedeemStrategy.execute();
-      if (redeemCount > 0) {
-        this.logger.info(
-          `[Orchestrator] 💵 Priority 1: Auto-Redeem claimed ${redeemCount} resolved position(s)`,
+      // Run ALL strategies in parallel for maximum speed
+      // Each strategy handles its own position checking and execution
+      const results = await Promise.allSettled([
+        // Priority 1: Auto-Redeem (claim resolved positions - highest priority for capital recovery)
+        this.executeWithLogging(
+          "Auto-Redeem",
+          1,
+          () => this.autoRedeemStrategy.execute(),
+          this.autoRedeemStrategy.getStats().enabled,
+        ),
+        
+        // Priority 3: Endgame Sweep (buy high-probability positions)
+        this.executeWithLogging(
+          "Endgame Sweep",
+          3,
+          () => this.endgameSweepStrategy.execute(),
+          this.endgameSweepStrategy.getStats().enabled,
+        ),
+        
+        // Priority 4: Auto-Sell (free up capital at threshold)
+        this.executeWithLogging(
+          "Auto-Sell",
+          4,
+          () => this.autoSellStrategy.execute(),
+          this.autoSellStrategy.getStats().enabled,
+        ),
+        
+        // Priority 5: Quick Flip (take profits at target)
+        this.executeWithLogging(
+          "Quick Flip",
+          5,
+          () => this.quickFlipStrategy.execute(),
+          this.quickFlipStrategy.getStats().enabled,
+        ),
+      ]);
+
+      // Log any failures
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          this.logger.error(
+            `[Orchestrator] Strategy ${index + 1} failed: ${result.reason}`,
+          );
+        }
+      });
+
+      // Log summary
+      const totalExecuted = results.filter(
+        (r) => r.status === "fulfilled" && (r.value as number) > 0
+      ).length;
+      
+      if (totalExecuted > 0) {
+        this.logger.debug(
+          `[Orchestrator] ${totalExecuted} strategies executed trades`,
         );
       }
 
-      // Priority 2: Risk-Free Arb (handled by existing arbitrage engine)
-      // This runs continuously in its own loop
+      // Note: ARB engine (Priority 2) and Monitor (Priority 6) run in their own loops
       this.logger.debug(
-        `[Orchestrator] ARB engine is ${this.arbEnabled ? "active" : "disabled"} (Priority 2)`,
+        `[Orchestrator] ARB=${this.arbEnabled ? "active" : "off"} Monitor=${this.monitorEnabled ? "active" : "off"}`,
       );
 
-      // Priority 3: Endgame Sweep (buy 98-99¢)
-      const endgameEnabled = this.endgameSweepStrategy.getStats().enabled;
-      this.logger.debug(
-        `[Orchestrator] Endgame Sweep is ${endgameEnabled ? "active" : "disabled"} (Priority 3)`,
-      );
-      const endgameCount = await this.endgameSweepStrategy.execute();
-      if (endgameCount > 0) {
-        this.logger.info(
-          `[Orchestrator] 💰 Priority 3: Endgame Sweep executed ${endgameCount} trades`,
-        );
-      }
-
-      // Priority 4: Auto-Sell at 99¢ (free up capital)
-      const autoSellEnabled = this.autoSellStrategy.getStats().enabled;
-      this.logger.debug(
-        `[Orchestrator] Auto-Sell is ${autoSellEnabled ? "active" : "disabled"} (Priority 4)`,
-      );
-      const autoSellCount = await this.autoSellStrategy.execute();
-      if (autoSellCount > 0) {
-        this.logger.info(
-          `[Orchestrator] 📤 Priority 4: Auto-Sell executed ${autoSellCount} trades`,
-        );
-      }
-
-      // Priority 5: Quick Flip (sell at +5% gain)
-      const quickFlipEnabled = this.quickFlipStrategy.getStats().enabled;
-      this.logger.debug(
-        `[Orchestrator] Quick Flip is ${quickFlipEnabled ? "active" : "disabled"} (Priority 5)`,
-      );
-      const quickFlipCount = await this.quickFlipStrategy.execute();
-      if (quickFlipCount > 0) {
-        this.logger.info(
-          `[Orchestrator] 💹 Priority 5: Quick Flip executed ${quickFlipCount} trades`,
-        );
-      }
-
-      // Priority 6: Whale Copy (handled by existing monitor service)
-      // This runs continuously in its own loop
-      this.logger.debug(
-        `[Orchestrator] Monitor service is ${this.monitorEnabled ? "active" : "disabled"} (Priority 6)`,
-      );
-
-      this.logger.debug("[Orchestrator] Strategy execution complete");
     } catch (err) {
       this.logger.error(
         "[Orchestrator] Error during strategy execution",
         err as Error,
       );
+    }
+  }
+
+  /**
+   * Execute a strategy with logging
+   */
+  private async executeWithLogging(
+    name: string,
+    priority: number,
+    execute: () => Promise<number>,
+    enabled: boolean,
+  ): Promise<number> {
+    if (!enabled) {
+      this.logger.debug(`[Orchestrator] ${name} is disabled (Priority ${priority})`);
+      return 0;
+    }
+
+    try {
+      const count = await execute();
+      if (count > 0) {
+        this.logger.info(
+          `[Orchestrator] 💰 Priority ${priority}: ${name} executed ${count} trade(s)`,
+        );
+      }
+      return count;
+    } catch (err) {
+      this.logger.error(`[Orchestrator] ${name} failed`, err as Error);
+      throw err;
     }
   }
 
