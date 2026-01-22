@@ -1101,6 +1101,7 @@ export type StrategyConfig = {
   quickFlipStopLossPct: number;
   quickFlipMinHoldSeconds: number;
   quickFlipMinProfitUsd: number; // Minimum absolute profit in USD per trade
+  quickFlipDynamicTargets: boolean; // Enable dynamic profit targets based on entry price
   autoSellEnabled: boolean;
   autoSellThreshold: number;
   autoSellMinHoldSeconds: number;
@@ -1172,6 +1173,16 @@ export function loadStrategyConfig(
             .QUICK_FLIP_MIN_PROFIT_USD
         : undefined) ??
       0.25, // Default $0.25 minimum profit per trade
+    // QUICK_FLIP_DYNAMIC_TARGETS: enable entry-price-based dynamic profit targets
+    // Lower entry price = higher profit target required (more uncertainty)
+    // Default: false (use static targets from config)
+    quickFlipDynamicTargets:
+      parseBool(readEnv("QUICK_FLIP_DYNAMIC_TARGETS", overrides) ?? "") ??
+      ("QUICK_FLIP_DYNAMIC_TARGETS" in preset
+        ? (preset as { QUICK_FLIP_DYNAMIC_TARGETS: boolean })
+            .QUICK_FLIP_DYNAMIC_TARGETS
+        : undefined) ??
+      false, // Default to static targets
     autoSellEnabled: preset.AUTO_SELL_ENABLED ?? false,
     autoSellThreshold: preset.AUTO_SELL_THRESHOLD ?? 0.99,
     autoSellMinHoldSeconds: preset.AUTO_SELL_MIN_HOLD_SECONDS ?? 120,

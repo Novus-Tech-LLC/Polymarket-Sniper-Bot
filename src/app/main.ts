@@ -95,6 +95,7 @@ async function main(): Promise<void> {
         minHoldSeconds: strategyConfig.quickFlipMinHoldSeconds,
         minOrderUsd: strategyConfig.minOrderUsd,
         minProfitUsd: strategyConfig.quickFlipMinProfitUsd,
+        dynamicTargets: strategyConfig.quickFlipDynamicTargets,
       },
       autoSellConfig: {
         enabled: strategyConfig.autoSellEnabled,

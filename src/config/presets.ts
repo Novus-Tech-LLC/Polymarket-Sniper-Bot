@@ -284,38 +284,51 @@ export const STRATEGY_PRESETS = {
     ARB_ENABLED: true,
     MONITOR_ENABLED: true,
     /**
-     * HIGH-FREQUENCY SCALPING STRATEGY
+     * PROFITABLE SCALPING STRATEGY (v2 - Optimized)
      *
-     * IMPORTANT: Don't waste time on penny profits!
-     * Every trade should make at least $1 to be worth the effort.
-     * Even aggressive HFT needs meaningful per-trade returns.
+     * KEY INSIGHTS FROM TRADING DATA:
+     * - Buying at 46¢, 50¢ is RISKY for scalping (too uncertain)
+     * - Buying at 75¢+ is BETTER (clearer outcome, tighter spreads)
+     * - Buying at 85¢+ is IDEAL for scalping (near-certain, reliable profits)
      *
-     * Key strategies:
-     * 1. Spread scalping - profit from bid/ask gaps
-     * 2. Unity constraint arb - YES + NO should = $1.00
-     * 3. Tail-end trading - mispriced contracts near resolution
-     * 4. Momentum scalps - ride quick price movements
+     * STRATEGY:
+     * 1. Focus on HIGH-CONFIDENCE entries (85¢+) for scalping
+     * 2. Scale profit targets with entry price (lower entry = higher target)
+     * 3. Quick exits on premium tier entries (90¢+)
+     * 4. Hold speculative entries for resolution instead of scalping
+     *
+     * Target: $1+ profit per trade on $5-10 positions (10-20% return)
      */
 
-    // Quick Flip - SCALPING WITH REAL PROFITS
-    // 15% target on $10 position = $1.50 profit minimum
+    // Quick Flip - DYNAMIC SCALPING
+    // Higher entry price = lower target needed (more certain)
+    // Lower entry price = hold for resolution or larger move
     QUICK_FLIP_ENABLED: true,
-    QUICK_FLIP_TARGET_PCT: 15, // 15% target for meaningful scalp profits
-    QUICK_FLIP_STOP_LOSS_PCT: 7, // 7% stop - ~2:1 risk/reward ratio
+    QUICK_FLIP_TARGET_PCT: 10, // Base 10% target - adjusted dynamically based on entry
+    QUICK_FLIP_STOP_LOSS_PCT: 5, // 5% stop - 2:1 risk/reward ratio
     QUICK_FLIP_MIN_HOLD_SECONDS: 0, // Exit immediately when target hit
-    QUICK_FLIP_MIN_PROFIT_USD: 1.0, // Minimum $1.00 profit per trade - non-negotiable
+    QUICK_FLIP_MIN_PROFIT_USD: 1.0, // Minimum $1.00 profit per trade
+    /** Enable dynamic profit targets based on entry price (uses trade-quality module) */
+    QUICK_FLIP_DYNAMIC_TARGETS: true,
 
-    // Auto-sell when price spikes
+    // Auto-sell when price reaches high confidence
     AUTO_SELL_ENABLED: true,
-    AUTO_SELL_THRESHOLD: 0.95, // Lock in gains at 95¢
+    AUTO_SELL_THRESHOLD: 0.96, // Lock in gains at 96¢ (tighter than before)
     AUTO_SELL_MIN_HOLD_SECONDS: 0,
 
-    // Endgame sweep - 80-90¢ range for scalping
-    // More volatility = more scalping opportunities
+    /**
+     * ENDGAME SWEEP - OPTIMIZED FOR PROFITABLE SCALPING
+     *
+     * IMPORTANT CHANGE: Raised minimum price from 75¢ to 85¢
+     * - 85¢+ entries have ~85% win probability
+     * - Tighter spreads = easier scalps
+     * - Less capital at risk per trade
+     * - More predictable outcomes
+     */
     ENDGAME_SWEEP_ENABLED: true,
-    ENDGAME_MIN_PRICE: 0.75, // Buy at 75¢+ (25% upside potential)
-    ENDGAME_MAX_PRICE: 0.92, // Up to 92¢ (room for quick exits)
-    MAX_POSITION_USD: 100, // Larger positions for scalping
+    ENDGAME_MIN_PRICE: 0.85, // Buy at 85¢+ only (safer entries, better scalp success)
+    ENDGAME_MAX_PRICE: 0.94, // Up to 94¢ (room for quick exits)
+    MAX_POSITION_USD: 50, // Moderate positions - less risk per trade
 
     // Auto-redeem resolved positions
     AUTO_REDEEM_ENABLED: true,
@@ -331,29 +344,29 @@ export const STRATEGY_PRESETS = {
     ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 0, // No per-market cooldown
 
     /**
-     * ARBITRAGE SETTINGS - REAL MONEY ONLY
-     * Don't bother with trades that don't make at least $1
+     * ARBITRAGE SETTINGS - QUALITY OVER QUANTITY
+     * Focus on higher-edge trades rather than volume
      */
     ARB_SCAN_INTERVAL_MS: 100, // Scan 10x/second
-    ARB_MIN_EDGE_BPS: 150, // 1.5% minimum edge for meaningful profit
+    ARB_MIN_EDGE_BPS: 200, // 2% minimum edge (up from 1.5%) for better profits
     ARB_MIN_PROFIT_USD: 1.0, // Minimum $1 profit per arb trade
-    ARB_MAX_SPREAD_BPS: 10000, // Permissive spread tolerance
+    ARB_MAX_SPREAD_BPS: 500, // Tighter spread requirement (5% max)
     ARB_FEE_BPS: 1, // Correct fee: 0.01% per side
     ARB_SLIPPAGE_BPS: 20, // Account for 0.2% slippage
-    ARB_TRADE_BASE_USD: 25, // Larger base size for scalping
-    ARB_MAX_POSITION_USD: 200,
-    ARB_MAX_WALLET_EXPOSURE_USD: 2000,
-    ARB_MAX_TRADES_PER_HOUR: 100000,
-    ARB_MARKET_COOLDOWN_SECONDS: 0,
-    ARB_MAX_CONSECUTIVE_FAILURES: 20, // Higher tolerance for fast trading
-    ARB_MAX_CONCURRENT_TRADES: 25, // Parallel execution
+    ARB_TRADE_BASE_USD: 15, // Smaller base size for more controlled risk
+    ARB_MAX_POSITION_USD: 100, // Reduced from 200 - less risk per position
+    ARB_MAX_WALLET_EXPOSURE_USD: 500, // Reduced from 2000 - better risk management
+    ARB_MAX_TRADES_PER_HOUR: 50000, // Reduced - focus on quality
+    ARB_MARKET_COOLDOWN_SECONDS: 1, // Small cooldown to avoid overtrading one market
+    ARB_MAX_CONSECUTIVE_FAILURES: 10, // Lower tolerance - don't chase losses
+    ARB_MAX_CONCURRENT_TRADES: 15, // Reduced from 25
     ARB_STARTUP_COOLDOWN_SECONDS: 0,
 
     // Monitor settings - fast scanning
     FETCH_INTERVAL: 1,
-    MIN_TRADE_SIZE_USD: 1,
-    MIN_ORDER_USD: 1,
-    FRONTRUN_MAX_SIZE_USD: 500,
+    MIN_TRADE_SIZE_USD: 5, // Higher minimum to filter noise
+    MIN_ORDER_USD: 5, // Match trade size minimum
+    FRONTRUN_MAX_SIZE_USD: 200, // Reduced from 500
     MONITOR_REQUIRE_CONFIRMED: false,
   },
 } as const;

@@ -3,6 +3,12 @@ import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker } from "./position-tracker";
 import { calculateNetProfit, MIN_QUICK_FLIP_PROFIT_USD } from "./constants";
+import {
+  getDynamicProfitTarget,
+  getDynamicStopLoss,
+  assessTradeQuality,
+  PRICE_TIERS,
+} from "./trade-quality";
 
 export interface QuickFlipConfig {
   enabled: boolean;
@@ -11,6 +17,7 @@ export interface QuickFlipConfig {
   minHoldSeconds: number; // Minimum time to hold position before selling
   minOrderUsd: number; // Minimum order size in USD (from MIN_ORDER_USD env)
   minProfitUsd?: number; // Minimum absolute profit in USD (optional, default $0.25)
+  dynamicTargets?: boolean; // Enable dynamic profit targets based on entry price
 }
 
 export interface QuickFlipStrategyConfig {
@@ -59,17 +66,9 @@ export class QuickFlipStrategy {
     // Get all positions for diagnostic logging
     const allPositions = this.positionTracker.getPositions();
 
-    // Check for positions that hit target gain
-    const targetPositions = this.positionTracker.getPositionsAboveTarget(
-      this.config.targetPct,
-    );
-
-    // Check for positions that hit stop loss
-    // Stop-loss executes immediately based on actual entry price P&L - no hold time required
-    // This ensures stop-loss works correctly even after bot restart (not memory-dependent)
-    const stopLossPositions = this.positionTracker.getPositionsBelowStopLoss(
-      this.config.stopLossPct,
-    );
+    // Get configured minimum profit USD (default to constant if not set)
+    const minProfitUsd = this.config.minProfitUsd ?? MIN_QUICK_FLIP_PROFIT_USD;
+    const useDynamicTargets = this.config.dynamicTargets ?? false;
 
     // Log diagnostic info about positions being monitored
     if (allPositions.length > 0) {
@@ -82,35 +81,40 @@ export class QuickFlipStrategy {
 
       this.logger.debug(
         `[QuickFlip] 📊 Monitoring ${allPositions.length} positions | ` +
-          `Stop-loss threshold: -${this.config.stopLossPct}% | ` +
-          `Target threshold: +${this.config.targetPct}% | ` +
+          `Stop-loss: -${this.config.stopLossPct}% | ` +
+          `Target: +${this.config.targetPct}% | ` +
+          `Dynamic: ${useDynamicTargets ? "ON" : "OFF"} | ` +
           `Worst P&L: ${worstPosition.pnlPct.toFixed(2)}% | ` +
-          `Best P&L: ${bestPosition.pnlPct.toFixed(2)}% | ` +
-          `Stop-loss candidates: ${stopLossPositions.length} | ` +
-          `Target candidates: ${targetPositions.length}`,
+          `Best P&L: ${bestPosition.pnlPct.toFixed(2)}%`,
       );
     }
 
-    // Get configured minimum profit USD (default to constant if not set)
-    const minProfitUsd = this.config.minProfitUsd ?? MIN_QUICK_FLIP_PROFIT_USD;
+    // Process each position with dynamic or static targets
+    for (const position of allPositions) {
+      // Determine profit target and stop loss for this position
+      let targetPct = this.config.targetPct;
+      let stopLossPct = this.config.stopLossPct;
 
-    for (const position of targetPositions) {
-      // Use pnlUsd directly from position tracker (correctly calculated as (currentPrice - entryPrice) * size)
-      const absoluteProfitUsd = position.pnlUsd;
+      if (useDynamicTargets) {
+        // Use dynamic targets based on entry price
+        targetPct = getDynamicProfitTarget(position.entryPrice);
+        stopLossPct = getDynamicStopLoss(position.entryPrice);
 
-      // Check if profit meets minimum USD threshold
-      if (absoluteProfitUsd < minProfitUsd) {
-        const positionCostUsd = position.size * position.entryPrice;
-        this.logger.debug(
-          `[QuickFlip] ⏸️ Skipping ${position.marketId}: profit $${absoluteProfitUsd.toFixed(2)} below min $${minProfitUsd.toFixed(2)} (${position.pnlPct.toFixed(2)}% on $${positionCostUsd.toFixed(2)} position)`,
-        );
-        continue;
+        // Log quality assessment for debug
+        const quality = assessTradeQuality({ entryPrice: position.entryPrice });
+        if (quality.action === "HOLD" && position.pnlPct > 0) {
+          this.logger.debug(
+            `[QuickFlip] 📊 Position ${position.marketId}: entry ${(position.entryPrice * 100).toFixed(1)}¢ suggests HOLD (score: ${quality.score}, target: ${targetPct}%)`,
+          );
+        }
       }
 
-      if (this.shouldSell(position.marketId, position.tokenId)) {
-        const netProfitPct = calculateNetProfit(position.pnlPct);
-        this.logger.info(
-          `[QuickFlip] 📈 Selling position at +${position.pnlPct.toFixed(2)}% gross (+${netProfitPct.toFixed(2)}% net after fees), profit: $${absoluteProfitUsd.toFixed(2)}: ${position.marketId}`,
+      // Check for stop loss (negative P&L beyond threshold)
+      if (position.pnlPct <= -stopLossPct) {
+        // Stop-loss sells immediately - no hold time check
+        const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
+        this.logger.warn(
+          `[QuickFlip] 🔻 Stop-loss at ${position.pnlPct.toFixed(2)}% (threshold: -${stopLossPct}%, net: ${netLossPct.toFixed(2)}%): ${position.marketId}`,
         );
 
         try {
@@ -124,35 +128,64 @@ export class QuickFlipStrategy {
           }
         } catch (err) {
           this.logger.error(
-            `[QuickFlip] ❌ Failed to sell position ${position.marketId}`,
+            `[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`,
             err as Error,
           );
         }
+        continue; // Don't process target for this position
       }
-    }
 
-    for (const position of stopLossPositions) {
-      // Stop-loss sells immediately - don't use shouldSell() which requires hold time
-      // The P&L is already calculated from actual entry price, so stop-loss is reliable
-      const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
-      this.logger.warn(
-        `[QuickFlip] 🔻 Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`,
-      );
+      // Check for target profit
+      if (position.pnlPct >= targetPct) {
+        const absoluteProfitUsd = position.pnlUsd;
 
-      try {
-        const sold = await this.sellPosition(
-          position.marketId,
-          position.tokenId,
-          position.size,
-        );
-        if (sold) {
-          soldCount++;
+        // Check if profit meets minimum USD threshold
+        if (absoluteProfitUsd < minProfitUsd) {
+          const positionCostUsd = position.size * position.entryPrice;
+          this.logger.debug(
+            `[QuickFlip] ⏸️ Skipping ${position.marketId}: profit $${absoluteProfitUsd.toFixed(2)} below min $${minProfitUsd.toFixed(2)} (${position.pnlPct.toFixed(2)}% on $${positionCostUsd.toFixed(2)} position)`,
+          );
+          continue;
         }
-      } catch (err) {
-        this.logger.error(
-          `[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`,
-          err as Error,
-        );
+
+        // For low-price entries with dynamic targets, consider holding longer
+        if (
+          useDynamicTargets &&
+          position.entryPrice < PRICE_TIERS.STANDARD_MIN
+        ) {
+          const quality = assessTradeQuality({
+            entryPrice: position.entryPrice,
+          });
+          if (quality.action === "HOLD") {
+            this.logger.debug(
+              `[QuickFlip] ⏸️ Holding ${position.marketId}: entry ${(position.entryPrice * 100).toFixed(1)}¢ suggests hold for resolution (score: ${quality.score})`,
+            );
+            continue;
+          }
+        }
+
+        if (this.shouldSell(position.marketId, position.tokenId)) {
+          const netProfitPct = calculateNetProfit(position.pnlPct);
+          this.logger.info(
+            `[QuickFlip] 📈 Selling at +${position.pnlPct.toFixed(2)}% (target: ${targetPct}%, net: +${netProfitPct.toFixed(2)}%), profit: $${absoluteProfitUsd.toFixed(2)}: ${position.marketId}`,
+          );
+
+          try {
+            const sold = await this.sellPosition(
+              position.marketId,
+              position.tokenId,
+              position.size,
+            );
+            if (sold) {
+              soldCount++;
+            }
+          } catch (err) {
+            this.logger.error(
+              `[QuickFlip] ❌ Failed to sell position ${position.marketId}`,
+              err as Error,
+            );
+          }
+        }
       }
     }
 
@@ -356,6 +389,7 @@ export class QuickFlipStrategy {
     targetPct: number;
     stopLossPct: number;
     minProfitUsd: number;
+    dynamicTargets: boolean;
   } {
     return {
       trackedPositions: this.positionEntryTimes.size,
@@ -363,6 +397,7 @@ export class QuickFlipStrategy {
       targetPct: this.config.targetPct,
       stopLossPct: this.config.stopLossPct,
       minProfitUsd: this.config.minProfitUsd ?? MIN_QUICK_FLIP_PROFIT_USD,
+      dynamicTargets: this.config.dynamicTargets ?? false,
     };
   }
 }

@@ -7,6 +7,7 @@ import {
   isProfitableAfterFees,
 } from "./constants";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
+import { assessTradeQuality, SPREAD_TIERS } from "./trade-quality";
 
 export interface EndgameSweepConfig {
   enabled: boolean;
@@ -37,6 +38,7 @@ export interface Market {
   side: "YES" | "NO";
   price: number;
   liquidity: number;
+  spreadBps?: number; // Bid-ask spread in basis points
 }
 
 export interface EndgameSweepStrategyConfig {
@@ -47,9 +49,12 @@ export interface EndgameSweepStrategyConfig {
 
 /**
  * Endgame Sweep Strategy
- * Scan markets for positions trading at 98-99¢ (near-certain outcomes)
- * Buy these positions for near-guaranteed 1-2% profit
- * Very low risk since outcome is almost certain
+ *
+ * OPTIMIZED FOR PROFITABLE SCALPING:
+ * - Focus on high-confidence entries (85¢+) for reliable scalps
+ * - Check spread quality before entering (avoid wide spreads)
+ * - Assess trade quality using the trade-quality module
+ * - Scale position size based on liquidity and confidence
  */
 export class EndgameSweepStrategy {
   private client: ClobClient;
@@ -89,6 +94,34 @@ export class EndgameSweepStrategy {
         continue;
       }
 
+      // === TRADE QUALITY ASSESSMENT ===
+      // Use the trade-quality module to assess if this is a good scalp opportunity
+      const quality = assessTradeQuality({
+        entryPrice: market.price,
+        spreadBps: market.spreadBps,
+        liquidityUsd: market.liquidity,
+        positionSizeUsd: this.config.maxPositionUsd,
+      });
+
+      // Skip trades that should be avoided based on quality assessment
+      if (quality.action === "AVOID") {
+        this.logger.debug(
+          `[EndgameSweep] Skipping ${market.id}: quality score ${quality.score} suggests AVOID (${quality.reasons.join(", ")})`,
+        );
+        continue;
+      }
+
+      // Check spread quality - avoid wide spreads that eat into profits
+      if (
+        market.spreadBps !== undefined &&
+        market.spreadBps > SPREAD_TIERS.ACCEPTABLE_MAX
+      ) {
+        this.logger.debug(
+          `[EndgameSweep] Skipping ${market.id} at ${(market.price * 100).toFixed(1)}¢ - spread too wide (${market.spreadBps}bps > ${SPREAD_TIERS.ACCEPTABLE_MAX}bps max)`,
+        );
+        continue;
+      }
+
       // Calculate expected profit (gross and net)
       const expectedGrossProfitPct =
         ((1.0 - market.price) / market.price) * 100;
@@ -102,8 +135,11 @@ export class EndgameSweepStrategy {
         continue;
       }
 
+      // Log opportunity with quality assessment
       this.logger.info(
-        `[EndgameSweep] 💰 Opportunity: ${market.id} at ${(market.price * 100).toFixed(1)}¢ (gross ${expectedGrossProfitPct.toFixed(2)}%, net ${expectedNetProfitPct.toFixed(2)}% after fees)`,
+        `[EndgameSweep] 💰 Opportunity: ${market.id} at ${(market.price * 100).toFixed(1)}¢ ` +
+          `(quality: ${quality.score}/100, spread: ${market.spreadBps ?? "N/A"}bps, ` +
+          `gross: ${expectedGrossProfitPct.toFixed(2)}%, net: ${expectedNetProfitPct.toFixed(2)}%)`,
       );
 
       try {
@@ -131,6 +167,7 @@ export class EndgameSweepStrategy {
   /**
    * Scan for endgame opportunities
    * Fetches markets from Gamma API and filters by price range
+   * Enhanced with spread calculation for trade quality assessment
    */
   private async scanForEndgameOpportunities(): Promise<Market[]> {
     this.logger.debug(
@@ -220,6 +257,19 @@ export class EndgameSweepStrategy {
                   const bestAsk = parseFloat(orderbook.asks[0].price);
                   const bestAskSize = parseFloat(orderbook.asks[0].size);
 
+                  // Calculate spread if bids are available
+                  let spreadBps: number | undefined;
+                  if (orderbook.bids && orderbook.bids.length > 0) {
+                    const bestBid = parseFloat(orderbook.bids[0].price);
+                    // Spread = (ask - bid) / midpoint * 10000 (in basis points)
+                    const midpoint = (bestAsk + bestBid) / 2;
+                    if (midpoint > 0) {
+                      spreadBps = Math.round(
+                        ((bestAsk - bestBid) / midpoint) * 10000,
+                      );
+                    }
+                  }
+
                   // Check if price is in target range
                   if (
                     bestAsk >= this.config.minPrice &&
@@ -236,6 +286,9 @@ export class EndgameSweepStrategy {
                       })
                       .reduce((sum, level) => sum + parseFloat(level.size), 0);
 
+                    // Convert liquidity from shares to USD
+                    const liquidityUsd = totalLiquidity * bestAsk;
+
                     // Only consider if there's sufficient liquidity
                     const minLiquidity = this.config.maxPositionUsd / bestAsk;
                     if (totalLiquidity >= minLiquidity * 0.5) {
@@ -250,7 +303,8 @@ export class EndgameSweepStrategy {
                         tokenId,
                         side,
                         price: bestAsk,
-                        liquidity: totalLiquidity,
+                        liquidity: liquidityUsd, // Now in USD
+                        spreadBps, // Include spread for quality assessment
                       });
                     }
                   }
