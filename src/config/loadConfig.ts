@@ -136,7 +136,7 @@ const ARB_LEGACY_DEFAULTS: ArbConfig = {
   maxWalletExposureUsd: 50,
   sizeScaling: "sqrt",
   slippageBps: 30,
-  feeBps: 10,
+  feeBps: 1, // Correct Polymarket taker fee: 0.01% (1 basis point)
   startupCooldownSeconds: 30,
   marketCooldownSeconds: 1,
   maxTradesPerHour: 100000,

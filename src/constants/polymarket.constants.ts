@@ -11,6 +11,14 @@ export const POLYMARKET_CONTRACTS = [
  * Default configuration values
  * Rate limits are based on Polymarket API documentation
  * @see https://docs.polymarket.com/quickstart/introduction/rate-limits
+ * 
+ * NOTE ON RPC USAGE:
+ * Trading goes through Polymarket's CLOB API, NOT the RPC endpoint.
+ * RPC is only used for: balance checks, gas estimates, approvals, on-chain trades.
+ * With CLOB mode (default), RPC usage is minimal (~1-5 calls per trade cycle).
+ * 
+ * Infura free tier: 3M requests/day = ~125k/hour = ~35/second
+ * This is MORE than enough for HFT since orders go through CLOB API.
  */
 export const DEFAULT_CONFIG = {
   FETCH_INTERVAL_SECONDS: 1,
