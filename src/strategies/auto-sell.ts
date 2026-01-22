@@ -138,9 +138,11 @@ export class AutoSellStrategy {
       const orderbook = await this.client.getOrderBook(tokenId);
 
       if (!orderbook.bids || orderbook.bids.length === 0) {
-        throw new Error(
-          `No bids available for token ${tokenId} - market may be closed or resolved`,
+        this.logger.warn(
+          `[AutoSell] ⚠️ No bids available for token ${tokenId} - position cannot be sold (illiquid market)`,
         );
+        // Return gracefully instead of throwing - this is a normal market condition
+        return;
       }
 
       const bestBid = parseFloat(orderbook.bids[0].price);
@@ -164,13 +166,12 @@ export class AutoSellStrategy {
       // Calculate sell value
       const sizeUsd = size * bestBid;
 
-      // Validate minimum order size
+      // Log info for small positions but allow selling them to liquidate
       const minOrderUsd = this.config.minOrderUsd;
       if (sizeUsd < minOrderUsd) {
-        this.logger.warn(
-          `[AutoSell] Position too small: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,
+        this.logger.debug(
+          `[AutoSell] ℹ️ Selling small position: $${sizeUsd.toFixed(2)} (below $${minOrderUsd} minimum, allowed for liquidation)`,
         );
-        return;
       }
 
       // Extract wallet if available
@@ -185,6 +186,7 @@ export class AutoSellStrategy {
       );
 
       // Execute sell order - use aggressive pricing for fast fill
+      // Always set minOrderUsd=0 for sells to allow liquidating small positions
       const result = await postOrder({
         client: this.client,
         wallet,
@@ -196,6 +198,7 @@ export class AutoSellStrategy {
         maxAcceptablePrice: bestBid * 0.9, // Accept up to 10% slippage for urgent exit
         logger: this.logger,
         priority: false,
+        orderConfig: { minOrderUsd: 0 }, // Bypass minimum order size for all sells
       });
 
       if (result.status === "submitted") {

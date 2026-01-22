@@ -72,7 +72,6 @@ export class QuickFlipStrategy {
             position.marketId,
             position.tokenId,
             position.size,
-            false, // Not a stop-loss
           );
           soldCount++;
         } catch (err) {
@@ -85,31 +84,32 @@ export class QuickFlipStrategy {
     }
 
     // Check for positions that hit stop loss
+    // Stop-loss executes immediately based on actual entry price P&L - no hold time required
+    // This ensures stop-loss works correctly even after bot restart (not memory-dependent)
     const stopLossPositions = this.positionTracker.getPositionsBelowStopLoss(
       this.config.stopLossPct,
     );
 
     for (const position of stopLossPositions) {
-      if (this.shouldSell(position.marketId, position.tokenId)) {
-        const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
-        this.logger.warn(
-          `[QuickFlip] 🔻 Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`,
-        );
+      // Stop-loss sells immediately - don't use shouldSell() which requires hold time
+      // The P&L is already calculated from actual entry price, so stop-loss is reliable
+      const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
+      this.logger.warn(
+        `[QuickFlip] 🔻 Stop-loss triggered at ${position.pnlPct.toFixed(2)}% gross (${netLossPct.toFixed(2)}% net with fees): ${position.marketId}`,
+      );
 
-        try {
-          await this.sellPosition(
-            position.marketId,
-            position.tokenId,
-            position.size,
-            true, // Stop-loss - bypass minimum check
-          );
-          soldCount++;
-        } catch (err) {
-          this.logger.error(
-            `[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`,
-            err as Error,
-          );
-        }
+      try {
+        await this.sellPosition(
+          position.marketId,
+          position.tokenId,
+          position.size,
+        );
+        soldCount++;
+      } catch (err) {
+        this.logger.error(
+          `[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`,
+          err as Error,
+        );
       }
     }
 
@@ -147,14 +147,11 @@ export class QuickFlipStrategy {
    * @param marketId - The market ID
    * @param tokenId - The token ID to sell
    * @param size - Number of shares to sell
-   * @param isStopLoss - If true, bypasses minimum order size check to ensure stop-loss can execute.
-   *                     Defaults to false for regular profit-taking sells which respect the minimum.
    */
   private async sellPosition(
     marketId: string,
     tokenId: string,
     size: number,
-    isStopLoss: boolean = false,
   ): Promise<void> {
     try {
       // Import postOrder utility
@@ -200,14 +197,17 @@ export class QuickFlipStrategy {
       // Calculate sell value (size * best bid price)
       const sizeUsd = size * bestBid;
 
-      // Validate minimum order size for regular sells only
-      // Stop-loss sells bypass this check to prevent being stuck in losing positions
+      // For sells (liquidations), we always allow the order regardless of size
+      // The minimum order size restriction is primarily to prevent spam on new buys
+      // For stop-loss and profit-taking sells, we need to be able to exit positions
+      // even if they've decreased in value below the minimum threshold
+
+      // Log info for small positions but don't block them
       const minOrderUsd = this.config.minOrderUsd;
-      if (!isStopLoss && sizeUsd < minOrderUsd) {
-        this.logger.warn(
-          `[QuickFlip] ⚠️ Position too small to sell: $${sizeUsd.toFixed(2)} < $${minOrderUsd} minimum`,
+      if (sizeUsd < minOrderUsd) {
+        this.logger.debug(
+          `[QuickFlip] ℹ️ Selling small position: $${sizeUsd.toFixed(2)} (below $${minOrderUsd} minimum, allowed for liquidation)`,
         );
-        return;
       }
 
       // Extract wallet if available (for compatibility with postOrder)
@@ -218,7 +218,8 @@ export class QuickFlipStrategy {
       );
 
       // Execute sell order using postOrder utility
-      // For stop-loss orders, set minOrderUsd=0 to bypass order-submission layer checks
+      // Always set minOrderUsd=0 for sells to allow liquidating small positions
+      // (positions acquired before minimum size requirements were enforced)
       const result = await postOrder({
         client: this.client,
         wallet,
@@ -230,7 +231,7 @@ export class QuickFlipStrategy {
         maxAcceptablePrice: bestBid * 0.95, // Accept up to 5% slippage
         logger: this.logger,
         priority: false, // Not a frontrun trade
-        orderConfig: isStopLoss ? { minOrderUsd: 0 } : undefined,
+        orderConfig: { minOrderUsd: 0 }, // Bypass minimum order size for all sells
       });
 
       if (result.status === "submitted") {
