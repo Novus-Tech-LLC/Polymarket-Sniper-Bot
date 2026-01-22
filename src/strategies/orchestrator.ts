@@ -101,23 +101,7 @@ export class StrategyOrchestrator {
       refreshIntervalMs: POSITION_TRACKER_REFRESH_INTERVAL_MS,
     });
 
-    // Initialize Universal Stop-Loss (SAFETY NET - runs on ALL positions)
-    const universalStopLossConfig =
-      config.universalStopLossConfig ?? DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG;
-    this.universalStopLossStrategy = new UniversalStopLossStrategy({
-      client: config.client,
-      logger: config.logger,
-      positionTracker: this.positionTracker,
-      config: universalStopLossConfig,
-    });
-
-    if (universalStopLossConfig.enabled) {
-      this.logger.info(
-        `[Orchestrator] 🛡️ Universal Stop-Loss: ENABLED (max: ${universalStopLossConfig.maxStopLossPct}%, dynamic tiers: ${universalStopLossConfig.useDynamicTiers ? "ON" : "OFF"})`,
-      );
-    }
-
-    // Initialize Smart Hedging (REPLACES stop-loss for risky tier positions)
+    // Initialize Smart Hedging FIRST (so we know if it's enabled for stop-loss config)
     const smartHedgingConfig =
       config.smartHedgingConfig ?? DEFAULT_SMART_HEDGING_CONFIG;
     this.smartHedgingStrategy = new SmartHedgingStrategy({
@@ -130,6 +114,33 @@ export class StrategyOrchestrator {
     if (smartHedgingConfig.enabled) {
       this.logger.info(
         `[Orchestrator] 🛡️ Smart Hedging: ENABLED (trigger: -${smartHedgingConfig.triggerLossPct}%, max hedge: $${smartHedgingConfig.maxHedgeUsd}, reserve: ${smartHedgingConfig.reservePct}%)`,
+      );
+    }
+
+    // Initialize Universal Stop-Loss (SAFETY NET - runs on higher-tier positions)
+    // When smart hedging is enabled, skip risky tier positions (they'll be hedged instead)
+    const universalStopLossConfig =
+      config.universalStopLossConfig ?? DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG;
+    
+    // Auto-configure: skip risky tier if smart hedging is enabled
+    const stopLossConfigWithHedging = {
+      ...universalStopLossConfig,
+      skipRiskyTierForHedging: smartHedgingConfig.enabled,
+    };
+
+    this.universalStopLossStrategy = new UniversalStopLossStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: stopLossConfigWithHedging,
+    });
+
+    if (universalStopLossConfig.enabled) {
+      const hedgingNote = smartHedgingConfig.enabled 
+        ? " (risky tier → smart hedging)" 
+        : "";
+      this.logger.info(
+        `[Orchestrator] 🛡️ Universal Stop-Loss: ENABLED (max: ${universalStopLossConfig.maxStopLossPct}%, dynamic tiers: ${universalStopLossConfig.useDynamicTiers ? "ON" : "OFF"})${hedgingNote}`,
       );
     }
 
