@@ -64,9 +64,9 @@ export class AutoRedeemStrategy {
   private static readonly MAX_REDEMPTION_FAILURES = 3;
   private static readonly REDEMPTION_RETRY_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly DEFAULT_GAS_LIMIT = 300000n;
-  // Minimum share threshold multiplier: minPositionUsd * this = minimum shares to redeem
-  // At ~$1/share, 0.01 means we skip positions smaller than 1% of minPositionUsd in shares
-  // e.g., if minPositionUsd=1, we skip positions with < 0.01 shares (true dust)
+  // Multiplier to convert USD threshold to minimum share count: minPositionUsd * this = minimum shares to redeem
+  // For example, if minPositionUsd = 1, we require at least 0.01 shares to redeem
+  // (filters out positions with fractional shares smaller than 0.01 as true dust)
   private static readonly MIN_SHARES_USD_MULTIPLIER = 0.01;
 
   constructor(strategyConfig: AutoRedeemStrategyConfig) {
@@ -159,8 +159,9 @@ export class AutoRedeemStrategy {
       // Use first position for redemption (all positions in the market will be redeemed together)
       const position = marketPositions[0];
       
-      // Determine if this is a winning or losing position
-      const isWinning = totalValueUsd > 0;
+      // Determine if this is a winning or losing position:
+      // consider it winning if any position in the market has a positive current price.
+      const isWinning = marketPositions.some(pos => pos.currentPrice > 0);
       this.logger.info(
         `[AutoRedeem] Attempting to redeem ${isWinning ? 'WINNING' : 'LOSING'} market: market=${marketId}, positions=${marketPositions.length}, shares=${totalSize.toFixed(2)}, value=$${totalValueUsd.toFixed(2)}`,
       );

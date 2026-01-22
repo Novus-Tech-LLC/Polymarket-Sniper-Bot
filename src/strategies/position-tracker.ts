@@ -39,7 +39,10 @@ export class PositionTracker {
   private missingOrderbooks = new Set<string>(); // Cache tokenIds with no orderbook to avoid repeated API calls
   // Cache market outcomes persistently across refresh cycles. Resolved markets cannot change their outcome,
   // so caching is safe and prevents redundant Gamma API calls on every 30-second refresh.
-  private marketOutcomeCache: Map<string, string | null> = new Map();
+  // Note: Only successful outcomes are cached; null values from transient errors are not cached.
+  // Maximum cache size is enforced to prevent unbounded memory growth in long-running processes.
+  private marketOutcomeCache: Map<string, string> = new Map();
+  private static readonly MAX_OUTCOME_CACHE_SIZE = 1000; // Maximum number of cached market outcomes
   private lastRefreshStats: { resolved: number; active: number; skipped: number } = { resolved: 0, active: 0, skipped: 0 }; // Track stats for summary logging
 
   // API timeout constant for external API calls
@@ -304,13 +307,24 @@ export class PositionTracker {
                 // Market is resolved - fetch the actual market outcome to determine settlement price
                 // Use marketId as cache key since all tokens in the same market share the same outcome
                 // This avoids redundant Gamma API calls for multi-outcome markets
-                let winningOutcome = this.marketOutcomeCache.get(marketId);
+                let winningOutcome: string | null | undefined = this.marketOutcomeCache.get(marketId);
                 const wasCached = winningOutcome !== undefined;
                 
                 if (!wasCached) {
                   winningOutcome = await this.fetchMarketOutcome(tokenId);
-                  this.marketOutcomeCache.set(marketId, winningOutcome);
-                  newlyCachedMarkets++;
+                  // Only cache definite outcomes; avoid caching null/undefined that may come from transient API errors
+                  if (winningOutcome !== null && winningOutcome !== undefined) {
+                    // Enforce maximum cache size to prevent unbounded memory growth
+                    if (this.marketOutcomeCache.size >= PositionTracker.MAX_OUTCOME_CACHE_SIZE) {
+                      // Remove oldest entry (first key in Map iteration order)
+                      const firstKey = this.marketOutcomeCache.keys().next().value;
+                      if (firstKey) {
+                        this.marketOutcomeCache.delete(firstKey);
+                      }
+                    }
+                    this.marketOutcomeCache.set(marketId, winningOutcome);
+                    newlyCachedMarkets++;
+                  }
                 }
 
                 if (!winningOutcome) {
@@ -332,7 +346,6 @@ export class PositionTracker {
                   );
                 }
               } else {
-                activeCount++;
                 // Active market - fetch current orderbook with fallback to price API
                 try {
                   // Skip orderbook fetch if we know it's missing (cached)
@@ -385,6 +398,8 @@ export class PositionTracker {
                   this.logger.debug(`[PositionTracker] ${reason}`);
                   return null;
                 }
+                // Increment activeCount only after successful pricing
+                activeCount++;
               }
 
               // Calculate P&L
