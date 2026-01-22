@@ -5,6 +5,7 @@ import { QuickFlipStrategy } from "./quick-flip";
 import { AutoSellStrategy } from "./auto-sell";
 import { EndgameSweepStrategy } from "./endgame-sweep";
 import { AutoRedeemStrategy } from "./auto-redeem";
+import { getPerformanceTracker } from "./strategy-performance";
 import type { QuickFlipConfig } from "./quick-flip";
 import type { AutoSellConfig } from "./auto-sell";
 import type { EndgameSweepConfig } from "./endgame-sweep";
@@ -124,6 +125,33 @@ export class StrategyOrchestrator {
         `[Orchestrator] Auto-Redeem: Enabled (min position: $${config.autoRedeemConfig.minPositionUsd})`,
       );
     }
+
+    // Register strategies for performance tracking
+    this.initializePerformanceTracking(config);
+  }
+
+  /**
+   * Initialize performance tracking for dynamic allocation
+   */
+  private initializePerformanceTracking(config: StrategyOrchestratorConfig): void {
+    const tracker = getPerformanceTracker();
+    
+    // Register each strategy with base allocation
+    // Allocations are percentages that will be dynamically adjusted based on ROI
+    if (config.autoRedeemConfig.enabled) {
+      tracker.registerStrategy("auto-redeem", 20, 100);
+    }
+    if (config.endgameSweepConfig.enabled) {
+      tracker.registerStrategy("endgame-sweep", 30, config.endgameSweepConfig.maxPositionUsd);
+    }
+    if (config.autoSellConfig.enabled) {
+      tracker.registerStrategy("auto-sell", 20, 100);
+    }
+    if (config.quickFlipConfig.enabled) {
+      tracker.registerStrategy("quick-flip", 30, 100);
+    }
+
+    this.logger.info("[Orchestrator] 📊 Performance tracking initialized for dynamic allocation");
   }
 
   /**
@@ -150,6 +178,16 @@ export class StrategyOrchestrator {
         this.logger.error("[Orchestrator] Execution failed", err as Error);
       });
     }, this.executionIntervalMs);
+
+    // Log performance summary periodically
+    setInterval(() => {
+      const tracker = getPerformanceTracker();
+      const summary = tracker.getSummary();
+      if (summary !== "No strategies tracked") {
+        this.logger.info(`[Orchestrator] 📊 Performance:\n${summary}`);
+      }
+      tracker.pruneHistory(); // Clean up old data
+    }, 5 * 60 * 1000); // Every 5 minutes
 
     this.logger.info(
       `[Orchestrator] ✅ Started (execution interval: ${this.executionIntervalMs}ms)`,
