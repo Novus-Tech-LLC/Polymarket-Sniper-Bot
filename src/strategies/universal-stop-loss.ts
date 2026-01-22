@@ -52,11 +52,28 @@ export class UniversalStopLossStrategy {
   private logger: ConsoleLogger;
   private positionTracker: PositionTracker;
   private config: UniversalStopLossConfig;
-  // Track tokens with no liquidity to suppress repeated warnings
+
+  /**
+   * Tracks tokenIds with no liquidity to suppress repeated warnings.
+   * Key: tokenId (string)
+   * Cleared when position is sold or no longer held.
+   */
   private noLiquidityTokens: Set<string> = new Set();
-  // Track positions we've already attempted to sell (prevent spam)
+
+  /**
+   * Tracks positions currently being processed for stop-loss sell.
+   * Key format: "marketId-tokenId"
+   * Used to prevent duplicate sell attempts within the same execution cycle.
+   * Entries are removed after sell attempt completes (success or failure).
+   */
   private pendingSells: Set<string> = new Set();
-  // Track stop-loss triggers for logging
+
+  /**
+   * Tracks when stop-loss was triggered for each position (for logging/diagnostics).
+   * Key format: "marketId-tokenId"
+   * Value: timestamp (ms) when stop-loss was triggered
+   * Cleaned up when position no longer exists.
+   */
   private stopLossTriggered: Map<string, number> = new Map();
 
   constructor(strategyConfig: UniversalStopLossStrategyConfig) {

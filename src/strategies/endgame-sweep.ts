@@ -129,7 +129,7 @@ export class EndgameSweepStrategy {
         entryPrice: market.price,
         spreadBps: market.spreadBps,
         liquidityUsd: market.liquidity,
-        positionSizeUsd: Math.min(remainingCapacityUsd, this.config.maxPositionUsd),
+        positionSizeUsd: remainingCapacityUsd, // Use remaining capacity for quality assessment
       });
 
       // Skip trades that should be avoided based on quality assessment
@@ -411,8 +411,9 @@ export class EndgameSweepStrategy {
     let totalExposureUsd = 0;
 
     for (const pos of positions) {
-      // Check both by marketId and tokenId since the same market can have YES/NO tokens
-      if (pos.marketId === marketId || pos.tokenId === tokenId) {
+      // Check for the same market AND token to avoid summing unrelated positions
+      // A position matches if it's in the same market with the same token
+      if (pos.marketId === marketId && pos.tokenId === tokenId) {
         // Position value = size * entry price (what we paid)
         totalExposureUsd += pos.size * pos.entryPrice;
       }

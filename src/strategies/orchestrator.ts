@@ -19,6 +19,16 @@ import {
   STRATEGY_EXECUTION_INTERVAL_MS,
 } from "./constants";
 
+/**
+ * Default Universal Stop-Loss configuration
+ * Used when universalStopLossConfig is not provided to the orchestrator
+ */
+export const DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG: UniversalStopLossConfig = {
+  enabled: true,
+  maxStopLossPct: 25, // Absolute ceiling - no position should lose more than 25%
+  useDynamicTiers: true, // Use entry-price-based stop-loss tiers
+};
+
 export interface StrategyOrchestratorConfig {
   client: ClobClient;
   logger: ConsoleLogger;
@@ -85,12 +95,8 @@ export class StrategyOrchestrator {
     });
 
     // Initialize Universal Stop-Loss (SAFETY NET - runs on ALL positions)
-    // Default config if not provided: enabled, 25% max stop-loss, dynamic tiers ON
-    const universalStopLossConfig = config.universalStopLossConfig ?? {
-      enabled: true,
-      maxStopLossPct: 25,
-      useDynamicTiers: true,
-    };
+    const universalStopLossConfig =
+      config.universalStopLossConfig ?? DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG;
     this.universalStopLossStrategy = new UniversalStopLossStrategy({
       client: config.client,
       logger: config.logger,
