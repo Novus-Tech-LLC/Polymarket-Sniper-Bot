@@ -159,6 +159,10 @@ export const MONITOR_PRESETS = {
 } as const;
 
 export const STRATEGY_PRESETS = {
+  /**
+   * OFF preset - All strategies disabled
+   * Use this for testing or when you want manual-only trading
+   */
   off: {
     STRATEGY_ENABLED: false,
     ARB_ENABLED: false,
@@ -176,7 +180,7 @@ export const STRATEGY_PRESETS = {
     MAX_POSITION_USD: 25,
     AUTO_REDEEM_ENABLED: false,
     AUTO_REDEEM_MIN_POSITION_USD: 0.1,
-    // Smart Hedging - disabled when strategy is off
+    // Smart Hedging - disabled in "off" preset (STRATEGY_ENABLED=false disables all strategies)
     SMART_HEDGING_ENABLED: false,
     SMART_HEDGING_TRIGGER_LOSS_PCT: 20,
     SMART_HEDGING_MAX_HEDGE_USD: 10,

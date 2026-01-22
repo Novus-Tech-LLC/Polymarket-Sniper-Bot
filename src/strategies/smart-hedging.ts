@@ -38,11 +38,34 @@ export interface SmartHedgingConfig {
   triggerLossPct: number;
 
   /**
-   * Maximum USD to use for hedge position
+   * Maximum USD to use for hedge position (standard limit)
    * Should match original position size for full coverage
    * Default: $10
    */
   maxHedgeUsd: number;
+
+  /**
+   * Allow hedge to EXCEED maxHedgeUsd when stopping heavy losses
+   * When true, hedge size can match original position even if > maxHedgeUsd
+   * This ensures we can fully protect large losing positions
+   * Default: true (don't let limits prevent proper protection)
+   */
+  allowExceedMaxForProtection: boolean;
+
+  /**
+   * Absolute maximum USD for hedge even when exceeding limits
+   * Acts as a safety cap to prevent runaway hedging
+   * Only applies when allowExceedMaxForProtection is true
+   * Default: $100 (never hedge more than this regardless of position size)
+   */
+  absoluteMaxHedgeUsd: number;
+
+  /**
+   * Loss percentage threshold to trigger "emergency" hedging (bypass limits)
+   * When position drops beyond this %, allow exceeding maxHedgeUsd
+   * Default: 30% (severe loss = need full protection)
+   */
+  emergencyLossThresholdPct: number;
 
   /**
    * Percentage of wallet balance to reserve for hedging
@@ -138,22 +161,63 @@ export interface SmartHedgingConfig {
 }
 
 /**
- * Represents a hedged position pair
+ * Hedge calculation details for transparency
+ */
+export interface HedgeCalculation {
+  /** Original position investment */
+  originalInvestment: number;
+  /** Current value of original position */
+  currentValue: number;
+  /** Unrealized loss on original position */
+  unrealizedLoss: number;
+  /** Price of opposing side when hedged */
+  hedgePrice: number;
+  /** Minimum hedge size to break even */
+  breakEvenHedgeSize: number;
+  /** Hedge size needed to profit if hedge wins */
+  profitableHedgeSize: number;
+  /** Actual hedge size used */
+  actualHedgeSize: number;
+  /** Profit if original side wins */
+  profitIfOriginalWins: number;
+  /** Profit if hedge side wins */
+  profitIfHedgeWins: number;
+  /** Whether this hedge can turn into a winner */
+  canTurnIntoWinner: boolean;
+}
+
+/**
+ * Represents a hedged position pair with full tracking
  */
 export interface HedgedPosition {
   marketId: string;
   originalTokenId: string;
   hedgeTokenId: string;
   originalSide: "YES" | "NO";
+  /** Original entry price (what we paid per share) */
   originalEntryPrice: number;
+  /** Number of shares in original position */
   originalSize: number;
+  /** Total USD invested in original position */
+  originalInvestment: number;
+  /** Price when hedge was triggered */
+  priceAtHedge: number;
+  /** Unrealized loss when hedge was triggered */
+  unrealizedLossAtHedge: number;
+  /** Hedge entry price */
   hedgeEntryPrice: number;
+  /** Number of hedge shares purchased */
   hedgeSize: number;
+  /** Total USD invested in hedge */
+  hedgeInvestment: number;
+  /** Timestamp when hedge was placed */
   hedgeTimestamp: number;
-  /** Maximum potential loss (spread paid) */
+  /** Maximum potential loss (worst case) */
   maxLoss: number;
-  /** Guaranteed minimum return on resolution */
-  guaranteedReturn: number;
+  /** Best case profit (if winning side wins) */
+  bestCaseProfit: number;
+  /** Full calculation details */
+  calculation: HedgeCalculation;
 }
 
 /**
@@ -469,11 +533,6 @@ export class SmartHedgingStrategy {
 
     // Get opposing token info
     const originalSide = this.determineSide(position);
-    const opposingTokenId = await this.getOpposingTokenId(
-      position.marketId,
-      position.tokenId,
-      originalSide,
-    );
 
     // Default analysis (can't hedge)
     const defaultAnalysis: HedgeTimingAnalysis = {
@@ -494,6 +553,16 @@ export class SmartHedgingStrategy {
         breakEvenChance: 0,
       },
     };
+
+    if (!originalSide) {
+      return { ...defaultAnalysis, reason: "Cannot determine position side" };
+    }
+
+    const opposingTokenId = await this.getOpposingTokenId(
+      position.marketId,
+      position.tokenId,
+      originalSide,
+    );
 
     if (!opposingTokenId) {
       return { ...defaultAnalysis, reason: "No opposing token found" };
@@ -743,6 +812,13 @@ export class SmartHedgingStrategy {
     try {
       // Determine original side and find opposing token
       const originalSide = this.determineSide(position);
+      if (!originalSide) {
+        this.logger.warn(
+          `[SmartHedging] ⚠️ Cannot hedge - unable to determine position side for ${position.marketId}`,
+        );
+        return false;
+      }
+
       const opposingTokenId = await this.getOpposingTokenId(
         position.marketId,
         position.tokenId,
@@ -790,38 +866,130 @@ export class SmartHedgingStrategy {
         }
       }
 
-      // Calculate hedge size - aim to match original position value
-      const originalValue = position.size * position.entryPrice;
-      const hedgeSizeUsd = Math.min(originalValue, this.config.maxHedgeUsd);
-      const hedgeShares = hedgeSizeUsd / opposingPrice;
+      // === CALCULATE HEDGE SIZES ===
+      // We need to track:
+      // 1. Original investment (what we paid)
+      // 2. Current unrealized loss
+      // 3. Break-even hedge size (minimize loss)
+      // 4. Profitable hedge size (actually make money on hedge win)
 
-      // Calculate potential outcomes
-      const totalInvested = originalValue + hedgeSizeUsd;
+      const originalInvestment = position.size * position.entryPrice;
+      const currentValue = position.size * position.currentPrice;
+      const unrealizedLoss = originalInvestment - currentValue;
 
-      // If original side wins: original shares × $1
+      // Calculate hedge sizes:
+      // If we buy X hedge shares at price P:
+      // - If original wins: original shares × $1 - originalInvestment - (X × P) = profit
+      // - If hedge wins: X × $1 - originalInvestment - (X × P) = X × (1 - P) - originalInvestment
+
+      // For hedge win to be PROFITABLE:
+      // X × (1 - opposingPrice) > originalInvestment
+      // X > originalInvestment / (1 - opposingPrice)
+      const hedgeProfit = 1 - opposingPrice; // Profit per hedge share if hedge wins
+      const profitableHedgeShares = originalInvestment / hedgeProfit;
+      const profitableHedgeUsd = profitableHedgeShares * opposingPrice;
+
+      // Break-even across BOTH outcomes:
+      // We want to find hedge size where worst-case outcome = 0
+      // If original wins: originalShares × $1 - originalInvestment - hedgeCost = 0
+      // If hedge wins: hedgeShares × $1 - originalInvestment - hedgeCost = 0
+      // 
+      // For symmetry, we want both outcomes to be equal:
+      // originalShares - totalInvested = hedgeShares - totalInvested
+      // This means: originalShares = hedgeShares
+      // hedgeShares = originalShares, hedgeCost = originalShares × opposingPrice
+      const breakEvenHedgeShares = position.size; // Match original shares for symmetric outcomes
+      const breakEvenHedgeUsd = breakEvenHedgeShares * opposingPrice;
+
+      // Determine actual hedge size based on strategy
+      const isEmergency = position.pnlPct <= -this.config.emergencyLossThresholdPct;
+      
+      let targetHedgeUsd: number;
+      let hedgeSizeReason: string;
+      let hedgeGoal: "profit" | "break_even" | "limit_loss";
+
+      // Try to make the hedge PROFITABLE if possible within limits
+      if (this.config.allowExceedMaxForProtection) {
+        if (profitableHedgeUsd <= this.config.absoluteMaxHedgeUsd) {
+          // We can afford a profitable hedge!
+          targetHedgeUsd = profitableHedgeUsd;
+          hedgeSizeReason = `💰 PROFITABLE HEDGE - buying enough to MAKE MONEY if hedge wins`;
+          hedgeGoal = "profit";
+        } else if (isEmergency) {
+          // Emergency - use max available even if not fully profitable
+          targetHedgeUsd = this.config.absoluteMaxHedgeUsd;
+          hedgeSizeReason = `🚨 EMERGENCY - using max $${this.config.absoluteMaxHedgeUsd} (${position.pnlPct.toFixed(1)}% loss)`;
+          hedgeGoal = "limit_loss";
+        } else {
+          // Can't afford profitable hedge, use what we can
+          targetHedgeUsd = Math.min(originalInvestment, this.config.absoluteMaxHedgeUsd);
+          hedgeSizeReason = `📊 Partial hedge - profitable would need $${profitableHedgeUsd.toFixed(2)}, using $${targetHedgeUsd.toFixed(2)}`;
+          hedgeGoal = "limit_loss";
+        }
+      } else {
+        // Standard mode - respect maxHedgeUsd
+        targetHedgeUsd = Math.min(originalInvestment, this.config.maxHedgeUsd);
+        hedgeSizeReason = `Standard hedge within $${this.config.maxHedgeUsd} limit`;
+        hedgeGoal = targetHedgeUsd >= profitableHedgeUsd ? "profit" : "limit_loss";
+      }
+
+      const hedgeShares = targetHedgeUsd / opposingPrice;
+
+      // Calculate actual outcomes with chosen hedge size
+      const totalInvested = originalInvestment + targetHedgeUsd;
+
+      // If original side wins: original shares × $1 - total invested
       const originalWinPayout = position.size * 1.0;
-      // If opposing side wins: hedge shares × $1
-      const hedgeWinPayout = hedgeShares * 1.0;
-
       const originalWinProfit = originalWinPayout - totalInvested;
-      const hedgeWinProfit = hedgeWinPayout - totalInvested;
-      const maxLoss = Math.min(originalWinProfit, hedgeWinProfit);
-      const guaranteedReturn = Math.max(originalWinProfit, hedgeWinProfit);
 
-      // Determine outcome description for logging
+      // If hedge side wins: hedge shares × $1 - total invested
+      const hedgeWinPayout = hedgeShares * 1.0;
+      const hedgeWinProfit = hedgeWinPayout - totalInvested;
+
+      const maxLoss = Math.min(originalWinProfit, hedgeWinProfit);
+      const bestCaseProfit = Math.max(originalWinProfit, hedgeWinProfit);
       const canTurnIntoWinner = originalWinProfit >= 0 || hedgeWinProfit >= 0;
+
+      // Build calculation details
+      const calculation: HedgeCalculation = {
+        originalInvestment,
+        currentValue,
+        unrealizedLoss,
+        hedgePrice: opposingPrice,
+        breakEvenHedgeSize: breakEvenHedgeUsd,
+        profitableHedgeSize: profitableHedgeUsd,
+        actualHedgeSize: targetHedgeUsd,
+        profitIfOriginalWins: originalWinProfit,
+        profitIfHedgeWins: hedgeWinProfit,
+        canTurnIntoWinner,
+      };
+
+      // Detailed logging
       const outcomeDescription = canTurnIntoWinner
-        ? `🎉 TURNING LOSER INTO WINNER - one outcome yields profit!`
-        : `📉 Capping loss at $${Math.abs(maxLoss).toFixed(2)} (vs unlimited without hedge)`;
+        ? `🎉 TURNING LOSER INTO WINNER!`
+        : `📉 Capping loss at $${Math.abs(maxLoss).toFixed(2)}`;
 
       this.logger.info(
-        `[SmartHedging] 🛡️ EXECUTING HEDGE:` +
-          `\n  ${outcomeDescription}` +
-          `\n  Original: ${position.size.toFixed(2)} ${originalSide} @ ${(position.entryPrice * 100).toFixed(1)}¢ (now ${(position.currentPrice * 100).toFixed(1)}¢, P&L: ${position.pnlPct.toFixed(1)}%)` +
-          `\n  Hedge: ${hedgeShares.toFixed(2)} ${originalSide === "YES" ? "NO" : "YES"} @ ${(opposingPrice * 100).toFixed(1)}¢ ($${hedgeSizeUsd.toFixed(2)})` +
-          `\n  Total invested: $${totalInvested.toFixed(2)}` +
-          `\n  If ${originalSide} wins: $${originalWinPayout.toFixed(2)} payout = $${originalWinProfit >= 0 ? "+" : ""}${originalWinProfit.toFixed(2)}` +
-          `\n  If ${originalSide === "YES" ? "NO" : "YES"} wins: $${hedgeWinPayout.toFixed(2)} payout = $${hedgeWinProfit >= 0 ? "+" : ""}${hedgeWinProfit.toFixed(2)}`,
+        `[SmartHedging] 🛡️ HEDGE CALCULATION:` +
+          `\n  ═══════════════════════════════════════` +
+          `\n  📊 ORIGINAL POSITION:` +
+          `\n     ${position.size.toFixed(2)} ${originalSide} @ ${(position.entryPrice * 100).toFixed(1)}¢ = $${originalInvestment.toFixed(2)} invested` +
+          `\n     Now @ ${(position.currentPrice * 100).toFixed(1)}¢ = $${currentValue.toFixed(2)} (${position.pnlPct >= 0 ? "+" : ""}${position.pnlPct.toFixed(1)}%)` +
+          `\n     Unrealized loss: $${unrealizedLoss.toFixed(2)}` +
+          `\n  ───────────────────────────────────────` +
+          `\n  🎯 HEDGE ANALYSIS:` +
+          `\n     ${originalSide === "YES" ? "NO" : "YES"} price: ${(opposingPrice * 100).toFixed(1)}¢` +
+          `\n     Break-even hedge: $${breakEvenHedgeUsd.toFixed(2)} (${breakEvenHedgeShares.toFixed(2)} shares)` +
+          `\n     Profitable hedge: $${profitableHedgeUsd.toFixed(2)} (${profitableHedgeShares.toFixed(2)} shares)` +
+          `\n  ───────────────────────────────────────` +
+          `\n  ✅ EXECUTING: ${hedgeSizeReason}` +
+          `\n     Buying: ${hedgeShares.toFixed(2)} ${originalSide === "YES" ? "NO" : "YES"} @ ${(opposingPrice * 100).toFixed(1)}¢ = $${targetHedgeUsd.toFixed(2)}` +
+          `\n  ───────────────────────────────────────` +
+          `\n  📈 OUTCOMES:` +
+          `\n     If ${originalSide} wins: $${originalWinPayout.toFixed(2)} payout → ${originalWinProfit >= 0 ? "+" : ""}$${originalWinProfit.toFixed(2)}` +
+          `\n     If ${originalSide === "YES" ? "NO" : "YES"} wins: $${hedgeWinPayout.toFixed(2)} payout → ${hedgeWinProfit >= 0 ? "+" : ""}$${hedgeWinProfit.toFixed(2)}` +
+          `\n     ${outcomeDescription}` +
+          `\n  ═══════════════════════════════════════`,
       );
 
       // Execute the hedge buy
@@ -835,7 +1003,7 @@ export class SmartHedgingStrategy {
         tokenId: opposingTokenId,
         outcome: originalSide === "YES" ? "NO" : "YES",
         side: "BUY",
-        sizeUsd: hedgeSizeUsd,
+        sizeUsd: targetHedgeUsd,
         maxAcceptablePrice: opposingPrice * 1.05, // 5% slippage tolerance
         logger: this.logger,
         priority: true, // High priority for hedging
@@ -843,7 +1011,7 @@ export class SmartHedgingStrategy {
       });
 
       if (result.status === "submitted") {
-        // Record the hedged position
+        // Record the hedged position with full tracking
         const hedgedPosition: HedgedPosition = {
           marketId: position.marketId,
           originalTokenId: position.tokenId,
@@ -851,18 +1019,25 @@ export class SmartHedgingStrategy {
           originalSide,
           originalEntryPrice: position.entryPrice,
           originalSize: position.size,
+          originalInvestment,
+          priceAtHedge: position.currentPrice,
+          unrealizedLossAtHedge: unrealizedLoss,
           hedgeEntryPrice: opposingPrice,
           hedgeSize: hedgeShares,
+          hedgeInvestment: targetHedgeUsd,
           hedgeTimestamp: Date.now(),
           maxLoss: Math.abs(maxLoss),
-          guaranteedReturn,
+          bestCaseProfit,
+          calculation,
         };
 
         const key = `${position.marketId}-${position.tokenId}`;
         this.hedgedPositions.set(key, hedgedPosition);
 
         this.logger.info(
-          `[SmartHedging] ✅ HEDGE SUCCESSFUL - ${canTurnIntoWinner ? "Loser turned into potential winner!" : `Max loss capped at $${Math.abs(maxLoss).toFixed(2)}`}`,
+          `[SmartHedging] ✅ HEDGE SUCCESSFUL!` +
+            `\n  ${canTurnIntoWinner ? "🎉 Loser turned into potential WINNER!" : `📉 Max loss capped at $${Math.abs(maxLoss).toFixed(2)}`}` +
+            `\n  Best case: ${bestCaseProfit >= 0 ? "+" : ""}$${bestCaseProfit.toFixed(2)} | Worst case: ${maxLoss >= 0 ? "+" : ""}$${maxLoss.toFixed(2)}`,
         );
         return true;
       } else {
@@ -881,15 +1056,19 @@ export class SmartHedgingStrategy {
 
   /**
    * Determine the side (YES/NO) based on position data
+   * Returns null if side cannot be determined (should skip hedging)
    */
-  private determineSide(position: Position): "YES" | "NO" {
+  private determineSide(position: Position): "YES" | "NO" | null {
     // Position tracker provides side info
     const side = position.side?.toUpperCase();
     if (side === "YES" || side === "NO") {
       return side;
     }
-    // Default to YES if unclear
-    return "YES";
+    // Cannot determine side - log warning and return null
+    this.logger.warn(
+      `[SmartHedging] ⚠️ Cannot determine side for position ${position.marketId} - side value: "${position.side}"`,
+    );
+    return null;
   }
 
   /**
@@ -1054,29 +1233,92 @@ export class SmartHedgingStrategy {
   }
 
   /**
-   * Get strategy statistics
+   * Get strategy statistics with detailed hedge tracking
    */
   getStats(): {
     enabled: boolean;
     triggerLossPct: number;
     maxHedgeUsd: number;
+    absoluteMaxHedgeUsd: number;
+    allowExceedMaxForProtection: boolean;
     reservePct: number;
     hedgedPositionsCount: number;
+    totalOriginalInvestment: number;
+    totalHedgeInvestment: number;
     totalMaxLoss: number;
+    totalBestCaseProfit: number;
+    hedgesCanWin: number;
   } {
     let totalMaxLoss = 0;
+    let totalBestCaseProfit = 0;
+    let totalOriginalInvestment = 0;
+    let totalHedgeInvestment = 0;
+    let hedgesCanWin = 0;
+
     for (const hedge of this.hedgedPositions.values()) {
       totalMaxLoss += hedge.maxLoss;
+      totalBestCaseProfit += hedge.bestCaseProfit;
+      totalOriginalInvestment += hedge.originalInvestment;
+      totalHedgeInvestment += hedge.hedgeInvestment;
+      if (hedge.calculation.canTurnIntoWinner) {
+        hedgesCanWin++;
+      }
     }
 
     return {
       enabled: this.config.enabled,
       triggerLossPct: this.config.triggerLossPct,
       maxHedgeUsd: this.config.maxHedgeUsd,
+      absoluteMaxHedgeUsd: this.config.absoluteMaxHedgeUsd,
+      allowExceedMaxForProtection: this.config.allowExceedMaxForProtection,
       reservePct: this.config.reservePct,
       hedgedPositionsCount: this.hedgedPositions.size,
+      totalOriginalInvestment,
+      totalHedgeInvestment,
       totalMaxLoss,
+      totalBestCaseProfit,
+      hedgesCanWin,
     };
+  }
+
+  /**
+   * Get detailed info about all hedged positions
+   */
+  getHedgedPositionsSummary(): Array<{
+    marketId: string;
+    originalSide: string;
+    originalInvestment: number;
+    hedgeInvestment: number;
+    totalInvested: number;
+    maxLoss: number;
+    bestCaseProfit: number;
+    canWin: boolean;
+  }> {
+    const summary: Array<{
+      marketId: string;
+      originalSide: string;
+      originalInvestment: number;
+      hedgeInvestment: number;
+      totalInvested: number;
+      maxLoss: number;
+      bestCaseProfit: number;
+      canWin: boolean;
+    }> = [];
+
+    for (const hedge of this.hedgedPositions.values()) {
+      summary.push({
+        marketId: hedge.marketId,
+        originalSide: hedge.originalSide,
+        originalInvestment: hedge.originalInvestment,
+        hedgeInvestment: hedge.hedgeInvestment,
+        totalInvested: hedge.originalInvestment + hedge.hedgeInvestment,
+        maxLoss: hedge.maxLoss,
+        bestCaseProfit: hedge.bestCaseProfit,
+        canWin: hedge.calculation.canTurnIntoWinner,
+      });
+    }
+
+    return summary;
   }
 }
 
@@ -1088,15 +1330,24 @@ export class SmartHedgingStrategy {
  * - Don't hedge too early (give position time to recover)
  * - Don't hedge too late (spread becomes too wide)
  * - Find the optimal window to turn losers into winners
+ *
+ * POSITION SIZING:
+ * - Allow exceeding MAX_POSITION_USD for emergency protection
+ * - When bleeding badly, full protection is more important than limits
  */
 export const DEFAULT_SMART_HEDGING_CONFIG: SmartHedgingConfig = {
   // === CORE SETTINGS ===
   enabled: true, // Enabled by default per user request
   triggerLossPct: 20, // Trigger hedge consideration at 20% loss
-  maxHedgeUsd: 10, // Max $10 per hedge (match typical position size)
+  maxHedgeUsd: 10, // Max $10 per hedge (standard limit)
   reservePct: 20, // Keep 20% in reserve for hedging
   maxEntryPriceForHedging: PRICE_TIERS.SPECULATIVE_MIN, // 60¢ - only risky tier
   minOpposingSidePrice: 0.5, // Opposing side must be at least 50¢
+
+  // === POSITION SIZE LIMITS (EXCEED WHEN NEEDED) ===
+  allowExceedMaxForProtection: true, // Allow exceeding maxHedgeUsd to stop the bleeding
+  absoluteMaxHedgeUsd: 100, // Never hedge more than $100 (safety cap)
+  emergencyLossThresholdPct: 30, // At 30%+ loss, use full protection mode
 
   // === TIMING OPTIMIZATION ===
   minHoldBeforeHedgeSeconds: 120, // Wait 2 minutes before hedging (might recover)
