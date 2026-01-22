@@ -31,6 +31,8 @@ export class QuickFlipStrategy {
   private positionTracker: PositionTracker;
   private config: QuickFlipConfig;
   private positionEntryTimes: Map<string, number> = new Map();
+  // Track tokens with no liquidity to suppress repeated warnings
+  private noLiquidityTokens: Set<string> = new Set();
 
   constructor(strategyConfig: QuickFlipStrategyConfig) {
     this.client = strategyConfig.client;
@@ -162,8 +164,20 @@ export class QuickFlipStrategy {
       const orderbook = await this.client.getOrderBook(tokenId);
 
       if (!orderbook.bids || orderbook.bids.length === 0) {
-        throw new Error(`No bids available for token ${tokenId} - cannot sell`);
+        // Only log if we haven't already logged for this token (suppress log spam)
+        if (!this.noLiquidityTokens.has(tokenId)) {
+          this.logger.warn(
+            `[QuickFlip] ⚠️ No bids available for token ${tokenId} - position cannot be sold (illiquid market)`,
+          );
+          this.noLiquidityTokens.add(tokenId);
+        }
+        // Return gracefully instead of throwing - this is a normal market condition
+        // The position will be re-evaluated on the next cycle when liquidity may return
+        return;
       }
+
+      // Clear no-liquidity flag if liquidity has returned
+      this.noLiquidityTokens.delete(tokenId);
 
       const bestBid = parseFloat(orderbook.bids[0].price);
       const bestBidSize = parseFloat(orderbook.bids[0].size);
@@ -255,6 +269,7 @@ export class QuickFlipStrategy {
     const currentKeys = new Set(
       currentPositions.map((pos) => `${pos.marketId}-${pos.tokenId}`),
     );
+    const currentTokenIds = new Set(currentPositions.map((pos) => pos.tokenId));
 
     let cleanedCount = 0;
     const keysToDelete: string[] = [];
@@ -266,6 +281,17 @@ export class QuickFlipStrategy {
     for (const key of keysToDelete) {
       this.positionEntryTimes.delete(key);
       cleanedCount++;
+    }
+
+    // Also clean up no-liquidity cache for tokens we no longer hold
+    const tokensToRemove: string[] = [];
+    for (const tokenId of this.noLiquidityTokens) {
+      if (!currentTokenIds.has(tokenId)) {
+        tokensToRemove.push(tokenId);
+      }
+    }
+    for (const tokenId of tokensToRemove) {
+      this.noLiquidityTokens.delete(tokenId);
     }
 
     if (cleanedCount > 0) {
