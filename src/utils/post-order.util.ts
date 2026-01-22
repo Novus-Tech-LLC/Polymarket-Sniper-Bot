@@ -348,5 +348,20 @@ async function postOrderClob(
     }
   }
 
+  // Check if order was filled (remaining amount is negligible)
+  // Orders are considered successful when remaining <= MIN_REMAINING_USD (0.01)
+  // because sub-cent amounts can't be practically filled due to price precision
+  if (remaining <= ORDER_EXECUTION.MIN_REMAINING_USD) {
+    return { status: "submitted" };
+  }
+
+  // Order was not fully filled - check if it was partially filled
+  const filledAmount = sizeUsd - remaining;
+  if (filledAmount > 0) {
+    logger.warn(
+      `[CLOB] Order partially filled: ${filledAmount.toFixed(2)}/${sizeUsd.toFixed(2)} USD (${((filledAmount / sizeUsd) * 100).toFixed(1)}%)`,
+    );
+  }
+
   return { status: "failed", reason: "order_incomplete" };
 }
