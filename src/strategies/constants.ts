@@ -3,23 +3,52 @@
  * Extracted to avoid magic numbers and improve maintainability
  */
 
-// Position Tracker constants
-export const POSITION_TRACKER_REFRESH_INTERVAL_MS = 30000; // 30 seconds
+/**
+ * Position Tracker constants
+ * 
+ * For HFT with many positions, we need fast refresh rates.
+ * As you compound and scale up, position count grows exponentially.
+ * The system must handle 100s of positions without bottlenecking.
+ */
+export const POSITION_TRACKER_REFRESH_INTERVAL_MS = 5000; // 5 seconds - fast refresh for HFT
 
-// Orchestrator constants
-export const STRATEGY_EXECUTION_INTERVAL_MS = 60000; // 60 seconds
+/**
+ * Orchestrator constants
+ * 
+ * Strategy execution must be fast to catch quick profit opportunities.
+ * With many positions, we run strategies in PARALLEL not sequential.
+ */
+export const STRATEGY_EXECUTION_INTERVAL_MS = 2000; // 2 seconds - rapid execution for scalping
+
+/**
+ * Parallel execution settings
+ * As positions scale, we need more concurrency
+ */
+export const MAX_PARALLEL_POSITION_CHECKS = 50; // Check up to 50 positions in parallel
+export const MAX_PARALLEL_SELLS = 10; // Execute up to 10 sells in parallel
 
 // Endgame Sweep constants
 export const MAX_LIQUIDITY_USAGE_PCT = 0.1; // Use max 10% of available liquidity
 
-// Fee constants (Polymarket trading fees)
-export const POLYMARKET_FEE_BPS = 10; // 0.1% per trade (10 basis points)
-export const POLYMARKET_ROUND_TRIP_FEE_PCT = 0.2; // 0.2% total for buy + sell (0.1% each)
+/**
+ * Fee constants (Polymarket trading fees as of 2024-2025)
+ * @see https://docs.polymarket.com/polymarket-learn/trading/fees
+ * 
+ * - Taker Fee: 0.01% (1 basis point) - paid when your order is immediately matched
+ * - Maker Fee: 0% - paid when your limit order rests on the book
+ * 
+ * For HFT scalping (taking liquidity), round-trip cost is only 0.02%!
+ * This means even tiny edges of 0.1% are profitable.
+ */
+export const POLYMARKET_TAKER_FEE_BPS = 1; // 0.01% per trade (1 basis point)
+export const POLYMARKET_MAKER_FEE_BPS = 0; // 0% for maker orders
+export const POLYMARKET_FEE_BPS = 1; // Default to taker fee for conservative calculations
+export const POLYMARKET_ROUND_TRIP_FEE_PCT = 0.02; // 0.02% total for buy + sell as taker (0.01% each)
 
 /**
  * Calculate net profit after fees
  * @param grossProfitPct Gross profit percentage
- * @returns Net profit percentage after 0.2% round-trip fees
+ * @returns Net profit percentage after round-trip fees
  */
 export function calculateNetProfit(grossProfitPct: number): number {
   return grossProfitPct - POLYMARKET_ROUND_TRIP_FEE_PCT;
@@ -27,13 +56,14 @@ export function calculateNetProfit(grossProfitPct: number): number {
 
 /**
  * Check if a trade is profitable after fees
+ * For HFT scalping with 0.02% round-trip fees, even small edges are profitable
  * @param grossProfitPct Gross profit percentage
- * @param minNetProfitPct Minimum acceptable net profit (default 0.5%)
+ * @param minNetProfitPct Minimum acceptable net profit (default 0.1% for scalping)
  * @returns true if trade is profitable after fees
  */
 export function isProfitableAfterFees(
   grossProfitPct: number,
-  minNetProfitPct: number = 0.5,
+  minNetProfitPct: number = 0.1,
 ): boolean {
   return calculateNetProfit(grossProfitPct) >= minNetProfitPct;
 }

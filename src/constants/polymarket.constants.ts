@@ -11,6 +11,14 @@ export const POLYMARKET_CONTRACTS = [
  * Default configuration values
  * Rate limits are based on Polymarket API documentation
  * @see https://docs.polymarket.com/quickstart/introduction/rate-limits
+ * 
+ * NOTE ON RPC USAGE:
+ * Trading goes through Polymarket's CLOB API, NOT the RPC endpoint.
+ * RPC is only used for: balance checks, gas estimates, approvals, on-chain trades.
+ * With CLOB mode (default), RPC usage is minimal (~1-5 calls per trade cycle).
+ * 
+ * Infura free tier: 3M requests/day = ~125k/hour = ~35/second
+ * This is MORE than enough for HFT since orders go through CLOB API.
  */
 export const DEFAULT_CONFIG = {
   FETCH_INTERVAL_SECONDS: 1,
@@ -24,9 +32,11 @@ export const DEFAULT_CONFIG = {
   AGGREGATION_WINDOW_SECONDS: 300,
   MIN_POL_BALANCE: 0.05,
   ACTIVITY_CHECK_WINDOW_SECONDS: 60,
-  ORDER_SUBMIT_MIN_INTERVAL_MS: 60_000,
-  ORDER_SUBMIT_MAX_PER_HOUR: 10,
-  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 600,
+  // Rate limits - Polymarket allows ~216,000 orders/hour (36,000 per 10 min sustained)
+  // For high-frequency scalping, we want maximum throughput
+  ORDER_SUBMIT_MIN_INTERVAL_MS: 0, // No artificial delay
+  ORDER_SUBMIT_MAX_PER_HOUR: 100000, // 100k/hour (well under Polymarket's 216k limit)
+  ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 1, // 1 second per market (prevent spam on same market)
   CLOUDFLARE_COOLDOWN_SECONDS: 3600,
   CLOB_AUTH_COOLDOWN_SECONDS: 300,
   TRADE_MODE: "clob" as "clob" | "onchain",

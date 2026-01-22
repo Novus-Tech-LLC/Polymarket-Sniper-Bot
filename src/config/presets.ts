@@ -4,99 +4,99 @@ export const ARB_PRESETS = {
   },
   safe_small: {
     ARB_ENABLED: true,
-    ARB_SCAN_INTERVAL_MS: 2000,
-    ARB_MIN_EDGE_BPS: 120,
+    ARB_SCAN_INTERVAL_MS: 1000,
+    ARB_MIN_EDGE_BPS: 50, // 0.5% edge (very profitable with 0.01% fee)
     ARB_MIN_PROFIT_USD: 0.1,
     ARB_MIN_LIQUIDITY_USD: 2000,
     ARB_MAX_SPREAD_BPS: 200,
     ARB_TRADE_BASE_USD: 2,
     ARB_SIZE_SCALING: "sqrt",
-    ARB_SLIPPAGE_BPS: 60,
-    ARB_FEE_BPS: 10,
+    ARB_SLIPPAGE_BPS: 30,
+    ARB_FEE_BPS: 1, // Correct: 0.01% per trade
     ARB_MAX_POSITION_USD: 10,
     ARB_MAX_WALLET_EXPOSURE_USD: 25,
-    ARB_MAX_TRADES_PER_HOUR: 4,
-    ARB_MARKET_COOLDOWN_SECONDS: 900,
-    ARB_MAX_CONSECUTIVE_FAILURES: 2,
-    ARB_MAX_CONCURRENT_TRADES: 1,
-    ARB_STARTUP_COOLDOWN_SECONDS: 60,
+    ARB_MAX_TRADES_PER_HOUR: 5000,
+    ARB_MARKET_COOLDOWN_SECONDS: 5,
+    ARB_MAX_CONSECUTIVE_FAILURES: 5,
+    ARB_MAX_CONCURRENT_TRADES: 10,
+    ARB_STARTUP_COOLDOWN_SECONDS: 30,
   },
   classic: {
     ARB_ENABLED: true,
-    ARB_SCAN_INTERVAL_MS: 2000,
-    ARB_MIN_EDGE_BPS: 120,
+    ARB_SCAN_INTERVAL_MS: 500,
+    ARB_MIN_EDGE_BPS: 30, // 0.3% edge
     ARB_MIN_PROFIT_USD: 0.1,
     ARB_MIN_LIQUIDITY_USD: 2000,
     ARB_MAX_SPREAD_BPS: 200,
     ARB_TRADE_BASE_USD: 5,
     ARB_SIZE_SCALING: "sqrt",
-    ARB_SLIPPAGE_BPS: 60,
-    ARB_FEE_BPS: 10,
+    ARB_SLIPPAGE_BPS: 30,
+    ARB_FEE_BPS: 1, // Correct: 0.01% per trade
     ARB_MAX_POSITION_USD: 25,
     ARB_MAX_WALLET_EXPOSURE_USD: 100,
-    ARB_MAX_TRADES_PER_HOUR: 8,
-    ARB_MARKET_COOLDOWN_SECONDS: 600,
-    ARB_MAX_CONSECUTIVE_FAILURES: 2,
-    ARB_MAX_CONCURRENT_TRADES: 1,
-    ARB_STARTUP_COOLDOWN_SECONDS: 60,
+    ARB_MAX_TRADES_PER_HOUR: 10000,
+    ARB_MARKET_COOLDOWN_SECONDS: 2,
+    ARB_MAX_CONSECUTIVE_FAILURES: 5,
+    ARB_MAX_CONCURRENT_TRADES: 15,
+    ARB_STARTUP_COOLDOWN_SECONDS: 10,
   },
   micro: {
     ARB_ENABLED: true,
-    ARB_SCAN_INTERVAL_MS: 1500,
-    ARB_MIN_EDGE_BPS: 60,
+    ARB_SCAN_INTERVAL_MS: 250,
+    ARB_MIN_EDGE_BPS: 20, // 0.2% edge (10x the fee!)
     ARB_MIN_PROFIT_USD: 0.05,
     ARB_MIN_LIQUIDITY_USD: 5000,
-    ARB_MAX_SPREAD_BPS: 120,
+    ARB_MAX_SPREAD_BPS: 150,
     ARB_TRADE_BASE_USD: 3,
     ARB_SIZE_SCALING: "sqrt",
-    ARB_SLIPPAGE_BPS: 40,
-    ARB_FEE_BPS: 10,
+    ARB_SLIPPAGE_BPS: 20,
+    ARB_FEE_BPS: 1, // Correct: 0.01% per trade
     ARB_MAX_POSITION_USD: 25,
     ARB_MAX_WALLET_EXPOSURE_USD: 125,
-    ARB_MAX_TRADES_PER_HOUR: 15,
-    ARB_MARKET_COOLDOWN_SECONDS: 300,
-    ARB_MAX_CONSECUTIVE_FAILURES: 2,
-    ARB_MAX_CONCURRENT_TRADES: 1,
-    ARB_STARTUP_COOLDOWN_SECONDS: 60,
+    ARB_MAX_TRADES_PER_HOUR: 20000,
+    ARB_MARKET_COOLDOWN_SECONDS: 1,
+    ARB_MAX_CONSECUTIVE_FAILURES: 10,
+    ARB_MAX_CONCURRENT_TRADES: 20,
+    ARB_STARTUP_COOLDOWN_SECONDS: 5,
   },
   quality: {
     ARB_ENABLED: true,
-    ARB_SCAN_INTERVAL_MS: 2500,
-    ARB_MIN_EDGE_BPS: 150,
+    ARB_SCAN_INTERVAL_MS: 1000,
+    ARB_MIN_EDGE_BPS: 100, // 1% edge for higher quality trades
     ARB_MIN_PROFIT_USD: 0.25,
     ARB_MIN_LIQUIDITY_USD: 15000,
     ARB_MAX_SPREAD_BPS: 100,
     ARB_TRADE_BASE_USD: 8,
     ARB_SIZE_SCALING: "sqrt",
-    ARB_SLIPPAGE_BPS: 30,
-    ARB_FEE_BPS: 10,
+    ARB_SLIPPAGE_BPS: 20,
+    ARB_FEE_BPS: 1, // Correct: 0.01% per trade
     ARB_MAX_POSITION_USD: 40,
     ARB_MAX_WALLET_EXPOSURE_USD: 200,
-    ARB_MAX_TRADES_PER_HOUR: 6,
-    ARB_MARKET_COOLDOWN_SECONDS: 900,
-    ARB_MAX_CONSECUTIVE_FAILURES: 2,
-    ARB_MAX_CONCURRENT_TRADES: 1,
-    ARB_STARTUP_COOLDOWN_SECONDS: 60,
+    ARB_MAX_TRADES_PER_HOUR: 5000,
+    ARB_MARKET_COOLDOWN_SECONDS: 5,
+    ARB_MAX_CONSECUTIVE_FAILURES: 5,
+    ARB_MAX_CONCURRENT_TRADES: 10,
+    ARB_STARTUP_COOLDOWN_SECONDS: 15,
   },
   late: {
     ARB_ENABLED: true,
-    ARB_SCAN_INTERVAL_MS: 1000,
-    ARB_MIN_EDGE_BPS: 80,
+    ARB_SCAN_INTERVAL_MS: 250,
+    ARB_MIN_EDGE_BPS: 30, // 0.3% edge
     ARB_MIN_PROFIT_USD: 0.1,
     ARB_MIN_LIQUIDITY_USD: 3000,
     ARB_MAX_SPREAD_BPS: 250,
     ARB_TRADE_BASE_USD: 5,
     ARB_SIZE_SCALING: "sqrt",
-    ARB_SLIPPAGE_BPS: 80,
-    ARB_FEE_BPS: 10,
+    ARB_SLIPPAGE_BPS: 40,
+    ARB_FEE_BPS: 1, // Correct: 0.01% per trade
     ARB_MAX_HOLD_MINUTES: 30,
     ARB_MAX_POSITION_USD: 25,
     ARB_MAX_WALLET_EXPOSURE_USD: 120,
-    ARB_MAX_TRADES_PER_HOUR: 10,
-    ARB_MARKET_COOLDOWN_SECONDS: 240,
-    ARB_MAX_CONSECUTIVE_FAILURES: 2,
-    ARB_MAX_CONCURRENT_TRADES: 1,
-    ARB_STARTUP_COOLDOWN_SECONDS: 60,
+    ARB_MAX_TRADES_PER_HOUR: 15000,
+    ARB_MARKET_COOLDOWN_SECONDS: 1,
+    ARB_MAX_CONSECUTIVE_FAILURES: 10,
+    ARB_MAX_CONCURRENT_TRADES: 15,
+    ARB_STARTUP_COOLDOWN_SECONDS: 3,
   },
 } as const;
 
@@ -209,6 +209,9 @@ export const STRATEGY_PRESETS = {
     ARB_TRADE_BASE_USD: 3,
     ARB_MAX_POSITION_USD: 15,
     ARB_MAX_WALLET_EXPOSURE_USD: 50,
+    ARB_MAX_TRADES_PER_HOUR: 2000,
+    ARB_MAX_CONCURRENT_TRADES: 8,
+    ARB_MARKET_COOLDOWN_SECONDS: 10,
     // Existing Monitor settings (from balanced)
     FETCH_INTERVAL: 2,
     MIN_TRADE_SIZE_USD: 50,
@@ -249,17 +252,17 @@ export const STRATEGY_PRESETS = {
     ARB_MAX_SPREAD_BPS: 10000, // Very permissive
     ARB_TRADE_BASE_USD: 5,
     ARB_SIZE_SCALING: "sqrt",
-    ARB_SLIPPAGE_BPS: 50,
-    ARB_FEE_BPS: 10,
+    ARB_SLIPPAGE_BPS: 20,
+    ARB_FEE_BPS: 1, // Correct: 0.01% per trade
     ARB_MAX_POSITION_USD: 25,
     ARB_MAX_WALLET_EXPOSURE_USD: 150,
-    ARB_MAX_TRADES_PER_HOUR: 60,
-    ARB_MARKET_COOLDOWN_SECONDS: 120,
-    ARB_MAX_CONSECUTIVE_FAILURES: 3,
-    ARB_MAX_CONCURRENT_TRADES: 2,
-    ARB_STARTUP_COOLDOWN_SECONDS: 30,
+    ARB_MAX_TRADES_PER_HOUR: 20000,
+    ARB_MARKET_COOLDOWN_SECONDS: 2,
+    ARB_MAX_CONSECUTIVE_FAILURES: 10,
+    ARB_MAX_CONCURRENT_TRADES: 20,
+    ARB_STARTUP_COOLDOWN_SECONDS: 5,
     ARB_DEBUG_TOP_N: 10,
-    // Existing Monitor settings (from active, optimized)
+    // Monitor settings - fast scanning
     FETCH_INTERVAL: 1,
     MIN_TRADE_SIZE_USD: 1, // Low minimum to catch more
     MIN_ORDER_USD: 1,
@@ -275,45 +278,83 @@ export const STRATEGY_PRESETS = {
     STRATEGY_ENABLED: true,
     ARB_ENABLED: true,
     MONITOR_ENABLED: true,
-    // Quick Flip settings (tighter targets for faster trades)
+    /**
+     * HIGH-FREQUENCY SCALPING STRATEGY
+     * 
+     * Fee structure (2024-2025):
+     * - Taker: 0.01% (1 bps)
+     * - Maker: 0%
+     * - Round-trip: 0.02%
+     * 
+     * With fees this low, even 0.5% edges are highly profitable!
+     * 
+     * Key strategies:
+     * 1. Spread scalping - profit from bid/ask gaps
+     * 2. Unity constraint arb - YES + NO should = $1.00
+     * 3. Tail-end trading - mispriced contracts near resolution
+     * 4. Momentum scalps - ride quick price movements
+     */
+    
+    // Quick Flip - AGGRESSIVE SCALPING
+    // With 0.02% fees, target 1-2% moves for quick profits
     QUICK_FLIP_ENABLED: true,
-    QUICK_FLIP_TARGET_PCT: 3, // Lower target, more trades
-    QUICK_FLIP_STOP_LOSS_PCT: 2,
-    QUICK_FLIP_MIN_HOLD_SECONDS: 15,
-    // Auto-sell settings: DISABLED - redeem is now the preferred exit strategy
-    // With auto-redeem working, we no longer need to sell before $1 - simply wait for resolution and redeem at full value
-    AUTO_SELL_ENABLED: false,
-    AUTO_SELL_THRESHOLD: 0.95, // Not used since disabled
-    AUTO_SELL_MIN_HOLD_SECONDS: 60,
-    // Endgame sweep settings: DISABLED - since we rely on redeem, no need to buy positions hoping they'll reach $1
-    // Redeem handles resolved positions automatically, so aggressive endgame buying is unnecessary
-    ENDGAME_SWEEP_ENABLED: false,
-    ENDGAME_MIN_PRICE: 0.85, // Not used since disabled
-    ENDGAME_MAX_PRICE: 0.95, // Not used since disabled
-    MAX_POSITION_USD: 50, // Aggressive position sizing
-    // Auto-Redeem settings (claim resolved positions)
+    QUICK_FLIP_TARGET_PCT: 2, // 2% gross = 1.98% net (fees are negligible!)
+    QUICK_FLIP_STOP_LOSS_PCT: 1, // Tight stop - cut losers fast
+    QUICK_FLIP_MIN_HOLD_SECONDS: 0, // Exit immediately when target hit
+    
+    // Auto-sell when price spikes
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.95, // Lock in gains at 95¢
+    AUTO_SELL_MIN_HOLD_SECONDS: 0,
+    
+    // Endgame sweep - 80-90¢ range for scalping
+    // More volatility = more scalping opportunities
+    ENDGAME_SWEEP_ENABLED: true,
+    ENDGAME_MIN_PRICE: 0.75, // Buy at 75¢+ (25% upside potential)
+    ENDGAME_MAX_PRICE: 0.92, // Up to 92¢ (room for quick exits)
+    MAX_POSITION_USD: 100, // Larger positions for scalping
+    
+    // Auto-redeem resolved positions
     AUTO_REDEEM_ENABLED: true,
-    AUTO_REDEEM_MIN_POSITION_USD: 0.05, // Claim even small amounts aggressively
-    // Rate limits (maximum)
-    ORDER_SUBMIT_MAX_PER_HOUR: 120,
-    ORDER_SUBMIT_MIN_INTERVAL_MS: 3000,
-    ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 30,
-    // ARB settings (aggressive)
-    ARB_SCAN_INTERVAL_MS: 1000,
-    ARB_MIN_EDGE_BPS: 30,
-    ARB_MAX_SPREAD_BPS: 15000,
-    ARB_TRADE_BASE_USD: 5,
-    ARB_MAX_POSITION_USD: 50,
-    ARB_MAX_WALLET_EXPOSURE_USD: 250,
-    ARB_MAX_TRADES_PER_HOUR: 120,
-    ARB_MARKET_COOLDOWN_SECONDS: 60,
-    ARB_MAX_CONCURRENT_TRADES: 3,
-    ARB_STARTUP_COOLDOWN_SECONDS: 15,
-    // Monitor settings (aggressive)
+    AUTO_REDEEM_MIN_POSITION_USD: 0.01,
+    
+    /**
+     * RATE LIMITS - HIGH THROUGHPUT
+     * Polymarket limits: 9,000 req/10sec general, 36,000/10min sustained for orders
+     * That's 216,000 orders/hour sustained capacity
+     * 
+     * For HFT, we want:
+     * - Minimal delays (but not zero - avoid spam detection)
+     * - High concurrency for parallel execution
+     * - Smart throttling to stay under limits
+     */
+    ORDER_SUBMIT_MAX_PER_HOUR: 100000, // 100k/hour (under 216k limit)
+    ORDER_SUBMIT_MIN_INTERVAL_MS: 10, // 10ms between orders (100/sec max)
+    ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 0, // No per-market cooldown
+    
+    /**
+     * ARBITRAGE SETTINGS - MAXIMUM VOLUME
+     * With 0.01% taker fee, even tiny edges are profitable
+     */
+    ARB_SCAN_INTERVAL_MS: 100, // Scan 10x/second
+    ARB_MIN_EDGE_BPS: 10, // 0.1% edge = 0.08% net profit (still 4x the fee!)
+    ARB_MAX_SPREAD_BPS: 10000, // Permissive spread tolerance
+    ARB_FEE_BPS: 1, // Correct fee: 0.01% per side
+    ARB_SLIPPAGE_BPS: 20, // Account for 0.2% slippage
+    ARB_TRADE_BASE_USD: 25, // Larger base size for scalping
+    ARB_MAX_POSITION_USD: 200,
+    ARB_MAX_WALLET_EXPOSURE_USD: 2000,
+    ARB_MAX_TRADES_PER_HOUR: 100000,
+    ARB_MARKET_COOLDOWN_SECONDS: 0,
+    ARB_MAX_CONSECUTIVE_FAILURES: 20, // Higher tolerance for fast trading
+    ARB_MAX_CONCURRENT_TRADES: 25, // Parallel execution
+    ARB_STARTUP_COOLDOWN_SECONDS: 0,
+    
+    // Monitor settings - fast scanning
     FETCH_INTERVAL: 1,
     MIN_TRADE_SIZE_USD: 1,
     MIN_ORDER_USD: 1,
-    FRONTRUN_MAX_SIZE_USD: 200,
+    FRONTRUN_MAX_SIZE_USD: 500,
     MONITOR_REQUIRE_CONFIRMED: false,
   },
 } as const;

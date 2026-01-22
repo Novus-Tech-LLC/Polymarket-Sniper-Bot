@@ -38,10 +38,10 @@ test("ARB_PRESET=micro loads expected defaults", () => {
   });
 
   const config = loadArbConfig();
-  assert.equal(config.scanIntervalMs, 1500);
-  assert.equal(config.minEdgeBps, 60);
+  assert.equal(config.scanIntervalMs, 250);
+  assert.equal(config.minEdgeBps, 20);
   assert.equal(config.minProfitUsd, 0.05);
-  assert.equal(config.maxTradesPerHour, 15);
+  assert.equal(config.maxTradesPerHour, 20000);
 });
 
 test("allowlisted override applies for arb presets", () => {
