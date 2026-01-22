@@ -64,6 +64,10 @@ export class AutoRedeemStrategy {
   private static readonly MAX_REDEMPTION_FAILURES = 3;
   private static readonly REDEMPTION_RETRY_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly DEFAULT_GAS_LIMIT = 300000n;
+  // Minimum share threshold multiplier: minPositionUsd * this = minimum shares to redeem
+  // At ~$1/share, 0.01 means we skip positions smaller than 1% of minPositionUsd in shares
+  // e.g., if minPositionUsd=1, we skip positions with < 0.01 shares (true dust)
+  private static readonly MIN_SHARES_USD_MULTIPLIER = 0.01;
 
   constructor(strategyConfig: AutoRedeemStrategyConfig) {
     this.client = strategyConfig.client;
@@ -144,10 +148,10 @@ export class AutoRedeemStrategy {
 
       // Skip only if the total position SIZE is negligible (true dust)
       // We want to redeem even losing positions to clear them from the wallet
-      // Use minPositionUsd as a proxy for minimum shares (assuming ~$1 per share)
-      if (totalSize < this.config.minPositionUsd * 0.01) {
+      const minShares = this.config.minPositionUsd * AutoRedeemStrategy.MIN_SHARES_USD_MULTIPLIER;
+      if (totalSize < minShares) {
         this.logger.debug(
-          `[AutoRedeem] Skipping dust market: ${totalSize.toFixed(4)} shares < ${(this.config.minPositionUsd * 0.01).toFixed(4)} minimum`,
+          `[AutoRedeem] Skipping dust market: ${totalSize.toFixed(4)} shares < ${minShares.toFixed(4)} minimum`,
         );
         continue;
       }

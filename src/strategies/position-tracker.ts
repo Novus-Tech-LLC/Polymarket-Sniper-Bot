@@ -37,7 +37,9 @@ export class PositionTracker {
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
   private missingOrderbooks = new Set<string>(); // Cache tokenIds with no orderbook to avoid repeated API calls
-  private marketOutcomeCache: Map<string, string | null> = new Map(); // Cache market outcomes to avoid redundant API calls (persisted across refreshes)
+  // Cache market outcomes persistently across refresh cycles. Resolved markets cannot change their outcome,
+  // so caching is safe and prevents redundant Gamma API calls on every 30-second refresh.
+  private marketOutcomeCache: Map<string, string | null> = new Map();
   private lastRefreshStats: { resolved: number; active: number; skipped: number } = { resolved: 0, active: 0, skipped: 0 }; // Track stats for summary logging
 
   // API timeout constant for external API calls
