@@ -1,6 +1,7 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
+import type { PositionTracker } from "./position-tracker";
 import {
   MAX_LIQUIDITY_USAGE_PCT,
   calculateNetProfit,
@@ -45,6 +46,7 @@ export interface EndgameSweepStrategyConfig {
   client: ClobClient;
   logger: ConsoleLogger;
   config: EndgameSweepConfig;
+  positionTracker?: PositionTracker; // Optional: used to check existing positions
 }
 
 /**
@@ -55,11 +57,13 @@ export interface EndgameSweepStrategyConfig {
  * - Check spread quality before entering (avoid wide spreads)
  * - Assess trade quality using the trade-quality module
  * - Scale position size based on liquidity and confidence
+ * - CHECK EXISTING POSITIONS to avoid exceeding max position size
  */
 export class EndgameSweepStrategy {
   private client: ClobClient;
   private logger: ConsoleLogger;
   private config: EndgameSweepConfig;
+  private positionTracker?: PositionTracker;
   private purchasedMarkets: Set<string> = new Set();
   private purchaseTimestamps: Map<string, number> = new Map(); // Track when markets were purchased
 
@@ -67,6 +71,7 @@ export class EndgameSweepStrategy {
     this.client = strategyConfig.client;
     this.logger = strategyConfig.logger;
     this.config = strategyConfig.config;
+    this.positionTracker = strategyConfig.positionTracker;
   }
 
   /**
@@ -89,8 +94,32 @@ export class EndgameSweepStrategy {
     for (const market of candidates) {
       const marketKey = `${market.id}-${market.tokenId}`;
 
-      // Skip if already purchased
+      // Skip if already purchased by this strategy in this session
       if (this.purchasedMarkets.has(marketKey)) {
+        continue;
+      }
+
+      // === CHECK EXISTING POSITION SIZE ===
+      // Prevent exceeding max position size by checking current exposure
+      const existingPositionUsd = this.getExistingPositionSize(
+        market.id,
+        market.tokenId,
+      );
+      if (existingPositionUsd >= this.config.maxPositionUsd) {
+        this.logger.debug(
+          `[EndgameSweep] Skipping ${market.id}: already at max position ($${existingPositionUsd.toFixed(2)} >= $${this.config.maxPositionUsd})`,
+        );
+        continue;
+      }
+
+      // Calculate remaining capacity for this position
+      const remainingCapacityUsd =
+        this.config.maxPositionUsd - existingPositionUsd;
+      if (remainingCapacityUsd < 1) {
+        // Less than $1 remaining capacity, skip
+        this.logger.debug(
+          `[EndgameSweep] Skipping ${market.id}: insufficient remaining capacity ($${remainingCapacityUsd.toFixed(2)})`,
+        );
         continue;
       }
 
@@ -100,7 +129,7 @@ export class EndgameSweepStrategy {
         entryPrice: market.price,
         spreadBps: market.spreadBps,
         liquidityUsd: market.liquidity,
-        positionSizeUsd: this.config.maxPositionUsd,
+        positionSizeUsd: remainingCapacityUsd, // Use remaining capacity for quality assessment
       });
 
       // Skip trades that should be avoided based on quality assessment
@@ -135,15 +164,20 @@ export class EndgameSweepStrategy {
         continue;
       }
 
-      // Log opportunity with quality assessment
+      // Log opportunity with quality assessment and existing position info
+      const existingInfo =
+        existingPositionUsd > 0
+          ? ` [existing: $${existingPositionUsd.toFixed(2)}, remaining: $${remainingCapacityUsd.toFixed(2)}]`
+          : "";
       this.logger.info(
         `[EndgameSweep] 💰 Opportunity: ${market.id} at ${(market.price * 100).toFixed(1)}¢ ` +
           `(quality: ${quality.score}/100, spread: ${market.spreadBps ?? "N/A"}bps, ` +
-          `gross: ${expectedGrossProfitPct.toFixed(2)}%, net: ${expectedNetProfitPct.toFixed(2)}%)`,
+          `gross: ${expectedGrossProfitPct.toFixed(2)}%, net: ${expectedNetProfitPct.toFixed(2)}%)${existingInfo}`,
       );
 
       try {
-        await this.buyPosition(market);
+        // Pass remaining capacity to buyPosition to limit the purchase
+        await this.buyPosition(market, remainingCapacityUsd);
         this.purchasedMarkets.add(marketKey);
         this.purchaseTimestamps.set(marketKey, Date.now());
         purchasedCount++;
@@ -365,10 +399,39 @@ export class EndgameSweepStrategy {
   }
 
   /**
+   * Get existing position size in USD for a market/token
+   * Returns 0 if no position exists or positionTracker is not available
+   */
+  private getExistingPositionSize(marketId: string, tokenId: string): number {
+    if (!this.positionTracker) {
+      return 0;
+    }
+
+    const positions = this.positionTracker.getPositions();
+    let totalExposureUsd = 0;
+
+    for (const pos of positions) {
+      // Check for the same market AND token to avoid summing unrelated positions
+      // A position matches if it's in the same market with the same token
+      if (pos.marketId === marketId && pos.tokenId === tokenId) {
+        // Position value = size * entry price (what we paid)
+        totalExposureUsd += pos.size * pos.entryPrice;
+      }
+    }
+
+    return totalExposureUsd;
+  }
+
+  /**
    * Buy a position using postOrder utility
    * Executes market buy order at best ask price
+   * @param market - Market opportunity to buy
+   * @param maxBuyUsd - Maximum USD to spend (respects existing position limits)
    */
-  private async buyPosition(market: Market): Promise<void> {
+  private async buyPosition(
+    market: Market,
+    maxBuyUsd?: number,
+  ): Promise<void> {
     // Validate market price before calculations
     if (market.price <= 0) {
       this.logger.warn(
@@ -377,9 +440,14 @@ export class EndgameSweepStrategy {
       return;
     }
 
-    // Calculate position size based on configured max and available liquidity
+    // Use the smaller of maxPositionUsd and maxBuyUsd (remaining capacity)
+    const effectiveMaxUsd = maxBuyUsd
+      ? Math.min(this.config.maxPositionUsd, maxBuyUsd)
+      : this.config.maxPositionUsd;
+
+    // Calculate position size based on effective max and available liquidity
     const positionSize = Math.min(
-      this.config.maxPositionUsd / market.price,
+      effectiveMaxUsd / market.price,
       market.liquidity * MAX_LIQUIDITY_USAGE_PCT, // Don't take more than configured % of liquidity
     );
 
