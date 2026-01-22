@@ -95,14 +95,14 @@ export class QuickFlipStrategy {
     const minProfitUsd = this.config.minProfitUsd ?? MIN_QUICK_FLIP_PROFIT_USD;
 
     for (const position of targetPositions) {
-      // Calculate position value and absolute profit
-      const positionValueUsd = position.size * position.currentPrice;
-      const absoluteProfitUsd = (position.pnlPct / 100) * positionValueUsd;
+      // Use pnlUsd directly from position tracker (correctly calculated as (currentPrice - entryPrice) * size)
+      const absoluteProfitUsd = position.pnlUsd;
 
       // Check if profit meets minimum USD threshold
       if (absoluteProfitUsd < minProfitUsd) {
+        const positionCostUsd = position.size * position.entryPrice;
         this.logger.debug(
-          `[QuickFlip] ⏸️ Skipping ${position.marketId}: profit $${absoluteProfitUsd.toFixed(2)} below min $${minProfitUsd.toFixed(2)} (${position.pnlPct.toFixed(2)}% on $${positionValueUsd.toFixed(2)} position)`,
+          `[QuickFlip] ⏸️ Skipping ${position.marketId}: profit $${absoluteProfitUsd.toFixed(2)} below min $${minProfitUsd.toFixed(2)} (${position.pnlPct.toFixed(2)}% on $${positionCostUsd.toFixed(2)} position)`,
         );
         continue;
       }

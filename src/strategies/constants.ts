@@ -97,14 +97,18 @@ export const DEFAULT_QUICK_FLIP_TARGET_PCT = 5;
 /**
  * Check if a trade meets minimum profit requirements
  * Both percentage AND absolute USD profit must be met
- * @param positionValueUsd Current position value in USD
+ *
+ * NOTE: This function is provided for external use cases. The quick-flip strategy
+ * uses position.pnlUsd directly from the position tracker for more accurate calculations.
+ *
+ * @param positionCostUsd Original position cost (size * entryPrice), NOT current market value
  * @param profitPct Profit percentage (gross)
  * @param minProfitPct Minimum profit percentage required
  * @param minProfitUsd Minimum absolute profit in USD required
  * @returns true if trade meets all profit requirements
  */
 export function meetsMinProfitRequirements(
-  positionValueUsd: number,
+  positionCostUsd: number,
   profitPct: number,
   minProfitPct: number = DEFAULT_QUICK_FLIP_TARGET_PCT,
   minProfitUsd: number = MIN_QUICK_FLIP_PROFIT_USD,
@@ -114,8 +118,8 @@ export function meetsMinProfitRequirements(
     return false;
   }
 
-  // Calculate absolute profit
-  const absoluteProfitUsd = (profitPct / 100) * positionValueUsd;
+  // Calculate absolute profit based on original investment
+  const absoluteProfitUsd = (profitPct / 100) * positionCostUsd;
 
   // Check absolute profit requirement
   return absoluteProfitUsd >= minProfitUsd;

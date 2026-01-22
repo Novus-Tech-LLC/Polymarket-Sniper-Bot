@@ -184,7 +184,7 @@ export const STRATEGY_PRESETS = {
     MONITOR_ENABLED: true,
     // Quick Flip settings - aim for meaningful profits
     QUICK_FLIP_ENABLED: true,
-    QUICK_FLIP_TARGET_PCT: 15, // 15% target - ensures $0.75+ profit on $5 positions
+    QUICK_FLIP_TARGET_PCT: 15, // 15% target on position size, with at least $0.50 profit per trade
     QUICK_FLIP_STOP_LOSS_PCT: 5, // 5% stop loss
     QUICK_FLIP_MIN_HOLD_SECONDS: 60,
     QUICK_FLIP_MIN_PROFIT_USD: 0.5, // Minimum $0.50 profit per trade
