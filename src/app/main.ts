@@ -112,11 +112,20 @@ async function main(): Promise<void> {
       autoRedeemConfig: {
         enabled: strategyConfig.autoRedeemEnabled,
         minPositionUsd: strategyConfig.autoRedeemMinPositionUsd,
+        checkIntervalMs: strategyConfig.autoRedeemCheckIntervalMs,
       },
     });
 
     await orchestrator.start();
     logger.info("✅ Strategy orchestrator started successfully");
+
+    // Log auto-redeem check interval for user clarity
+    if (strategyConfig.autoRedeemEnabled) {
+      const intervalSec = strategyConfig.autoRedeemCheckIntervalMs / 1000;
+      logger.info(
+        `💵 Auto-Redeem: Checking for redeemable positions every ${intervalSec} seconds`,
+      );
+    }
   } else if (strategyConfig && !strategyConfig.enabled) {
     logger.info(
       `[Strategy] Preset=${strategyConfig.presetName} disabled; using individual ARB/MONITOR presets.`,

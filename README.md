@@ -31,10 +31,20 @@ When a market resolves, your positions can be redeemed for USDC. Previously, thi
 
 ### How It Works
 
-1. **Position Tracking**: The bot monitors all your positions through the Data API
+1. **Position Tracking**: The bot monitors all your positions through the Data API (refreshes every 5 seconds)
 2. **Resolution Detection**: When a market resolves, positions are marked as "redeemable"
-3. **Automatic Redemption**: The bot calls the CTF contract's `redeemPositions()` to claim USDC
+3. **Automatic Redemption**: The bot checks for redeemable positions every **30 seconds** (configurable) and calls the CTF contract's `redeemPositions()` to claim USDC
 4. **Capital Recovery**: Immediately frees up capital for new trades
+
+### When Does Auto-Redeem Run?
+
+| Event | Frequency |
+|-------|-----------|
+| **At startup** | Once when the bot starts |
+| **During operation** | Every 30 seconds (configurable via `AUTO_REDEEM_CHECK_INTERVAL_MS`) |
+| **Manual trigger** | Anytime via `npm run redeem` |
+
+**Note**: The bot must be running for auto-redeem to work. If you stop the bot, positions won't be redeemed until you restart it or manually trigger redemption.
 
 ### Configuration
 
@@ -47,6 +57,9 @@ STRATEGY_PRESET=balanced
 # Or configure manually via environment variables:
 AUTO_REDEEM_ENABLED=true              # Enable/disable auto-redeem
 AUTO_REDEEM_MIN_POSITION_USD=0.10     # Skip dust positions below this value
+AUTO_REDEEM_CHECK_INTERVAL_MS=30000   # How often to check (default: 30 seconds)
+                                      # Lower = more responsive, more API calls
+                                      # Higher = less responsive, fewer API calls
 ```
 
 ### Manual Redemption

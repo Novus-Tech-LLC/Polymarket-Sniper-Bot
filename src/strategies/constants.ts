@@ -21,6 +21,22 @@ export const POSITION_TRACKER_REFRESH_INTERVAL_MS = 5000; // 5 seconds - fast re
 export const STRATEGY_EXECUTION_INTERVAL_MS = 2000; // 2 seconds - rapid execution for scalping
 
 /**
+ * Auto-Redeem check interval
+ *
+ * How often the auto-redeem strategy checks for redeemable positions.
+ * Auto-redeem runs as part of the strategy orchestrator loop (every 2 seconds),
+ * but internally throttles to this interval to avoid excessive blockchain calls.
+ *
+ * Default: 30 seconds (30000ms)
+ * - Positions are checked against the position tracker which refreshes every 5 seconds
+ * - Actual redemption requires blockchain transaction, so more frequent checks waste gas estimation
+ * - 30 seconds is a reasonable balance between responsiveness and efficiency
+ *
+ * Can be overridden via AUTO_REDEEM_CHECK_INTERVAL_MS environment variable.
+ */
+export const AUTO_REDEEM_CHECK_INTERVAL_MS = 30000; // 30 seconds default
+
+/**
  * Parallel execution settings
  * As positions scale, we need more concurrency
  */

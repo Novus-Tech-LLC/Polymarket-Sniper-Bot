@@ -5,6 +5,7 @@ import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker, Position } from "./position-tracker";
 import { resolvePolymarketContracts } from "../polymarket/contracts";
 import { CTF_ABI, ERC20_ABI } from "../trading/exchange-abi";
+import { AUTO_REDEEM_CHECK_INTERVAL_MS } from "./constants";
 
 export interface AutoRedeemConfig {
   enabled: boolean;
@@ -12,6 +13,8 @@ export interface AutoRedeemConfig {
   minPositionUsd: number;
   /** Maximum gas price in gwei to pay for redemption */
   maxGasPriceGwei?: number;
+  /** Check interval in milliseconds (default: 30000ms = 30 seconds) */
+  checkIntervalMs?: number;
 }
 
 export interface AutoRedeemStrategyConfig {
@@ -49,6 +52,11 @@ export interface RedemptionResult {
  * - Automatic capital recovery without manual intervention
  * - No waiting for Polymarket's 4pm UTC daily settlement
  * - Immediate USDC availability for new trades
+ *
+ * Execution frequency:
+ * - The orchestrator calls execute() every 2 seconds
+ * - This strategy throttles internally to check every 30 seconds (configurable via checkIntervalMs)
+ * - This prevents excessive blockchain calls while still being responsive to resolved markets
  */
 export class AutoRedeemStrategy {
   private client: ClobClient;
@@ -62,6 +70,9 @@ export class AutoRedeemStrategy {
     string,
     { lastAttempt: number; failures: number }
   > = new Map();
+  // Throttling: track last execution time to avoid checking too frequently
+  private lastExecutionTime: number = 0;
+  private checkIntervalMs: number;
 
   // Constants
   private static readonly MAX_REDEMPTION_FAILURES = 3;
@@ -77,16 +88,43 @@ export class AutoRedeemStrategy {
     this.logger = strategyConfig.logger;
     this.positionTracker = strategyConfig.positionTracker;
     this.config = strategyConfig.config;
+    // Use configured interval or default from constants
+    this.checkIntervalMs =
+      strategyConfig.config.checkIntervalMs ?? AUTO_REDEEM_CHECK_INTERVAL_MS;
+  }
+
+  /**
+   * Get the check interval in milliseconds
+   */
+  getCheckIntervalMs(): number {
+    return this.checkIntervalMs;
   }
 
   /**
    * Execute the auto-redeem strategy
    * Returns number of positions redeemed
+   *
+   * Note: This method is throttled to only run the full check at the configured interval
+   * (default: every 30 seconds). The orchestrator calls this every 2 seconds, but most
+   * calls will return early due to throttling. This prevents excessive blockchain calls
+   * while still being responsive to resolved markets.
    */
   async execute(): Promise<number> {
     if (!this.config.enabled) {
       return 0;
     }
+
+    // Throttle: only run full check at the configured interval
+    const now = Date.now();
+    const timeSinceLastExecution = now - this.lastExecutionTime;
+    if (
+      this.lastExecutionTime > 0 &&
+      timeSinceLastExecution < this.checkIntervalMs
+    ) {
+      // Not enough time has passed since last check
+      return 0;
+    }
+    this.lastExecutionTime = now;
 
     // Clean up stale entries
     this.cleanupStaleEntries();
@@ -450,6 +488,8 @@ export class AutoRedeemStrategy {
     redeemedCount: number;
     pendingRedemptions: number;
     minPositionUsd: number;
+    checkIntervalMs: number;
+    nextCheckInMs: number;
   } {
     const allPositions = this.positionTracker.getPositions();
     // Count unique markets with redeemable positions that haven't been redeemed yet
@@ -462,11 +502,21 @@ export class AutoRedeemStrategy {
         .map((pos) => pos.marketId),
     );
 
+    // Calculate time until next check
+    // Handle potential clock drift or system clock changes
+    const timeSinceLastCheck = Math.max(0, Date.now() - this.lastExecutionTime);
+    const nextCheckInMs = Math.max(
+      0,
+      this.checkIntervalMs - timeSinceLastCheck,
+    );
+
     return {
       enabled: this.config.enabled,
       redeemedCount: this.redeemedMarkets.size,
       pendingRedemptions: redeemableMarkets.size,
       minPositionUsd: this.config.minPositionUsd,
+      checkIntervalMs: this.checkIntervalMs,
+      nextCheckInMs,
     };
   }
 

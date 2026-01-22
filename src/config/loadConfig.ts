@@ -1111,6 +1111,7 @@ export type StrategyConfig = {
   endgameMaxPositionUsd: number;
   autoRedeemEnabled: boolean;
   autoRedeemMinPositionUsd: number;
+  autoRedeemCheckIntervalMs: number;
   minOrderUsd: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
@@ -1205,6 +1206,10 @@ export function loadStrategyConfig(
       parseNumber(readEnv("AUTO_REDEEM_MIN_POSITION_USD", overrides) ?? "") ??
       preset.AUTO_REDEEM_MIN_POSITION_USD ??
       0.1, // Skip dust below 10 cents
+    // AUTO_REDEEM_CHECK_INTERVAL_MS: how often to check for redeemable positions (default: 30000ms = 30 seconds)
+    autoRedeemCheckIntervalMs:
+      parseNumber(readEnv("AUTO_REDEEM_CHECK_INTERVAL_MS", overrides) ?? "") ??
+      30000, // 30 seconds default
     // MIN_ORDER_USD: respect env override > preset > default
     minOrderUsd:
       parseNumber(readEnv("MIN_ORDER_USD", overrides) ?? "") ??
