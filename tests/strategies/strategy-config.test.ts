@@ -77,3 +77,47 @@ test("MAX_POSITION_USD defaults to 25 when preset has no value", () => {
   // Off preset has MAX_POSITION_USD: 25 (see presets.ts line 176)
   assert.equal(config.endgameMaxPositionUsd, 25);
 });
+
+test("AUTO_REDEEM_CHECK_INTERVAL_MS defaults to 30000", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+  });
+
+  const config = loadStrategyConfig();
+  // Default check interval is 30 seconds
+  assert.equal(config.autoRedeemCheckIntervalMs, 30000);
+});
+
+test("AUTO_REDEEM_CHECK_INTERVAL_MS env variable overrides default", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    AUTO_REDEEM_CHECK_INTERVAL_MS: "10000",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence over default
+  assert.equal(config.autoRedeemCheckIntervalMs, 10000);
+});
+
+test("AUTO_REDEEM_ENABLED is true by default in strategy presets", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config.autoRedeemEnabled, true);
+});
+
+test("AUTO_REDEEM_ENABLED can be disabled via env override", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    AUTO_REDEEM_ENABLED: "false",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config.autoRedeemEnabled, false);
+});
