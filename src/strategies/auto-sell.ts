@@ -8,6 +8,14 @@ export interface AutoSellConfig {
   threshold: number; // Price threshold to auto-sell (e.g., 0.99 = 99¢)
   minHoldSeconds: number; // Minimum time to hold before auto-selling (avoids conflict with endgame sweep)
   minOrderUsd: number; // Minimum order size in USD (from MIN_ORDER_USD env)
+  /**
+   * DISPUTE WINDOW EXIT SETTINGS
+   * Positions near resolution ($0.99+) can get stuck in a 2-hour dispute window
+   * Better to sell at 99¢ and free up capital than wait 2 hours
+   */
+  disputeWindowExitEnabled?: boolean; // Enable early exit for positions nearing dispute window
+  disputeWindowExitThreshold?: number; // Price threshold for early exit (default: 0.99 = 99¢)
+  disputeWindowExitMinProfitPct?: number; // Minimum profit % to trigger exit (default: 90%)
 }
 
 export interface AutoSellStrategyConfig {

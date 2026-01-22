@@ -1112,6 +1112,28 @@ export type StrategyConfig = {
   autoRedeemEnabled: boolean;
   autoRedeemMinPositionUsd: number;
   autoRedeemCheckIntervalMs: number;
+  // Smart Hedging settings (replaces stop-loss for risky tier positions)
+  smartHedgingEnabled: boolean;
+  smartHedgingTriggerLossPct: number;
+  smartHedgingMaxHedgeUsd: number;
+  smartHedgingReservePct: number;
+  /**
+   * Allow hedging to exceed MAX_POSITION_USD / maxHedgeUsd when needed to stop bleeding
+   * Default: true - proper protection > arbitrary limits
+   */
+  smartHedgingAllowExceedMax: boolean;
+  /**
+   * Absolute maximum USD for hedge even when exceeding normal limits
+   * Safety cap to prevent runaway hedging
+   * Default: $100
+   */
+  smartHedgingAbsoluteMaxUsd: number;
+  /**
+   * Loss percentage threshold for emergency/full protection mode
+   * When position drops beyond this %, use absoluteMaxUsd limit instead of maxHedgeUsd
+   * Default: 30%
+   */
+  smartHedgingEmergencyLossPct: number;
   minOrderUsd: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
@@ -1210,6 +1232,78 @@ export function loadStrategyConfig(
     autoRedeemCheckIntervalMs:
       parseNumber(readEnv("AUTO_REDEEM_CHECK_INTERVAL_MS", overrides) ?? "") ??
       30000, // 30 seconds default
+    /**
+     * SMART HEDGING SETTINGS
+     * Instead of selling risky positions (<60¢ entry) at a loss,
+     * hedge by buying the opposing side to cap maximum loss at the spread
+     */
+    // SMART_HEDGING_ENABLED: enabled by default to minimize losses
+    smartHedgingEnabled:
+      parseBool(readEnv("SMART_HEDGING_ENABLED", overrides) ?? "") ??
+      ("SMART_HEDGING_ENABLED" in preset
+        ? (preset as { SMART_HEDGING_ENABLED: boolean }).SMART_HEDGING_ENABLED
+        : undefined) ??
+      true, // Enabled by default - make money, not lose it!
+    // SMART_HEDGING_TRIGGER_LOSS_PCT: loss percentage to trigger hedging
+    smartHedgingTriggerLossPct:
+      parseNumber(readEnv("SMART_HEDGING_TRIGGER_LOSS_PCT", overrides) ?? "") ??
+      ("SMART_HEDGING_TRIGGER_LOSS_PCT" in preset
+        ? (preset as { SMART_HEDGING_TRIGGER_LOSS_PCT: number })
+            .SMART_HEDGING_TRIGGER_LOSS_PCT
+        : undefined) ??
+      20, // Default: hedge at 20% loss
+    // SMART_HEDGING_MAX_HEDGE_USD: maximum USD per hedge position
+    smartHedgingMaxHedgeUsd:
+      parseNumber(readEnv("SMART_HEDGING_MAX_HEDGE_USD", overrides) ?? "") ??
+      ("SMART_HEDGING_MAX_HEDGE_USD" in preset
+        ? (preset as { SMART_HEDGING_MAX_HEDGE_USD: number })
+            .SMART_HEDGING_MAX_HEDGE_USD
+        : undefined) ??
+      10, // Default: max $10 per hedge
+    // SMART_HEDGING_RESERVE_PCT: percentage of wallet to reserve for hedging
+    smartHedgingReservePct:
+      parseNumber(readEnv("SMART_HEDGING_RESERVE_PCT", overrides) ?? "") ??
+      ("SMART_HEDGING_RESERVE_PCT" in preset
+        ? (preset as { SMART_HEDGING_RESERVE_PCT: number })
+            .SMART_HEDGING_RESERVE_PCT
+        : undefined) ??
+      20, // Default: keep 20% in reserve
+    /**
+     * SMART_HEDGING_ALLOW_EXCEED_MAX: Allow hedge to exceed maxHedgeUsd when stopping heavy losses
+     * Set to "true" to allow hedging beyond normal limits when position is bleeding
+     * Default: true (proper protection is more important than arbitrary limits)
+     */
+    smartHedgingAllowExceedMax:
+      parseBool(readEnv("SMART_HEDGING_ALLOW_EXCEED_MAX", overrides) ?? "") ??
+      ("SMART_HEDGING_ALLOW_EXCEED_MAX" in preset
+        ? (preset as { SMART_HEDGING_ALLOW_EXCEED_MAX: boolean })
+            .SMART_HEDGING_ALLOW_EXCEED_MAX
+        : undefined) ??
+      true, // Default: allow exceeding limits for protection
+    /**
+     * SMART_HEDGING_ABSOLUTE_MAX_USD: Safety cap for hedge size even when exceeding limits
+     * This is the maximum a single hedge can ever be, regardless of position size
+     * Default: $100
+     */
+    smartHedgingAbsoluteMaxUsd:
+      parseNumber(readEnv("SMART_HEDGING_ABSOLUTE_MAX_USD", overrides) ?? "") ??
+      ("SMART_HEDGING_ABSOLUTE_MAX_USD" in preset
+        ? (preset as { SMART_HEDGING_ABSOLUTE_MAX_USD: number })
+            .SMART_HEDGING_ABSOLUTE_MAX_USD
+        : undefined) ??
+      100, // Default: max $100 per hedge (safety cap)
+    /**
+     * SMART_HEDGING_EMERGENCY_LOSS_PCT: Loss % threshold for emergency full protection
+     * When position drops beyond this %, switch to absoluteMaxUsd limit
+     * Default: 30%
+     */
+    smartHedgingEmergencyLossPct:
+      parseNumber(readEnv("SMART_HEDGING_EMERGENCY_LOSS_PCT", overrides) ?? "") ??
+      ("SMART_HEDGING_EMERGENCY_LOSS_PCT" in preset
+        ? (preset as { SMART_HEDGING_EMERGENCY_LOSS_PCT: number })
+            .SMART_HEDGING_EMERGENCY_LOSS_PCT
+        : undefined) ??
+      30, // Default: emergency mode at 30% loss
     // MIN_ORDER_USD: respect env override > preset > default
     minOrderUsd:
       parseNumber(readEnv("MIN_ORDER_USD", overrides) ?? "") ??

@@ -9,6 +9,11 @@ import {
   UniversalStopLossStrategy,
   type UniversalStopLossConfig,
 } from "./universal-stop-loss";
+import {
+  SmartHedgingStrategy,
+  type SmartHedgingConfig,
+  DEFAULT_SMART_HEDGING_CONFIG,
+} from "./smart-hedging";
 import { getPerformanceTracker } from "./strategy-performance";
 import type { QuickFlipConfig } from "./quick-flip";
 import type { AutoSellConfig } from "./auto-sell";
@@ -39,6 +44,7 @@ export interface StrategyOrchestratorConfig {
   endgameSweepConfig: EndgameSweepConfig;
   autoRedeemConfig: AutoRedeemConfig;
   universalStopLossConfig?: UniversalStopLossConfig;
+  smartHedgingConfig?: SmartHedgingConfig;
   executionIntervalMs?: number;
 }
 
@@ -69,6 +75,7 @@ export class StrategyOrchestrator {
   private logger: ConsoleLogger;
   private positionTracker: PositionTracker;
   private universalStopLossStrategy: UniversalStopLossStrategy;
+  private smartHedgingStrategy: SmartHedgingStrategy;
   private quickFlipStrategy: QuickFlipStrategy;
   private autoSellStrategy: AutoSellStrategy;
   private endgameSweepStrategy: EndgameSweepStrategy;
@@ -94,19 +101,46 @@ export class StrategyOrchestrator {
       refreshIntervalMs: POSITION_TRACKER_REFRESH_INTERVAL_MS,
     });
 
-    // Initialize Universal Stop-Loss (SAFETY NET - runs on ALL positions)
+    // Initialize Smart Hedging FIRST (so we know if it's enabled for stop-loss config)
+    const smartHedgingConfig =
+      config.smartHedgingConfig ?? DEFAULT_SMART_HEDGING_CONFIG;
+    this.smartHedgingStrategy = new SmartHedgingStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: smartHedgingConfig,
+    });
+
+    if (smartHedgingConfig.enabled) {
+      this.logger.info(
+        `[Orchestrator] 🛡️ Smart Hedging: ENABLED (trigger: -${smartHedgingConfig.triggerLossPct}%, max hedge: $${smartHedgingConfig.maxHedgeUsd}, reserve: ${smartHedgingConfig.reservePct}%)`,
+      );
+    }
+
+    // Initialize Universal Stop-Loss (SAFETY NET - runs on higher-tier positions)
+    // When smart hedging is enabled, skip risky tier positions (they'll be hedged instead)
     const universalStopLossConfig =
       config.universalStopLossConfig ?? DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG;
+    
+    // Auto-configure: skip risky tier if smart hedging is enabled
+    const stopLossConfigWithHedging = {
+      ...universalStopLossConfig,
+      skipRiskyTierForHedging: smartHedgingConfig.enabled,
+    };
+
     this.universalStopLossStrategy = new UniversalStopLossStrategy({
       client: config.client,
       logger: config.logger,
       positionTracker: this.positionTracker,
-      config: universalStopLossConfig,
+      config: stopLossConfigWithHedging,
     });
 
     if (universalStopLossConfig.enabled) {
+      const hedgingNote = smartHedgingConfig.enabled 
+        ? " (risky tier → smart hedging)" 
+        : "";
       this.logger.info(
-        `[Orchestrator] 🛡️ Universal Stop-Loss: ENABLED (max: ${universalStopLossConfig.maxStopLossPct}%, dynamic tiers: ${universalStopLossConfig.useDynamicTiers ? "ON" : "OFF"})`,
+        `[Orchestrator] 🛡️ Universal Stop-Loss: ENABLED (max: ${universalStopLossConfig.maxStopLossPct}%, dynamic tiers: ${universalStopLossConfig.useDynamicTiers ? "ON" : "OFF"})${hedgingNote}`,
       );
     }
 
@@ -175,6 +209,12 @@ export class StrategyOrchestrator {
     // Allocations are percentages that will be dynamically adjusted based on ROI
     if (config.autoRedeemConfig.enabled) {
       tracker.registerStrategy("auto-redeem", 20, 100);
+    }
+    // Register smart hedging for risky tier positions
+    const smartHedgingConfig =
+      config.smartHedgingConfig ?? DEFAULT_SMART_HEDGING_CONFIG;
+    if (smartHedgingConfig.enabled) {
+      tracker.registerStrategy("smart-hedging", 25, smartHedgingConfig.maxHedgeUsd);
     }
     if (config.endgameSweepConfig.enabled) {
       tracker.registerStrategy(
@@ -282,34 +322,44 @@ export class StrategyOrchestrator {
           this.autoRedeemStrategy.getStats().enabled,
         ),
 
-        // Priority 2: Universal Stop-Loss (SAFETY NET - protects ALL positions from excessive losses)
+        // Priority 2: Smart Hedging (HEDGE risky tier positions instead of selling at loss)
+        // Runs BEFORE stop-loss to prevent risky positions from being sold
+        this.executeWithLogging(
+          "Smart Hedging",
+          2,
+          () => this.smartHedgingStrategy.execute(),
+          this.smartHedgingStrategy.getStats().enabled,
+        ),
+
+        // Priority 3: Universal Stop-Loss (SAFETY NET - protects higher-tier positions)
+        // Only applies to positions NOT already hedged by Smart Hedging
         this.executeWithLogging(
           "Universal Stop-Loss",
-          2,
+          3,
           () => this.universalStopLossStrategy.execute(),
           this.universalStopLossStrategy.getStats().enabled,
         ),
 
-        // Priority 3: Endgame Sweep (buy high-probability positions)
+        // Priority 4: Endgame Sweep (buy high-probability positions)
         this.executeWithLogging(
           "Endgame Sweep",
-          3,
+          4,
           () => this.endgameSweepStrategy.execute(),
           this.endgameSweepStrategy.getStats().enabled,
         ),
 
-        // Priority 4: Auto-Sell (free up capital at threshold)
+        // Priority 5: Auto-Sell (free up capital at threshold)
         this.executeWithLogging(
           "Auto-Sell",
-          4,
+          5,
           () => this.autoSellStrategy.execute(),
           this.autoSellStrategy.getStats().enabled,
         ),
 
-        // Priority 5: Quick Flip (take profits at target)
+        // Priority 6: Quick Flip (take profits at target)
         this.executeWithLogging(
           "Quick Flip",
-          5,
+          6,
           () => this.quickFlipStrategy.execute(),
           this.quickFlipStrategy.getStats().enabled,
         ),
@@ -385,6 +435,7 @@ export class StrategyOrchestrator {
     arbEnabled: boolean;
     monitorEnabled: boolean;
     universalStopLossStats: ReturnType<UniversalStopLossStrategy["getStats"]>;
+    smartHedgingStats: ReturnType<SmartHedgingStrategy["getStats"]>;
     quickFlipStats: ReturnType<QuickFlipStrategy["getStats"]>;
     autoSellStats: ReturnType<AutoSellStrategy["getStats"]>;
     endgameSweepStats: ReturnType<EndgameSweepStrategy["getStats"]>;
@@ -396,6 +447,7 @@ export class StrategyOrchestrator {
       arbEnabled: this.arbEnabled,
       monitorEnabled: this.monitorEnabled,
       universalStopLossStats: this.universalStopLossStrategy.getStats(),
+      smartHedgingStats: this.smartHedgingStrategy.getStats(),
       quickFlipStats: this.quickFlipStrategy.getStats(),
       autoSellStats: this.autoSellStrategy.getStats(),
       endgameSweepStats: this.endgameSweepStrategy.getStats(),

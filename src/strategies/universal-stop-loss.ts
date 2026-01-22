@@ -17,6 +17,11 @@ export interface UniversalStopLossConfig {
    * If false, uses maxStopLossPct for all positions.
    */
   useDynamicTiers: boolean;
+  /**
+   * Skip risky tier positions (entry < 60¢) - let smart hedging handle them
+   * Default: true when smart hedging is enabled
+   */
+  skipRiskyTierForHedging?: boolean;
 }
 
 export interface UniversalStopLossStrategyConfig {
@@ -37,9 +42,13 @@ export interface UniversalStopLossStrategyConfig {
  * - Quality tier (80-90¢): 5% stop-loss
  * - Standard tier (70-80¢): 8% stop-loss
  * - Speculative tier (60-70¢): 12% stop-loss
- * - Risky tier (< 60¢): 20% stop-loss
+ * - Risky tier (< 60¢): 20% stop-loss (SKIPPED if smart hedging enabled)
  *
  * The maxStopLossPct acts as an absolute ceiling (default 25%).
+ *
+ * NOTE: When Smart Hedging is enabled (default), risky tier positions (<60¢ entry)
+ * are SKIPPED by this strategy. Smart Hedging handles them by buying the opposing
+ * side instead of selling at a loss, which can turn losers into winners.
  *
  * This strategy is designed to catch positions from:
  * - ARB trades (which have no built-in stop-loss)
@@ -99,7 +108,21 @@ export class UniversalStopLossStrategy {
     const allPositions = this.positionTracker.getPositions();
 
     // Skip resolved/redeemable positions (they can't be sold, only redeemed)
-    const activePositions = allPositions.filter((pos) => !pos.redeemable);
+    let activePositions = allPositions.filter((pos) => !pos.redeemable);
+
+    // Skip risky tier positions if smart hedging is handling them
+    // Risky tier = entry price < 60¢ (SPECULATIVE_MIN threshold)
+    if (this.config.skipRiskyTierForHedging) {
+      const riskyThreshold = PRICE_TIERS.SPECULATIVE_MIN; // 0.6 = 60¢
+      const riskyCount = activePositions.filter((pos) => pos.entryPrice < riskyThreshold).length;
+      activePositions = activePositions.filter((pos) => pos.entryPrice >= riskyThreshold);
+      
+      if (riskyCount > 0) {
+        this.logger.debug(
+          `[UniversalStopLoss] Skipping ${riskyCount} risky tier position(s) - smart hedging will handle them`,
+        );
+      }
+    }
 
     if (activePositions.length === 0) {
       return 0;

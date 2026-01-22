@@ -159,6 +159,10 @@ export const MONITOR_PRESETS = {
 } as const;
 
 export const STRATEGY_PRESETS = {
+  /**
+   * OFF preset - All strategies disabled
+   * Use this for testing or when you want manual-only trading
+   */
   off: {
     STRATEGY_ENABLED: false,
     ARB_ENABLED: false,
@@ -176,6 +180,11 @@ export const STRATEGY_PRESETS = {
     MAX_POSITION_USD: 25,
     AUTO_REDEEM_ENABLED: false,
     AUTO_REDEEM_MIN_POSITION_USD: 0.1,
+    // Smart Hedging - disabled in "off" preset (STRATEGY_ENABLED=false disables all strategies)
+    SMART_HEDGING_ENABLED: false,
+    SMART_HEDGING_TRIGGER_LOSS_PCT: 20,
+    SMART_HEDGING_MAX_HEDGE_USD: 10,
+    SMART_HEDGING_RESERVE_PCT: 20,
   },
   conservative: {
     STRATEGY_ENABLED: true,
@@ -201,6 +210,15 @@ export const STRATEGY_PRESETS = {
     // Auto-Redeem settings (claim resolved positions)
     AUTO_REDEEM_ENABLED: true,
     AUTO_REDEEM_MIN_POSITION_USD: 0.1, // Skip dust below 10 cents
+    /**
+     * SMART HEDGING - Conservative settings
+     * Instead of selling risky positions at a loss, hedge by buying the opposing side
+     * This limits max loss to the spread paid, not the full position value
+     */
+    SMART_HEDGING_ENABLED: true, // ENABLED BY DEFAULT
+    SMART_HEDGING_TRIGGER_LOSS_PCT: 20, // Hedge when position drops 20%
+    SMART_HEDGING_MAX_HEDGE_USD: 10, // Max $10 per hedge
+    SMART_HEDGING_RESERVE_PCT: 25, // Keep 25% reserve for hedging (conservative)
     // Rate limits
     ORDER_SUBMIT_MAX_PER_HOUR: 30,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
@@ -245,6 +263,14 @@ export const STRATEGY_PRESETS = {
     // Auto-Redeem settings (claim resolved positions)
     AUTO_REDEEM_ENABLED: true,
     AUTO_REDEEM_MIN_POSITION_USD: 0.1, // Skip dust below 10 cents
+    /**
+     * SMART HEDGING - Balanced settings
+     * Instead of selling risky positions at a loss, hedge by buying the opposing side
+     */
+    SMART_HEDGING_ENABLED: true, // ENABLED BY DEFAULT
+    SMART_HEDGING_TRIGGER_LOSS_PCT: 20, // Hedge when position drops 20%
+    SMART_HEDGING_MAX_HEDGE_USD: 15, // Max $15 per hedge (balanced)
+    SMART_HEDGING_RESERVE_PCT: 20, // Keep 20% reserve for hedging
     // Rate limits (higher for more trades)
     ORDER_SUBMIT_MAX_PER_HOUR: 60,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
@@ -333,6 +359,23 @@ export const STRATEGY_PRESETS = {
     // Auto-redeem resolved positions
     AUTO_REDEEM_ENABLED: true,
     AUTO_REDEEM_MIN_POSITION_USD: 0.01,
+
+    /**
+     * SMART HEDGING - Aggressive settings
+     * 
+     * REPLACES stop-loss for risky tier positions (<60¢ entry)
+     * Instead of selling at a 20% loss, hedge by buying the opposing side
+     * This caps maximum loss to the spread paid, not the full position
+     * 
+     * Example: Buy YES at 50¢, drops to 30¢ 
+     * - Old way: Sell at 30¢ = -40% loss
+     * - New way: Buy NO at 70¢, ONE side ALWAYS pays $1
+     * - Max loss is capped at the spread (~10-20%) vs full loss
+     */
+    SMART_HEDGING_ENABLED: true, // ENABLED BY DEFAULT - make money, not lose it!
+    SMART_HEDGING_TRIGGER_LOSS_PCT: 20, // Hedge when position drops 20%
+    SMART_HEDGING_MAX_HEDGE_USD: 25, // Max $25 per hedge (aggressive)
+    SMART_HEDGING_RESERVE_PCT: 15, // Keep 15% reserve for hedging (less conservative)
 
     /**
      * RATE LIMITS - HIGH THROUGHPUT
