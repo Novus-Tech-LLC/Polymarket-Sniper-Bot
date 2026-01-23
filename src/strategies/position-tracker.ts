@@ -189,6 +189,20 @@ export class PositionTracker {
   }
 
   /**
+   * Get position by token ID only (searches all positions)
+   * Used to check if we already own a specific token before buying
+   * NOTE: This does NOT block hedging - hedges use a different tokenId (opposite outcome)
+   */
+  getPositionByTokenId(tokenId: string): Position | undefined {
+    for (const position of this.positions.values()) {
+      if (position.tokenId === tokenId) {
+        return position;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Get positions with P&L above threshold
    */
   getPositionsAboveTarget(targetPct: number): Position[] {

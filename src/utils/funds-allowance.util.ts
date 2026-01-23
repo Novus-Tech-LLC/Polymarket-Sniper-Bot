@@ -53,8 +53,12 @@ const balanceCheckWarnDedup = new Map<
  * In-flight buy order tracking to prevent order stacking.
  * Tracks pending balance/allowance checks and order submissions.
  * Key format: `${tokenId}:BUY` - we only track BUYs since those stack losses.
+ *
+ * The cooldown must be longer than the position tracker refresh interval (5s)
+ * to ensure the position tracker has time to detect the new position before
+ * allowing another buy on the same token.
  */
-const IN_FLIGHT_COOLDOWN_MS = 10_000; // 10 second cooldown between buys on same token
+const IN_FLIGHT_COOLDOWN_MS = 15_000; // 15 second cooldown (> 5s position tracker refresh)
 const STALE_IN_FLIGHT_TIMEOUT_MS = 60_000; // 60s timeout for stale in-flight entries
 const inFlightBuys = new Map<
   string,
@@ -117,18 +121,28 @@ export const isInFlightOrCooldown = (
 /**
  * Mark a buy order as in-flight (starting).
  * Returns true if successfully marked, false if another buy is already in-flight
- * (prevents race condition where two threads both pass the check before either marks).
+ * or in cooldown (prevents race condition and stacking).
  */
 export const markBuyInFlight = (tokenId: string): boolean => {
   const key = `${tokenId}:BUY`;
   const existing = inFlightBuys.get(key);
   const now = Date.now();
 
-  // If there's an existing in-flight entry that is not stale yet, do not overwrite it
-  if (existing && !existing.completedAt) {
-    const elapsed = now - existing.startedAt;
-    if (elapsed <= STALE_IN_FLIGHT_TIMEOUT_MS) {
-      return false; // Another buy is already in-flight
+  if (existing) {
+    // If still in-flight (no completion time), block
+    if (!existing.completedAt) {
+      const elapsed = now - existing.startedAt;
+      if (elapsed <= STALE_IN_FLIGHT_TIMEOUT_MS) {
+        return false; // Another buy is already in-flight
+      }
+      // Stale entry - allow overwrite
+    } else {
+      // Check cooldown after completion
+      const timeSinceCompletion = now - existing.completedAt;
+      if (timeSinceCompletion < IN_FLIGHT_COOLDOWN_MS) {
+        return false; // Still in cooldown period
+      }
+      // Cooldown expired - allow overwrite
     }
   }
 

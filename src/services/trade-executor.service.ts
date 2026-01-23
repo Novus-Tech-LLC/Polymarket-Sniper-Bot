@@ -3,6 +3,7 @@ import type { Wallet } from "ethers";
 import type { RuntimeEnv } from "../config/env";
 import type { Logger } from "../utils/logger.util";
 import type { TradeSignal } from "../domain/trade.types";
+import type { PositionTracker } from "../strategies/position-tracker";
 import { postOrder } from "../utils/post-order.util";
 import { getUsdBalanceApprox, getPolBalance } from "../utils/get-balance.util";
 import { httpGet } from "../utils/fetch-data.util";
@@ -17,6 +18,12 @@ export type TradeExecutorDeps = {
   proxyWallet: string;
   env: RuntimeEnv;
   logger: Logger;
+  /**
+   * Optional position tracker to check existing positions before buying.
+   * When provided, prevents buying tokens we already own (avoids stacking).
+   * Does NOT block hedging since hedges use a different tokenId (opposite outcome).
+   */
+  positionTracker?: PositionTracker;
 };
 
 interface Position {
@@ -36,7 +43,7 @@ export class TradeExecutorService {
   }
 
   async frontrunTrade(signal: TradeSignal): Promise<void> {
-    const { logger, env, client } = this.deps;
+    const { logger, env, client, positionTracker } = this.deps;
     if (env.detectOnly) {
       if (!this.detectOnlyLogged) {
         logger.warn(
@@ -46,6 +53,19 @@ export class TradeExecutorService {
       }
       return;
     }
+
+    // Check if we already own this exact token (prevents stacking/duplicate buys)
+    // NOTE: This does NOT block hedging - hedges buy a different tokenId (opposite outcome)
+    if (signal.side === "BUY" && positionTracker) {
+      const existingPosition = positionTracker.getPositionByTokenId(signal.tokenId);
+      if (existingPosition && existingPosition.size > 0) {
+        logger.info(
+          `[Frontrun] ⏭️ Skipping BUY - already own ${existingPosition.size.toFixed(2)} shares of token ${signal.tokenId.slice(0, 8)}... (prevents stacking)`,
+        );
+        return;
+      }
+    }
+
     try {
       // Fetch both balances in parallel instead of sequentially
       // This reduces latency by ~50% for balance checks

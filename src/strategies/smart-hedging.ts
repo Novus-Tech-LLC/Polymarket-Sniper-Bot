@@ -143,7 +143,8 @@ export interface SmartHedgingConfig {
   /**
    * Minimum profit percentage to consider selling for reserve replenishment
    * Only positions with at least this much profit are eligible
-   * Default: 5% (don't sell at a loss to replenish reserves)
+   * Default: 2% (lowered from 5% to enable hedging when no highly profitable positions exist)
+   * Note: In emergency mode (severe losses), this threshold drops to 0.1% to ensure hedging can occur
    */
   reserveSellMinProfitPct: number;
 
@@ -907,11 +908,26 @@ export class SmartHedgingStrategy {
       return sum + Math.min(positionValue, this.config.maxHedgeUsd);
     }, 0);
 
+    // Dynamic threshold: lower the min profit requirement when facing severe losses
+    // If we have positions with >emergencyLossThresholdPct loss, accept ANY profitable position
+    // Note: pnlPct is negative for losses (e.g., -35% means 35% loss)
+    // Math.min returns the most negative value = worst loss (e.g., -48% is worse than -20%)
+    // emergencyLossThresholdPct is a positive number (e.g., 30), so we check: worstLoss <= -30
+    const worstLoss = Math.min(...potentialHedgePositions.map((pos) => pos.pnlPct));
+    const hasEmergencyLoss = worstLoss <= -this.config.emergencyLossThresholdPct;
+    const effectiveMinProfitPct = hasEmergencyLoss ? 0.1 : this.config.reserveSellMinProfitPct;
+
+    if (hasEmergencyLoss) {
+      this.logger.debug(
+        `[SmartHedging] Emergency mode: worst loss is ${worstLoss.toFixed(1)}%, lowering reserve sell threshold to ${effectiveMinProfitPct}%`,
+      );
+    }
+
     // Find profitable positions we could sell (excluding hedge positions)
     const profitablePositions = allPositions
       .filter((pos) => {
-        // Must be profitable
-        if (pos.pnlPct < this.config.reserveSellMinProfitPct) return false;
+        // Must be profitable (using dynamic threshold)
+        if (pos.pnlPct < effectiveMinProfitPct) return false;
         // Don't sell hedge positions
         if (this.hedgeTokenIds.has(pos.tokenId)) return false;
         // Don't sell positions we're hedging
@@ -1628,7 +1644,7 @@ export const DEFAULT_SMART_HEDGING_CONFIG: SmartHedgingConfig = {
   optimalOpposingPriceMax: 0.75, // Ideal hedge up to 75¢
 
   // === RESERVE MANAGEMENT ===
-  reserveSellMinProfitPct: 5, // Only sell positions with 5%+ profit for reserves
+  reserveSellMinProfitPct: 2, // Only sell positions with 2%+ profit for reserves (lowered from 5% to enable hedging)
   criticalReserveThresholdPct: 50, // Urgent sell when reserves at 50% of target
   volumeDeclineThresholdPct: 30, // Prioritize selling positions with 30%+ volume decline
 };

@@ -279,6 +279,14 @@ export class StrategyOrchestrator {
   }
 
   /**
+   * Get the position tracker instance
+   * Used by TradeExecutorService to check existing positions before buying
+   */
+  getPositionTracker(): PositionTracker {
+    return this.positionTracker;
+  }
+
+  /**
    * Stop the strategy orchestrator
    */
   stop(): void {

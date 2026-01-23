@@ -128,9 +128,9 @@ test("in-flight buy tracking", async (t) => {
     markBuyInFlight(tokenId);
     markBuyCompleted(tokenId);
 
-    // Simulate time passing beyond cooldown (10s) using nowOverride
+    // Simulate time passing beyond cooldown (15s) using nowOverride
     const now = Date.now();
-    const afterCooldown = now + 11_000; // 11 seconds later
+    const afterCooldown = now + 16_000; // 16 seconds later (> 15s cooldown)
 
     const result = isInFlightOrCooldown(tokenId, "BUY", afterCooldown);
     assert.equal(result.blocked, false); // Should be allowed after cooldown

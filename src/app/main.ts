@@ -78,12 +78,14 @@ async function main(): Promise<void> {
   });
 
   // Start unified strategy orchestrator if STRATEGY_PRESET is configured
+  // Hoist orchestrator variable so its position tracker can be shared with TradeExecutorService
+  let orchestrator: StrategyOrchestrator | undefined;
   if (strategyConfig && strategyConfig.enabled && !tradingReady.detectOnly) {
     logger.info(
       `🎯 Starting unified strategy orchestrator (preset: ${strategyConfig.presetName})`,
     );
 
-    const orchestrator = new StrategyOrchestrator({
+    orchestrator = new StrategyOrchestrator({
       client,
       logger,
       arbEnabled: strategyConfig.arbEnabled,
@@ -231,6 +233,9 @@ async function main(): Promise<void> {
       proxyWallet: mempoolEnv.proxyWallet,
       logger,
       env: mempoolEnv,
+      // Pass position tracker to prevent buying positions we already own (avoids stacking)
+      // NOTE: Does NOT block hedging - hedges use a different tokenId (opposite outcome)
+      positionTracker: orchestrator?.getPositionTracker(),
     });
 
     const monitor = new MempoolMonitorService({
