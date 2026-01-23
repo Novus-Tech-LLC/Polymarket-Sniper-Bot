@@ -355,7 +355,6 @@ export class OrderSubmissionController {
     // This is the PRIMARY mechanism to prevent order stacking
     // Skip if explicitly requested (for hedging, stop-loss, etc.)
     if (
-      !params.skipRateLimit &&
       !params.skipDuplicatePrevention &&
       this.settings.duplicatePreventionMs > 0 &&
       params.tokenId &&
