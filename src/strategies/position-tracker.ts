@@ -899,15 +899,27 @@ export class PositionTracker {
         }
 
         const key = `${marketId}-${tokenId}`;
-        const timestamp = typeof activity.timestamp === "number"
-          ? activity.timestamp * 1000 // Convert seconds to ms if needed
-          : new Date(activity.timestamp).getTime();
+        
+        // Handle timestamp - check if it's in seconds or milliseconds
+        // Timestamps > 1e12 are already in milliseconds (year 2001+)
+        // Timestamps < 1e12 are in seconds and need conversion
+        let timestamp: number;
+        if (typeof activity.timestamp === "number") {
+          timestamp = activity.timestamp > 1e12 
+            ? activity.timestamp 
+            : activity.timestamp * 1000;
+        } else {
+          timestamp = new Date(activity.timestamp).getTime();
+        }
 
         // Keep the earliest (oldest) BUY timestamp
         const existing = earliestBuyTimes.get(key);
         if (!existing || timestamp < existing) {
+          // Only count as new BUY trade when adding a new position to the map
+          if (!existing) {
+            buyCount++;
+          }
           earliestBuyTimes.set(key, timestamp);
-          buyCount++;
         }
       }
 
@@ -923,7 +935,7 @@ export class PositionTracker {
       this.historicalEntryTimesLoaded = true;
 
       this.logger.info(
-        `[PositionTracker] ✅ Loaded ${earliestBuyTimes.size} historical entry times from ${activities.length} activities (${buyCount} BUY trades)`,
+        `[PositionTracker] ✅ Loaded ${earliestBuyTimes.size} historical entry times from ${activities.length} activities (${buyCount} unique positions)`,
       );
 
     } catch (err) {

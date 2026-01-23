@@ -545,6 +545,42 @@ describe("PositionTracker Redeemable Positions with Unknown Outcome", () => {
 });
 
 describe("PositionTracker Historical Entry Times", () => {
+  test("Timestamp conversion - handles both seconds and milliseconds", () => {
+    // Simulates the timestamp conversion logic
+    function convertTimestamp(timestamp: number | string): number {
+      if (typeof timestamp === "number") {
+        // Timestamps > 1e12 are already in milliseconds
+        // Timestamps < 1e12 are in seconds
+        return timestamp > 1e12 ? timestamp : timestamp * 1000;
+      }
+      return new Date(timestamp).getTime();
+    }
+
+    // Test seconds (Unix timestamp in seconds)
+    const secondsTimestamp = 1700000000; // Nov 14, 2023 in seconds
+    assert.strictEqual(
+      convertTimestamp(secondsTimestamp),
+      1700000000000,
+      "Should convert seconds to milliseconds",
+    );
+
+    // Test milliseconds (already in ms)
+    const msTimestamp = 1700000000000; // Nov 14, 2023 in milliseconds
+    assert.strictEqual(
+      convertTimestamp(msTimestamp),
+      1700000000000,
+      "Should keep milliseconds as-is",
+    );
+
+    // Test string timestamp
+    const stringTimestamp = "2023-11-14T22:13:20.000Z";
+    assert.strictEqual(
+      convertTimestamp(stringTimestamp),
+      1700000000000,
+      "Should convert ISO string to milliseconds",
+    );
+  });
+
   test("Historical entry times parsing - finds earliest BUY for each token", () => {
     // Simulates parsing activity data to find earliest BUY timestamp
     interface ActivityItem {
