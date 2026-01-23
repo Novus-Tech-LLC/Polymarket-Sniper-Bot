@@ -143,18 +143,13 @@ export class UniversalStopLossStrategy {
     if (this.config.skipForSmartHedging) {
       // Use configured threshold or default to 100¢ (matches Smart Hedging default - handles ALL positions)
       const hedgingThreshold = this.config.hedgingMaxEntryPrice ?? 1.0;
-      const skippedCount = activePositions.filter(
-        (pos) => pos.entryPrice < hedgingThreshold,
-      ).length;
       activePositions = activePositions.filter(
         (pos) => pos.entryPrice >= hedgingThreshold,
       );
 
-      if (skippedCount > 0) {
-        this.logger.debug(
-          `[UniversalStopLoss] Skipping ${skippedCount} position(s) with entry < ${(hedgingThreshold * 100).toFixed(1)}¢ - smart hedging will handle them`,
-        );
-      }
+      // NOTE: We intentionally don't log skipped positions here.
+      // Smart Hedging handles these positions with its own fallback mechanism
+      // (liquidation if hedge fails), so this skip is expected and silent.
     }
 
     if (activePositions.length === 0) {
