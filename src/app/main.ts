@@ -127,6 +127,7 @@ async function main(): Promise<void> {
         enabled: strategyConfig.smartHedgingEnabled,
         triggerLossPct: strategyConfig.smartHedgingTriggerLossPct,
         maxHedgeUsd: strategyConfig.smartHedgingMaxHedgeUsd,
+        minHedgeUsd: strategyConfig.smartHedgingMinHedgeUsd,
         reservePct: strategyConfig.smartHedgingReservePct,
         allowExceedMaxForProtection: strategyConfig.smartHedgingAllowExceedMax,
         absoluteMaxHedgeUsd: strategyConfig.smartHedgingAbsoluteMaxUsd,

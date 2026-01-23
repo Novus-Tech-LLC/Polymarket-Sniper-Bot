@@ -197,3 +197,26 @@ test("Smart hedging config respects absoluteMaxUsd over maxHedgeUsd when allowEx
   // The reserve calculation should use absoluteMaxUsd (25) not maxHedgeUsd (10)
   // This is verified by the smart-hedging.ts logic, not just config loading
 });
+
+test("SMART_HEDGING_MIN_HEDGE_USD defaults to 1", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Default min hedge USD is $1
+  assert.equal(config.smartHedgingMinHedgeUsd, 1);
+});
+
+test("SMART_HEDGING_MIN_HEDGE_USD env variable overrides default", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_MIN_HEDGE_USD: "5",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence
+  assert.equal(config.smartHedgingMinHedgeUsd, 5);
+});

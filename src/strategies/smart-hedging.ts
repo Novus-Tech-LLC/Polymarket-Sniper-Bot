@@ -48,6 +48,14 @@ export interface SmartHedgingConfig {
   maxHedgeUsd: number;
 
   /**
+   * Minimum USD to use for a hedge position
+   * Hedges below this size are skipped (not worth the transaction)
+   * Prevents creating micro-hedges (e.g., 0.3 shares) that don't provide meaningful protection
+   * Default: $1 (any hedge below $1 is skipped)
+   */
+  minHedgeUsd: number;
+
+  /**
    * Allow hedge to EXCEED maxHedgeUsd when stopping heavy losses
    * When true, hedge size can match original position even if > maxHedgeUsd
    * This ensures we can fully protect large losing positions
@@ -420,6 +428,18 @@ export class SmartHedgingStrategy {
     if (config.maxHedgeUsd <= 0) {
       throw new Error(
         `SmartHedgingConfig.maxHedgeUsd must be > 0, received ${config.maxHedgeUsd}`,
+      );
+    }
+
+    if (config.minHedgeUsd < 0) {
+      throw new Error(
+        `SmartHedgingConfig.minHedgeUsd must be >= 0, received ${config.minHedgeUsd}`,
+      );
+    }
+
+    if (config.minHedgeUsd > config.maxHedgeUsd) {
+      throw new Error(
+        `SmartHedgingConfig.minHedgeUsd must be <= maxHedgeUsd (${config.maxHedgeUsd}), received ${config.minHedgeUsd}`,
       );
     }
 
@@ -1152,71 +1172,98 @@ export class SmartHedgingStrategy {
       // - If original wins: original shares × $1 - originalInvestment - (X × P) = profit
       // - If hedge wins: X × $1 - originalInvestment - (X × P) = X × (1 - P) - originalInvestment
 
-      // For hedge win to be PROFITABLE:
+      // For hedge win to be PROFITABLE (not just break-even):
       // X × (1 - opposingPrice) > originalInvestment
       // X > originalInvestment / (1 - opposingPrice)
+      // We add 10% buffer to ensure actual profit, not just break-even
       const hedgeProfit = 1 - opposingPrice; // Profit per hedge share if hedge wins
-      const profitableHedgeShares = originalInvestment / hedgeProfit;
+
+      // Guard: if opposingPrice >= 1, hedgeProfit <= 0 and hedge math breaks down
+      // This means the opposing side is too expensive (or invalid) to hedge
+      if (hedgeProfit <= 0) {
+        this.logger.warn(
+          `[SmartHedging] ⚠️ Cannot hedge - opposing price ${(opposingPrice * 100).toFixed(1)}¢ is too high (>= $1)`,
+        );
+        return false;
+      }
+
+      const breakEvenHedgeShares = originalInvestment / hedgeProfit;
+      const breakEvenHedgeUsd = breakEvenHedgeShares * opposingPrice;
+      // Add 10% buffer to ensure we PROFIT, not just break even
+      const profitableHedgeShares = breakEvenHedgeShares * 1.1;
       const profitableHedgeUsd = profitableHedgeShares * opposingPrice;
 
-      // Break-even across BOTH outcomes:
-      // We want to find hedge size where worst-case outcome = 0
-      // If original wins: originalShares × $1 - originalInvestment - hedgeCost = 0
-      // If hedge wins: hedgeShares × $1 - originalInvestment - hedgeCost = 0
-      // 
-      // For symmetry, we want both outcomes to be equal:
-      // originalShares - totalInvested = hedgeShares - totalInvested
-      // This means: originalShares = hedgeShares
-      // hedgeShares = originalShares, hedgeCost = originalShares × opposingPrice
-      const breakEvenHedgeShares = position.size; // Match original shares for symmetric outcomes
-      const breakEvenHedgeUsd = breakEvenHedgeShares * opposingPrice;
-
       // Determine actual hedge size based on strategy
+      // KEY INSIGHT: We want to create an inverse trade UP TO THE CEILING to undo loss damage
+      // NOT micro-trades that match the original tiny position size
       const isEmergency = position.pnlPct <= -this.config.emergencyLossThresholdPct;
       
       let targetHedgeUsd: number;
       let hedgeSizeReason: string;
 
-      // Try to make the hedge PROFITABLE if possible within limits
+      // SMART HEDGE CALCULATION:
+      // Calculate the exact amount needed to PROFIT if the hedge wins
+      // This is the "profitable hedge" - the inverse trade that undoes the damage
+      this.logger.debug(
+        `[SmartHedging] 🧮 SMART HEDGE CALCULATION:` +
+          `\n  Original investment: $${originalInvestment.toFixed(2)}` +
+          `\n  Current loss: ${position.pnlPct.toFixed(1)}% ($${unrealizedLoss.toFixed(2)})` +
+          `\n  Opposing price: ${(opposingPrice * 100).toFixed(1)}¢` +
+          `\n  Profit per hedge share: $${hedgeProfit.toFixed(2)}` +
+          `\n  Shares needed to profit: ${profitableHedgeShares.toFixed(2)}` +
+          `\n  💰 SMART HEDGE AMOUNT: $${profitableHedgeUsd.toFixed(2)} (this is what we need to make money!)` +
+          `\n  Ceiling: $${this.config.absoluteMaxHedgeUsd}`,
+      );
+
+      // Goal: Create a meaningful hedge that can turn the loss into a WIN
+      // Use the calculated profitableHedgeUsd (capped at ceiling)
       if (this.config.allowExceedMaxForProtection) {
         if (profitableHedgeUsd <= this.config.absoluteMaxHedgeUsd) {
-          // We can afford a profitable hedge!
+          // We can afford a profitable hedge! Use the full amount needed.
           targetHedgeUsd = profitableHedgeUsd;
-          hedgeSizeReason = `💰 PROFITABLE HEDGE - buying enough to MAKE MONEY if hedge wins`;
-        } else if (isEmergency) {
-          // Emergency - use max available even if not fully profitable
-          targetHedgeUsd = this.config.absoluteMaxHedgeUsd;
-          hedgeSizeReason = `🚨 EMERGENCY - using max $${this.config.absoluteMaxHedgeUsd} (${position.pnlPct.toFixed(1)}% loss)`;
-          // Warn user that limit prevents profitable hedge
-          this.logger.warn(
-            `[SmartHedging] ⚠️ SMART_HEDGING_ABSOLUTE_MAX_USD ($${this.config.absoluteMaxHedgeUsd}) prevents profitable hedge!` +
-              `\n  Profitable hedge would need: $${profitableHedgeUsd.toFixed(2)}` +
-              `\n  Using max allowed: $${this.config.absoluteMaxHedgeUsd}` +
-              `\n  Consider increasing SMART_HEDGING_ABSOLUTE_MAX_USD to turn losers into winners`,
-          );
+          hedgeSizeReason = `💰 SMART HEDGE - buying $${targetHedgeUsd.toFixed(2)} to PROFIT if hedge wins`;
         } else {
-          // Can't afford profitable hedge, use what we can
-          targetHedgeUsd = Math.min(originalInvestment, this.config.absoluteMaxHedgeUsd);
-          hedgeSizeReason = `📊 Partial hedge - profitable would need $${profitableHedgeUsd.toFixed(2)}, using $${targetHedgeUsd.toFixed(2)}`;
-          // Warn user that limit prevents profitable hedge
-          this.logger.warn(
-            `[SmartHedging] ⚠️ Hedge limit prevents profitable outcome!` +
-              `\n  To MAKE MONEY on hedge win: need $${profitableHedgeUsd.toFixed(2)}` +
-              `\n  Your limit (SMART_HEDGING_ABSOLUTE_MAX_USD): $${this.config.absoluteMaxHedgeUsd}` +
-              `\n  Will use: $${targetHedgeUsd.toFixed(2)} (caps loss but won't profit)`,
+          // Profitable hedge exceeds our limit - use the MAXIMUM ALLOWED to get as close as possible
+          // This creates a meaningful inverse trade, not a micro-hedge
+          targetHedgeUsd = this.config.absoluteMaxHedgeUsd;
+          hedgeSizeReason = isEmergency
+            ? `🚨 EMERGENCY MAX HEDGE - using full $${this.config.absoluteMaxHedgeUsd} ceiling (${position.pnlPct.toFixed(1)}% loss)`
+            : `📊 MAX HEDGE - using full $${this.config.absoluteMaxHedgeUsd} ceiling to maximize protection`;
+          
+          this.logger.info(
+            `[SmartHedging] ℹ️ Smart hedge exceeds ceiling:` +
+              `\n  Smart hedge needed: $${profitableHedgeUsd.toFixed(2)} (to profit from upside)` +
+              `\n  Using ceiling: $${this.config.absoluteMaxHedgeUsd}` +
+              `\n  💡 Tip: Increase SMART_HEDGING_ABSOLUTE_MAX_USD to $${Math.ceil(profitableHedgeUsd)} to turn this into a winning trade`,
           );
         }
       } else {
-        // Standard mode - respect maxHedgeUsd
-        targetHedgeUsd = Math.min(originalInvestment, this.config.maxHedgeUsd);
-        hedgeSizeReason = `Standard hedge within $${this.config.maxHedgeUsd} limit`;
-        if (profitableHedgeUsd > this.config.maxHedgeUsd) {
-          this.logger.warn(
-            `[SmartHedging] ⚠️ SMART_HEDGING_MAX_HEDGE_USD ($${this.config.maxHedgeUsd}) prevents profitable hedge!` +
-              `\n  Profitable hedge would need: $${profitableHedgeUsd.toFixed(2)}` +
-              `\n  Set SMART_HEDGING_ALLOW_EXCEED_MAX=true to allow larger hedges`,
+        // Standard mode - use maxHedgeUsd as ceiling, but still aim for meaningful hedge
+        if (profitableHedgeUsd <= this.config.maxHedgeUsd) {
+          targetHedgeUsd = profitableHedgeUsd;
+          hedgeSizeReason = `💰 SMART HEDGE within standard $${this.config.maxHedgeUsd} limit`;
+        } else {
+          // Use the full maxHedgeUsd to create a meaningful inverse trade
+          targetHedgeUsd = this.config.maxHedgeUsd;
+          hedgeSizeReason = `📊 MAX HEDGE - using full $${this.config.maxHedgeUsd} limit`;
+          this.logger.info(
+            `[SmartHedging] ℹ️ Smart hedge exceeds standard limit:` +
+              `\n  Smart hedge needed: $${profitableHedgeUsd.toFixed(2)} (to profit from upside)` +
+              `\n  Using limit: $${this.config.maxHedgeUsd}` +
+              `\n  💡 Tip: Set SMART_HEDGING_ALLOW_EXCEED_MAX=true to allow larger hedges`,
           );
         }
+      }
+
+      // Check minimum hedge size - skip if below threshold
+      if (targetHedgeUsd < this.config.minHedgeUsd) {
+        this.logger.info(
+          `[SmartHedging] ⏭️ Skipping hedge - calculated size below minimum:` +
+            `\n  Position: ${position.size.toFixed(2)} ${originalSide} @ ${(position.entryPrice * 100).toFixed(1)}¢ = $${originalInvestment.toFixed(2)} invested` +
+            `\n  Calculated hedge: $${targetHedgeUsd.toFixed(2)} (below minimum $${this.config.minHedgeUsd})` +
+            `\n  💡 Tip: Micro-positions are better managed by stop-loss or allowed to expire`,
+        );
+        return false;
       }
 
       const hedgeShares = targetHedgeUsd / opposingPrice;
@@ -1685,6 +1732,7 @@ export const DEFAULT_SMART_HEDGING_CONFIG: SmartHedgingConfig = {
   enabled: true, // Enabled by default per user request
   triggerLossPct: 20, // Trigger hedge consideration at 20% loss
   maxHedgeUsd: 10, // Max $10 per hedge (standard limit)
+  minHedgeUsd: 1, // Minimum $1 per hedge (skip micro-hedges that don't provide meaningful protection)
   reservePct: 20, // Keep 20% in reserve for hedging
   maxEntryPriceForHedging: PRICE_TIERS.SPECULATIVE_MIN, // 60¢ - only risky tier
   minOpposingSidePrice: 0.5, // Opposing side must be at least 50¢

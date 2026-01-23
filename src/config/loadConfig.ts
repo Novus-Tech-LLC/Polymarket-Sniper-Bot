@@ -1134,6 +1134,12 @@ export type StrategyConfig = {
   smartHedgingEnabled: boolean;
   smartHedgingTriggerLossPct: number;
   smartHedgingMaxHedgeUsd: number;
+  /**
+   * Minimum USD for a hedge position - skip hedges below this threshold
+   * Prevents creating micro-hedges that don't provide meaningful protection
+   * Default: $1
+   */
+  smartHedgingMinHedgeUsd: number;
   smartHedgingReservePct: number;
   /**
    * Allow hedging to exceed MAX_POSITION_USD / maxHedgeUsd when needed to stop bleeding
@@ -1278,6 +1284,15 @@ export function loadStrategyConfig(
             .SMART_HEDGING_MAX_HEDGE_USD
         : undefined) ??
       10, // Default: max $10 per hedge
+    // SMART_HEDGING_MIN_HEDGE_USD: minimum USD per hedge position (skip smaller hedges)
+    // Prevents creating micro-hedges that don't provide meaningful protection
+    smartHedgingMinHedgeUsd:
+      parseNumber(readEnv("SMART_HEDGING_MIN_HEDGE_USD", overrides) ?? "") ??
+      ("SMART_HEDGING_MIN_HEDGE_USD" in preset
+        ? (preset as { SMART_HEDGING_MIN_HEDGE_USD: number })
+            .SMART_HEDGING_MIN_HEDGE_USD
+        : undefined) ??
+      1, // Default: min $1 per hedge (skip micro-hedges below $1)
     // SMART_HEDGING_RESERVE_PCT: percentage of wallet to reserve for hedging
     smartHedgingReservePct:
       parseNumber(readEnv("SMART_HEDGING_RESERVE_PCT", overrides) ?? "") ??
