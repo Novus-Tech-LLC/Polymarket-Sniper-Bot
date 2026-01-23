@@ -322,17 +322,23 @@ export class SimpleSmartHedgingStrategy {
 
   /**
    * Normalize an outcome string to the OrderOutcome type expected by postOrder.
-   * Maps non-standard outcomes to YES/NO based on token position in market.
-   * For binary markets, the first token is effectively "YES" and second is "NO".
+   *
+   * IMPORTANT: The CLOB API uses tokenId (not outcome) to identify the specific
+   * outcome token for order execution. The outcome field is primarily for logging
+   * and internal bookkeeping. For non-YES/NO markets, we use "YES" as a placeholder
+   * since the tokenId is what actually determines which side is being traded.
+   *
+   * @param outcome - The outcome string from the position (e.g., "YES", "NO", "Over", "Under", "Team A")
+   * @returns "YES" or "NO" for the order API
    */
   private normalizeOutcomeForOrder(outcome: string): "YES" | "NO" {
     const upper = outcome.toUpperCase();
     if (upper === "YES" || upper === "NO") {
       return upper as "YES" | "NO";
     }
-    // For non-YES/NO markets (Over/Under, Team A/Team B, etc.),
-    // we treat them as YES since the tokenId is what matters for order execution.
-    // The CLOB API uses tokenId to identify the specific outcome token.
+    // For non-YES/NO markets (Over/Under, Team A/Team B, etc.), we use "YES" as a
+    // placeholder. The tokenId is what the CLOB API uses to identify the specific
+    // outcome token - the outcome field is just metadata for logging.
     return "YES";
   }
 
@@ -347,6 +353,15 @@ export class SimpleSmartHedgingStrategy {
       return false;
     }
 
+    // The execute() method already filters out positions without a side,
+    // but check again as a safety measure
+    if (!position.side || position.side.trim() === "") {
+      this.logger.warn(
+        `[SimpleHedging] Position has no side defined - cannot sell (tokenId=${position.tokenId})`,
+      );
+      return false;
+    }
+
     const currentValue = position.size * position.currentPrice;
 
     this.logger.info(
@@ -355,9 +370,7 @@ export class SimpleSmartHedgingStrategy {
 
     try {
       // Normalize the outcome for the order (tokenId is what matters for execution)
-      const orderOutcome = this.normalizeOutcomeForOrder(
-        position.side ?? "YES",
-      );
+      const orderOutcome = this.normalizeOutcomeForOrder(position.side);
 
       const result = await postOrder({
         client: this.client,
@@ -415,9 +428,17 @@ export class SimpleSmartHedgingStrategy {
 
       if (!oppositeToken) return null;
 
+      // Outcome should always be defined for valid market tokens.
+      // If missing, log a warning but continue - the tokenId is what matters for execution.
+      if (!oppositeToken.outcome) {
+        this.logger.warn(
+          `[SimpleHedging] Opposite token has no outcome defined (marketId=${marketId}, tokenId=${oppositeToken.token_id})`,
+        );
+      }
+
       return {
         tokenId: oppositeToken.token_id,
-        outcome: oppositeToken.outcome ?? "OPPOSITE",
+        outcome: oppositeToken.outcome ?? "Unknown",
       };
     } catch {
       return null;
