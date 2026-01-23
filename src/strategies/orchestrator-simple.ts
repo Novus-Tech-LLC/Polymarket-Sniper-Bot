@@ -5,11 +5,11 @@
  * No parallel execution = no race conditions = no order stacking.
  *
  * EXECUTION ORDER:
- * 1. Auto-Redeem - Claim resolved positions
+ * 1. Auto-Redeem - Claim resolved positions (HIGHEST PRIORITY - get money back!)
  * 2. Smart Hedging - Hedge losing positions
- * 3. Stop-Loss - Sell positions at max loss
+ * 3. Universal Stop-Loss - Sell positions at max loss
  * 4. Endgame Sweep - Buy high-confidence positions
- * 5. Auto-Sell - Sell near resolution
+ * 5. Auto-Sell - Sell near resolution (99¢+)
  * 6. Quick Flip - Take profits
  */
 
@@ -31,6 +31,9 @@ import {
   type SimpleQuickFlipConfig,
   DEFAULT_SIMPLE_QUICKFLIP_CONFIG,
 } from "./quick-flip-simple";
+import { AutoRedeemStrategy, type AutoRedeemConfig } from "./auto-redeem";
+import { AutoSellStrategy, type AutoSellConfig } from "./auto-sell";
+import { UniversalStopLossStrategy, type UniversalStopLossConfig } from "./universal-stop-loss";
 import { RiskManager, createRiskManager } from "./risk-manager";
 import { PnLLedger } from "./pnl-ledger";
 
@@ -45,6 +48,9 @@ export interface SimpleOrchestratorConfig {
   hedgingConfig?: Partial<SimpleSmartHedgingConfig>;
   endgameConfig?: Partial<SimpleEndgameSweepConfig>;
   quickFlipConfig?: Partial<SimpleQuickFlipConfig>;
+  autoRedeemConfig?: Partial<AutoRedeemConfig>;
+  autoSellConfig?: Partial<AutoSellConfig>;
+  stopLossConfig?: Partial<UniversalStopLossConfig>;
 }
 
 export class SimpleOrchestrator {
@@ -54,8 +60,12 @@ export class SimpleOrchestrator {
   private riskManager: RiskManager;
   private pnlLedger: PnLLedger;
 
+  // All strategies
+  private autoRedeemStrategy: AutoRedeemStrategy;
   private hedgingStrategy: SimpleSmartHedgingStrategy;
+  private stopLossStrategy: UniversalStopLossStrategy;
   private endgameStrategy: SimpleEndgameSweepStrategy;
+  private autoSellStrategy: AutoSellStrategy;
   private quickFlipStrategy: SimpleQuickFlipStrategy;
 
   private executionTimer?: NodeJS.Timeout;
@@ -80,7 +90,22 @@ export class SimpleOrchestrator {
       refreshIntervalMs: POSITION_REFRESH_MS,
     });
 
-    // Initialize strategies with user config merged with defaults
+    // === INITIALIZE ALL STRATEGIES ===
+
+    // 1. Auto-Redeem - Claim resolved positions (HIGHEST PRIORITY)
+    this.autoRedeemStrategy = new AutoRedeemStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: {
+        enabled: true,
+        minPositionUsd: 0.01, // Redeem anything
+        checkIntervalMs: 30000, // Check every 30s
+        ...config.autoRedeemConfig,
+      },
+    });
+
+    // 2. Smart Hedging - Hedge losing positions
     this.hedgingStrategy = new SimpleSmartHedgingStrategy({
       client: config.client,
       logger: config.logger,
@@ -92,6 +117,21 @@ export class SimpleOrchestrator {
       },
     });
 
+    // 3. Universal Stop-Loss - Protect against big losses
+    this.stopLossStrategy = new UniversalStopLossStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: {
+        enabled: true,
+        maxStopLossPct: 25, // Max 25% loss
+        useDynamicTiers: true,
+        minHoldSeconds: 60, // Wait 60s before stop-loss
+        ...config.stopLossConfig,
+      },
+    });
+
+    // 4. Endgame Sweep - Buy high-confidence positions
     this.endgameStrategy = new SimpleEndgameSweepStrategy({
       client: config.client,
       logger: config.logger,
@@ -103,6 +143,23 @@ export class SimpleOrchestrator {
       },
     });
 
+    // 5. Auto-Sell - Sell near resolution (99¢+)
+    this.autoSellStrategy = new AutoSellStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: {
+        enabled: true,
+        threshold: 0.99, // Sell at 99¢+
+        minHoldSeconds: 60,
+        minOrderUsd: 1,
+        disputeWindowExitEnabled: true,
+        disputeWindowExitPrice: 0.999,
+        ...config.autoSellConfig,
+      },
+    });
+
+    // 6. Quick Flip - Take profits
     this.quickFlipStrategy = new SimpleQuickFlipStrategy({
       client: config.client,
       logger: config.logger,
@@ -143,18 +200,28 @@ export class SimpleOrchestrator {
 
   /**
    * Execute all strategies sequentially
+   * ORDER MATTERS - higher priority strategies run first
    */
   private async executeStrategies(): Promise<void> {
     if (!this.isRunning) return;
 
     try {
-      // 1. Smart Hedging - protect losing positions
+      // 1. Auto-Redeem - HIGHEST PRIORITY - get money back from resolved positions
+      await this.runStrategy("AutoRedeem", () => this.autoRedeemStrategy.execute());
+
+      // 2. Smart Hedging - protect losing positions by buying opposite side
       await this.runStrategy("Hedging", () => this.hedgingStrategy.execute());
 
-      // 2. Endgame Sweep - buy high-confidence positions
+      // 3. Universal Stop-Loss - sell positions exceeding max loss threshold
+      await this.runStrategy("StopLoss", () => this.stopLossStrategy.execute());
+
+      // 4. Endgame Sweep - buy high-confidence positions (85-99¢)
       await this.runStrategy("Endgame", () => this.endgameStrategy.execute());
 
-      // 3. Quick Flip - take profits
+      // 5. Auto-Sell - sell positions near resolution (99¢+)
+      await this.runStrategy("AutoSell", () => this.autoSellStrategy.execute());
+
+      // 6. Quick Flip - take profits when target reached
       await this.runStrategy("QuickFlip", () => this.quickFlipStrategy.execute());
     } catch (err) {
       this.logger.error(
