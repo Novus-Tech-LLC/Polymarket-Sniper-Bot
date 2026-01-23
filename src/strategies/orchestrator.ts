@@ -120,11 +120,15 @@ export class StrategyOrchestrator {
     });
 
     if (smartHedgingConfig.enabled) {
+      // When allowExceedMaxForProtection is true, the effective max is absoluteMaxHedgeUsd
+      const effectiveMaxHedge = smartHedgingConfig.allowExceedMaxForProtection
+        ? smartHedgingConfig.absoluteMaxHedgeUsd
+        : smartHedgingConfig.maxHedgeUsd;
       const exceedMsg = smartHedgingConfig.allowExceedMaxForProtection
-        ? `allowExceed=true, absMax=$${smartHedgingConfig.absoluteMaxHedgeUsd}`
+        ? `allowExceed=true, base=$${smartHedgingConfig.maxHedgeUsd}`
         : `allowExceed=false`;
       this.logger.info(
-        `[Orchestrator] 🛡️ Smart Hedging: ENABLED (trigger: -${smartHedgingConfig.triggerLossPct}%, max hedge: $${smartHedgingConfig.maxHedgeUsd}, ${exceedMsg}, reserve: ${smartHedgingConfig.reservePct}%)`,
+        `[Orchestrator] 🛡️ Smart Hedging: ENABLED (trigger: -${smartHedgingConfig.triggerLossPct}%, max hedge: $${effectiveMaxHedge}, ${exceedMsg}, reserve: ${smartHedgingConfig.reservePct}%)`,
       );
     }
 
