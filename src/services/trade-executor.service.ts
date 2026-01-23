@@ -57,7 +57,7 @@ export class TradeExecutorService {
     // === MINIMUM BUY PRICE CHECK ===
     // Prevents buying extremely low-probability "loser" positions (e.g., 3¢ positions)
     // This protects against copying trades into positions that are almost certain to lose.
-    // Default: 0.15 (15¢) - configurable via MIN_BUY_PRICE environment variable
+    // Default: 0.50 (50¢) - configurable via MIN_BUY_PRICE environment variable
     if (signal.side === "BUY") {
       const minBuyPrice = env.minBuyPrice ?? DEFAULT_CONFIG.MIN_BUY_PRICE;
       if (signal.price < minBuyPrice) {

@@ -47,7 +47,7 @@ export type MonitorRuntimeConfig = {
   /**
    * Minimum price threshold for BUY orders (0-1 scale where 1 = $1)
    * Prevents buying extremely low-probability "loser" positions.
-   * Default: 0.15 (15¢) - blocks positions like 3¢ which are almost certain to lose.
+   * Default: 0.50 (50¢) - blocks positions like 3¢ which are almost certain to lose.
    */
   minBuyPrice: number;
   minOrderUsd: number;

@@ -269,3 +269,133 @@ test("monitor gracefully handles RPC endpoint without eth_newPendingTransactionF
     "Should not log errors for unsupported RPC method",
   );
 });
+
+test("monitor skips low-price BUY trades and increments skippedLowPriceTrades", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const activities = [
+    {
+      type: "TRADE",
+      timestamp: now,
+      conditionId: "market-low-price",
+      asset: "token-low-price",
+      size: 1000,
+      usdcSize: 120, // Above minTradeSizeUsd
+      price: 0.03, // 3¢ - below default minBuyPrice of 50¢
+      side: "buy",
+      outcomeIndex: 0,
+      transactionHash: "0xhash-low-price",
+    },
+  ];
+
+  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet = async () =>
+    activities;
+
+  const detected: string[] = [];
+  const debugLogs: string[] = [];
+  const testLogger = {
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+    debug: (msg: string) => debugLogs.push(msg),
+  };
+
+  const service = new MempoolMonitorService({
+    client: {} as never,
+    env: { ...baseEnv, requireConfirmed: false, minBuyPrice: 0.50 }, // 50¢ minimum
+    logger: testLogger,
+    onDetectedTrade: async (signal) => {
+      detected.push(signal.marketId);
+    },
+  });
+
+  const stats = {
+    tradesSeen: 0,
+    recentTrades: 0,
+    eligibleTrades: 0,
+    skippedSmallTrades: 0,
+    skippedLowPriceTrades: 0,
+    skippedUnconfirmedTrades: 0,
+    skippedNonTargetTrades: 0,
+    skippedParseErrorTrades: 0,
+    skippedOutsideRecentWindowTrades: 0,
+    skippedUnsupportedActionTrades: 0,
+    skippedMissingFieldsTrades: 0,
+    skippedApiErrorTrades: 0,
+    skippedOtherTrades: 0,
+  };
+
+  await (
+    service as {
+      checkRecentActivity: (
+        target: string,
+        stats: typeof stats,
+      ) => Promise<void>;
+    }
+  ).checkRecentActivity(baseEnv.targetAddresses[0], stats);
+
+  // Verify the low-price BUY was skipped
+  assert.equal(stats.skippedLowPriceTrades, 1, "Should increment skippedLowPriceTrades for low-price BUY");
+  assert.equal(stats.eligibleTrades, 0, "Should not count low-price BUY as eligible");
+  assert.equal(detected.length, 0, "Should not call onDetectedTrade for low-price BUY");
+});
+
+test("monitor allows SELL trades even when price is below minBuyPrice", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const activities = [
+    {
+      type: "TRADE",
+      timestamp: now,
+      conditionId: "market-sell-low",
+      asset: "token-sell-low",
+      size: 1000,
+      usdcSize: 120, // Above minTradeSizeUsd
+      price: 0.03, // 3¢ - below minBuyPrice, but this is a SELL
+      side: "sell", // SELL should be allowed at any price
+      outcomeIndex: 0,
+      transactionHash: "0xhash-sell-low",
+    },
+  ];
+
+  (fetchData as { httpGet: typeof fetchData.httpGet }).httpGet = async () =>
+    activities;
+
+  const detected: string[] = [];
+  const service = new MempoolMonitorService({
+    client: {} as never,
+    env: { ...baseEnv, requireConfirmed: false, minBuyPrice: 0.50 },
+    logger,
+    onDetectedTrade: async (signal) => {
+      detected.push(signal.marketId);
+    },
+  });
+
+  const stats = {
+    tradesSeen: 0,
+    recentTrades: 0,
+    eligibleTrades: 0,
+    skippedSmallTrades: 0,
+    skippedLowPriceTrades: 0,
+    skippedUnconfirmedTrades: 0,
+    skippedNonTargetTrades: 0,
+    skippedParseErrorTrades: 0,
+    skippedOutsideRecentWindowTrades: 0,
+    skippedUnsupportedActionTrades: 0,
+    skippedMissingFieldsTrades: 0,
+    skippedApiErrorTrades: 0,
+    skippedOtherTrades: 0,
+  };
+
+  await (
+    service as {
+      checkRecentActivity: (
+        target: string,
+        stats: typeof stats,
+      ) => Promise<void>;
+    }
+  ).checkRecentActivity(baseEnv.targetAddresses[0], stats);
+
+  // SELL should be allowed regardless of price
+  assert.equal(stats.skippedLowPriceTrades, 0, "Should NOT skip SELL trades based on price");
+  assert.equal(stats.eligibleTrades, 1, "SELL trade should be eligible");
+  assert.equal(detected.length, 1, "Should call onDetectedTrade for SELL");
+});
