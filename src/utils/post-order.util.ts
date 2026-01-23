@@ -255,8 +255,8 @@ async function postOrderClob(
   try {
     const result = await postOrderClobInner(input);
     
-    // Mark market cooldown on successful BUY
-    if (!input.skipDuplicatePrevention && side === "BUY" && result.status === "submitted") {
+    // Mark market cooldown on successful BUY (only if marketId is provided)
+    if (!input.skipDuplicatePrevention && side === "BUY" && marketId && result.status === "submitted") {
       markMarketBuyCompleted(marketId);
     }
     

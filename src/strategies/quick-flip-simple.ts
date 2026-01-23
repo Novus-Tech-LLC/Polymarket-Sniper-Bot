@@ -41,16 +41,17 @@ export interface SimpleQuickFlipConfig {
 
 /**
  * Polymarket fee structure:
- * - Trading fee: 0.01% per side (0.02% round-trip = 2 basis points)
+ * - Trading fee: 0.01% per side (1 basis point per side)
+ * - Round-trip fee: 0.02% (2 basis points total)
  * - Bid-ask spread: typically 1-5% depending on liquidity
  * 
  * To ensure profit after fees, we need:
- * - Minimum 1% profit to cover spread + fees with buffer
+ * - Minimum ~1% profit to cover spread with buffer
+ * - The trading fee itself (0.02%) is negligible compared to spread
  * - But take profit quickly - don't be greedy!
  */
-const TRADING_FEE_PCT = 0.02; // 0.02% round-trip fee
-const MIN_SPREAD_BUFFER_PCT = 1.0; // 1% buffer for spread
-const EFFECTIVE_MIN_PROFIT_PCT = TRADING_FEE_PCT + MIN_SPREAD_BUFFER_PCT; // ~1.02%
+const MIN_PROFIT_BUFFER_PCT = 1.0; // 1% buffer to cover spread + fees
+const EFFECTIVE_MIN_PROFIT_PCT = MIN_PROFIT_BUFFER_PCT; // ~1% minimum profit required
 
 export const DEFAULT_SIMPLE_QUICKFLIP_CONFIG: SimpleQuickFlipConfig = {
   enabled: true,
