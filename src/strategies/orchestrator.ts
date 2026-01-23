@@ -331,7 +331,7 @@ export class StrategyOrchestrator {
    * capital for hedges, but other strategies "steal" that capital before the hedge executes.
    */
   private async executeStrategies(): Promise<void> {
-    this.logger.debug("[Orchestrator] Executing strategies in parallel");
+    this.logger.debug("[Orchestrator] Executing strategies (sequential + parallel phases)");
 
     try {
       // PHASE 1: Sequential execution for capital-critical strategies
@@ -357,46 +357,51 @@ export class StrategyOrchestrator {
 
       // PHASE 2: Parallel execution for remaining strategies
       // These can safely compete for available capital
-      const results = await Promise.allSettled([
-        // Priority 3: Universal Stop-Loss (SAFETY NET - protects higher-tier positions)
-        // Only applies to positions NOT already hedged by Smart Hedging
-        this.executeWithLogging(
-          "Universal Stop-Loss",
-          3,
-          () => this.universalStopLossStrategy.execute(),
-          this.universalStopLossStrategy.getStats().enabled,
-        ),
+      // Each strategy is wrapped with its name for proper error logging
+      const parallelStrategies = [
+        {
+          name: "Universal Stop-Loss",
+          priority: 3,
+          execute: () => this.universalStopLossStrategy.execute(),
+          enabled: this.universalStopLossStrategy.getStats().enabled,
+        },
+        {
+          name: "Endgame Sweep",
+          priority: 4,
+          execute: () => this.endgameSweepStrategy.execute(),
+          enabled: this.endgameSweepStrategy.getStats().enabled,
+        },
+        {
+          name: "Auto-Sell",
+          priority: 5,
+          execute: () => this.autoSellStrategy.execute(),
+          enabled: this.autoSellStrategy.getStats().enabled,
+        },
+        {
+          name: "Quick Flip",
+          priority: 6,
+          execute: () => this.quickFlipStrategy.execute(),
+          enabled: this.quickFlipStrategy.getStats().enabled,
+        },
+      ];
 
-        // Priority 4: Endgame Sweep (buy high-probability positions)
-        this.executeWithLogging(
-          "Endgame Sweep",
-          4,
-          () => this.endgameSweepStrategy.execute(),
-          this.endgameSweepStrategy.getStats().enabled,
+      const results = await Promise.allSettled(
+        parallelStrategies.map((strategy) =>
+          this.executeWithLogging(
+            strategy.name,
+            strategy.priority,
+            strategy.execute,
+            strategy.enabled,
+          ),
         ),
+      );
 
-        // Priority 5: Auto-Sell (free up capital at threshold)
-        this.executeWithLogging(
-          "Auto-Sell",
-          5,
-          () => this.autoSellStrategy.execute(),
-          this.autoSellStrategy.getStats().enabled,
-        ),
-
-        // Priority 6: Quick Flip (take profits at target)
-        this.executeWithLogging(
-          "Quick Flip",
-          6,
-          () => this.quickFlipStrategy.execute(),
-          this.quickFlipStrategy.getStats().enabled,
-        ),
-      ]);
-
-      // Log any failures
+      // Log any failures with strategy names
       results.forEach((result, index) => {
         if (result.status === "rejected") {
+          const strategyName = parallelStrategies[index].name;
           this.logger.error(
-            `[Orchestrator] Strategy ${index + 3} failed: ${result.reason}`,
+            `[Orchestrator] ${strategyName} failed: ${result.reason}`,
           );
         }
       });
