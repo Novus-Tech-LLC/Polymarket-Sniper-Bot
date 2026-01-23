@@ -173,15 +173,15 @@ export class UniversalStopLossStrategy {
       // Check if position exceeds stop-loss (negative P&L beyond threshold)
       if (position.pnlPct <= -stopLossPct) {
         // Check minimum hold time before allowing stop-loss
-        const firstSeenTime = this.positionFirstSeen.get(positionKey)!;
+        // Use fallback to 'now' if for some reason the entry doesn't exist (race condition protection)
+        const firstSeenTime = this.positionFirstSeen.get(positionKey) ?? now;
         const holdTimeSeconds = (now - firstSeenTime) / 1000;
 
         if (holdTimeSeconds < minHoldSeconds) {
           // Position hasn't been held long enough - skip stop-loss for now
           // This prevents selling positions immediately after buying due to bid-ask spread
           this.logger.debug(
-            `[UniversalStopLoss] ⏳ Position at ${position.pnlPct.toFixed(2)}% loss (threshold: -${stopLossPct}%) ` +
-              `held for ${holdTimeSeconds.toFixed(0)}s, need ${minHoldSeconds}s before stop-loss can trigger`,
+            `[UniversalStopLoss] ⏳ Position at ${position.pnlPct.toFixed(2)}% loss (threshold: -${stopLossPct}%) held for ${holdTimeSeconds.toFixed(0)}s, need ${minHoldSeconds}s before stop-loss can trigger`,
           );
           continue;
         }
