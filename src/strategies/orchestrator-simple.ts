@@ -102,18 +102,21 @@ export class SimpleOrchestrator {
     });
 
     // 2. Smart Hedging - Hedge losing positions
+    const hedgingConfig = {
+      ...DEFAULT_SIMPLE_HEDGING_CONFIG,
+      maxHedgeUsd: config.maxPositionUsd,
+      ...config.hedgingConfig,
+    };
     this.hedgingStrategy = new SimpleSmartHedgingStrategy({
       client: config.client,
       logger: config.logger,
       positionTracker: this.positionTracker,
-      config: {
-        ...DEFAULT_SIMPLE_HEDGING_CONFIG,
-        maxHedgeUsd: config.maxPositionUsd,
-        ...config.hedgingConfig,
-      },
+      config: hedgingConfig,
     });
 
     // 3. Universal Stop-Loss - Protect against big losses
+    // When Smart Hedging is enabled, skip positions it handles (entry < maxEntryPrice)
+    const smartHedgingEnabled = hedgingConfig.enabled;
     this.stopLossStrategy = new UniversalStopLossStrategy({
       client: config.client,
       logger: config.logger,
@@ -123,6 +126,9 @@ export class SimpleOrchestrator {
         maxStopLossPct: 25, // Max 25% loss
         useDynamicTiers: true,
         minHoldSeconds: 60, // Wait 60s before stop-loss
+        // Skip positions that Smart Hedging handles (below its maxEntryPrice)
+        skipForSmartHedging: smartHedgingEnabled,
+        hedgingMaxEntryPrice: hedgingConfig.maxEntryPrice,
         ...config.stopLossConfig,
       },
     });
