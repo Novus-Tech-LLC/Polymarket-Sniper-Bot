@@ -170,6 +170,27 @@ export interface SmartHedgingConfig {
    * Default: 30% (30% volume decline triggers priority sell)
    */
   volumeDeclineThresholdPct: number;
+
+  /**
+   * FALLBACK LIQUIDATION SETTINGS
+   * When hedging cannot execute, fall back to selling the losing position
+   */
+
+  /**
+   * Enable fallback liquidation when hedging fails
+   * When true, if a hedge cannot execute (insufficient funds, order fails, etc.),
+   * the position will be liquidated instead of left to decay further.
+   * Default: true (don't let losers sit and go to zero)
+   */
+  enableFallbackLiquidation: boolean;
+
+  /**
+   * Loss percentage threshold for forced liquidation (catastrophic loss protection)
+   * When position drops beyond this %, force liquidate even if hedging timing isn't optimal.
+   * This is a safety mechanism to prevent positions from going to zero.
+   * Default: 50% (at 50%+ loss, cut losses immediately)
+   */
+  forceLiquidationLossPct: number;
 }
 
 /**
@@ -383,6 +404,13 @@ export class SmartHedgingStrategy {
   private static readonly RESERVE_SELL_COOLDOWN_MS = 300000; // 5 minutes
 
   /**
+   * Slippage tolerances for order execution
+   */
+  private static readonly HEDGE_SLIPPAGE_PCT = 0.05; // 5% slippage for hedge buys
+  private static readonly SELL_SLIPPAGE_PCT = 0.10; // 10% slippage for emergency sells
+  private static readonly SWAP_FEE_BUFFER_PCT = 0.02; // 2% buffer for swap fees
+
+  /**
    * Price history for timing optimization
    * Key: tokenId, Value: array of price entries (most recent first)
    */
@@ -519,9 +547,10 @@ export class SmartHedgingStrategy {
 
   /**
    * Process hedging for eligible positions with smart timing
+   * ENHANCED: Adds force liquidation for catastrophic losses and fallback liquidation when hedging fails
    */
   private async processHedging(allPositions: Position[]): Promise<number> {
-    let hedgedCount = 0;
+    let actionsCount = 0;
 
     // Filter for risky tier positions that are losing
     const eligiblePositions = allPositions.filter((pos) => {
@@ -577,65 +606,580 @@ export class SmartHedgingStrategy {
         continue;
       }
 
-      // Track when we first saw this position as losing
-      if (!this.positionFirstSeenLosing.has(positionKey)) {
-        this.positionFirstSeenLosing.set(positionKey, Date.now());
-        this.logger.debug(
-          `[SmartHedging] 📍 First detection of losing position: ${position.marketId.slice(0, 16)}... at ${position.pnlPct.toFixed(1)}%`,
-        );
-      }
-
-      // Update price history
-      this.updatePriceHistory(position.tokenId, position.currentPrice);
-
-      // Analyze hedge timing
-      const timingAnalysis = await this.analyzeHedgeTiming(position);
-
-      if (!timingAnalysis.shouldHedgeNow) {
-        this.logger.debug(
-          `[SmartHedging] ⏳ Not hedging yet: ${timingAnalysis.reason} (confidence: ${timingAnalysis.confidence}%)`,
-        );
-        continue;
-      }
-
       this.pendingHedges.add(positionKey);
 
       try {
-        // Log the timing analysis
+        // =================================================================
+        // SMART ACTION: HEDGE OR SELL - NEVER LET POSITIONS GO TO ZERO!
+        // =================================================================
+        // This is a YES/NO binary market. One side ALWAYS pays $1.
+        // 
+        // Decision matrix:
+        // 1. If hedge can turn loss into profit → BUY THE INVERSE
+        // 2. If hedge helps but doesn't guarantee profit → BUY THE INVERSE (better than nothing)
+        // 3. If hedge is too expensive (opposing price too high) → SELL NOW to stop bleeding
+        // 
+        // NEVER just watch a position go to zero!
+        // =================================================================
+
+        const lossPct = Math.abs(position.pnlPct);
+        const originalInvestment = position.size * position.entryPrice;
+        const currentValue = position.size * position.currentPrice;
+        const unrealizedLoss = originalInvestment - currentValue;
+
         this.logger.info(
-          `[SmartHedging] ⏰ HEDGE TIMING OPTIMAL: ${timingAnalysis.reason}` +
-            `\n  Confidence: ${timingAnalysis.confidence}%` +
-            `\n  Consecutive drops: ${timingAnalysis.consecutiveDrops}` +
-            `\n  Volume trend: ${timingAnalysis.volumeTrend}` +
-            `\n  Opposing price: ${(timingAnalysis.opposingPrice * 100).toFixed(1)}¢` +
-            `\n  If original wins: $${timingAnalysis.potentialOutcome.ifOriginalWins.toFixed(2)}` +
-            `\n  If hedge wins: $${timingAnalysis.potentialOutcome.ifHedgeWins.toFixed(2)}` +
-            `\n  Max loss: $${timingAnalysis.potentialOutcome.maxLoss.toFixed(2)}` +
-            `\n  Break-even chance: ${(timingAnalysis.potentialOutcome.breakEvenChance * 100).toFixed(0)}%`,
+          `[SmartHedging] 🎯 ANALYZING LOSING POSITION:` +
+            `\n  ═══════════════════════════════════════` +
+            `\n  Position: ${position.size.toFixed(2)} ${position.side} @ ${(position.entryPrice * 100).toFixed(1)}¢` +
+            `\n  Invested: $${originalInvestment.toFixed(2)}` +
+            `\n  Current:  ${(position.currentPrice * 100).toFixed(1)}¢ = $${currentValue.toFixed(2)} (${position.pnlPct.toFixed(1)}%)` +
+            `\n  Loss:     $${unrealizedLoss.toFixed(2)}` +
+            `\n  ═══════════════════════════════════════`,
         );
 
-        const hedged = await this.hedgePosition(position, timingAnalysis);
-        if (hedged) {
-          hedgedCount++;
-          // Clear the first-seen timestamp on successful hedge
+        // Check if loss exceeds forceLiquidationLossPct - skip hedge analysis and force liquidation
+        let analysis: Awaited<ReturnType<typeof this.analyzeHedgeVsSell>>;
+        if (
+          this.config.forceLiquidationLossPct !== undefined &&
+          lossPct >= this.config.forceLiquidationLossPct
+        ) {
+          // Force liquidation once loss exceeds configured threshold,
+          // skipping hedge analysis even if hedging might be viable.
+          this.logger.warn(
+            `[SmartHedging] 🚨 LOSS ${lossPct.toFixed(1)}% >= forceLiquidationLossPct=${this.config.forceLiquidationLossPct.toFixed(1)}% - forcing liquidation instead of hedging`,
+          );
+          analysis = {
+            action: "SELL",
+            reason: `Loss ${lossPct.toFixed(1)}% exceeded forceLiquidationLossPct=${this.config.forceLiquidationLossPct}%`,
+            expectedOutcome: "Immediate liquidation to cap further losses",
+          };
+        } else {
+          // Analyze the best action
+          analysis = await this.analyzeHedgeVsSell(position);
+        }
+
+        if (analysis.action === "HEDGE") {
+          this.logger.info(
+            `[SmartHedging] 📊 DECISION: HEDGE (buy ${position.side === "YES" ? "NO" : "YES"})` +
+              `\n  Reason: ${analysis.reason}` +
+              `\n  Expected outcome: ${analysis.expectedOutcome}`,
+          );
+
+          const hedged = await this.executeAggressiveHedge(position);
+          if (hedged) {
+            actionsCount++;
+            this.positionFirstSeenLosing.delete(positionKey);
+            continue;
+          }
+
+          // Hedge failed - try swap as backup
+          this.logger.warn(`[SmartHedging] ⚠️ Direct hedge failed - trying SWAP`);
+          const swapped = await this.executeSwap(position);
+          if (swapped) {
+            actionsCount++;
+            this.positionFirstSeenLosing.delete(positionKey);
+            continue;
+          }
+
+          // Both hedge and swap failed - must liquidate to stop bleeding
+          this.logger.warn(`[SmartHedging] ⚠️ Hedge and swap both failed - must liquidate`);
+        }
+
+        // If we reach here, either:
+        // 1. analysis.action === "SELL" (hedging wasn't viable, sell is best option)
+        // 2. analysis.action === "HEDGE" but both hedge and swap failed (must liquidate)
+        // In both cases, we need to liquidate to stop losses
+        this.logger.info(
+          `[SmartHedging] 📊 EXECUTING LIQUIDATION:` +
+            `\n  Reason: ${analysis.action === "SELL" ? analysis.reason : "All hedge attempts failed"}` +
+            `\n  Salvaging: ~$${currentValue.toFixed(2)} before further decay`,
+        );
+
+        const liquidated = await this.liquidatePosition(position, "FORCE_LIQUIDATION");
+        if (liquidated) {
+          actionsCount++;
           this.positionFirstSeenLosing.delete(positionKey);
+          this.logger.info(
+            `[SmartHedging] ✅ LIQUIDATED - Salvaged $${currentValue.toFixed(2)} (saved from going to $0)`,
+          );
+        } else {
+          this.logger.error(
+            `[SmartHedging] ❌ FAILED TO LIQUIDATE - Position still at risk!`,
+          );
         }
       } catch (err) {
         this.logger.error(
-          `[SmartHedging] ❌ Failed to hedge position: ${err instanceof Error ? err.message : String(err)}`,
+          `[SmartHedging] ❌ Error processing position: ${err instanceof Error ? err.message : String(err)}`,
         );
+
+        // Emergency liquidation on any error
+        if (this.config.enableFallbackLiquidation) {
+          try {
+            this.logger.warn(`[SmartHedging] 🚨 Emergency liquidation after error`);
+            const liquidated = await this.liquidatePosition(position, "HEDGE_ERROR_FALLBACK");
+            if (liquidated) {
+              actionsCount++;
+              this.positionFirstSeenLosing.delete(positionKey);
+            }
+          } catch (liquidateErr) {
+            this.logger.error(
+              `[SmartHedging] ❌ Emergency liquidation failed: ${liquidateErr instanceof Error ? liquidateErr.message : String(liquidateErr)}`,
+            );
+          }
+        }
       } finally {
         this.pendingHedges.delete(positionKey);
       }
     }
 
-    if (hedgedCount > 0) {
+    if (actionsCount > 0) {
       this.logger.info(
-        `[SmartHedging] ✅ Hedged ${hedgedCount} position(s) - turning losers into winners!`,
+        `[SmartHedging] ✅ Processed ${actionsCount} position(s) (hedged/swapped/liquidated)`,
       );
     }
 
-    return hedgedCount;
+    return actionsCount;
+  }
+
+  /**
+   * Analyze whether to HEDGE or SELL a losing position
+   * 
+   * HEDGE makes sense when:
+   * - Opposing price is reasonable (not too expensive)
+   * - We have enough budget to create a meaningful hedge
+   * - The hedge can either guarantee profit or significantly reduce loss
+   * 
+   * SELL makes sense when:
+   * - Opposing price is too high (e.g., 95¢+ means our side is almost certainly losing)
+   * - Hedge would be too expensive to be useful
+   * - Position is so deep in the red that hedging can't help
+   */
+  private async analyzeHedgeVsSell(position: Position): Promise<{
+    action: "HEDGE" | "SELL";
+    reason: string;
+    expectedOutcome: string;
+    opposingPrice?: number;
+  }> {
+    const originalSide = this.determineSide(position);
+    if (!originalSide) {
+      return {
+        action: "SELL",
+        reason: "Cannot determine position side",
+        expectedOutcome: "Salvage remaining value",
+      };
+    }
+
+    const opposingTokenId = await this.getOpposingTokenId(
+      position.marketId,
+      position.tokenId,
+      originalSide,
+    );
+
+    if (!opposingTokenId) {
+      return {
+        action: "SELL",
+        reason: "Cannot find opposing token",
+        expectedOutcome: "Salvage remaining value",
+      };
+    }
+
+    // Get opposing price
+    let opposingPrice: number;
+    try {
+      const orderbook = await this.client.getOrderBook(opposingTokenId);
+      if (!orderbook.asks || orderbook.asks.length === 0) {
+        return {
+          action: "SELL",
+          reason: "No liquidity for opposing token",
+          expectedOutcome: "Salvage remaining value",
+        };
+      }
+      opposingPrice = parseFloat(orderbook.asks[0].price);
+    } catch {
+      return {
+        action: "SELL",
+        reason: "Failed to get opposing price",
+        expectedOutcome: "Salvage remaining value",
+      };
+    }
+
+    const originalInvestment = position.size * position.entryPrice;
+    const currentValue = position.size * position.currentPrice;
+    const hedgeProfit = 1 - opposingPrice; // Profit per hedge share if hedge wins
+
+    // If opposing price is extremely high (>90¢), our side is almost certainly losing
+    // Hedging is very expensive and may not help much
+    if (opposingPrice >= 0.90) {
+      return {
+        action: "SELL",
+        reason: `Opposing side at ${(opposingPrice * 100).toFixed(0)}¢ - our side likely losing, hedge too expensive`,
+        expectedOutcome: `Salvage $${currentValue.toFixed(2)} now vs risk going to $0`,
+        opposingPrice,
+      };
+    }
+
+    // Calculate what hedge we can afford
+    const maxHedgeBudget = this.config.allowExceedMaxForProtection
+      ? this.config.absoluteMaxHedgeUsd
+      : this.config.maxHedgeUsd;
+
+    // Calculate shares needed to break even on hedge win
+    // hedgeShares × (1 - opposingPrice) = originalInvestment
+    const breakEvenShares = originalInvestment / hedgeProfit;
+    const breakEvenCost = breakEvenShares * opposingPrice;
+
+    // Can we afford a hedge that at least breaks even?
+    if (breakEvenCost <= maxHedgeBudget) {
+      // We can afford a profitable hedge!
+      const profitableHedgeCost = breakEvenCost * 1.1; // 10% buffer for profit
+      const hedgeCost = Math.min(profitableHedgeCost, maxHedgeBudget);
+      const hedgeShares = hedgeCost / opposingPrice;
+      const ifHedgeWins = hedgeShares * 1.0 - originalInvestment - hedgeCost;
+
+      return {
+        action: "HEDGE",
+        reason: `Can afford profitable hedge ($${hedgeCost.toFixed(2)} ≤ $${maxHedgeBudget} budget)`,
+        expectedOutcome: `If ${originalSide === "YES" ? "NO" : "YES"} wins: +$${ifHedgeWins.toFixed(2)} profit`,
+        opposingPrice,
+      };
+    }
+
+    // We can't afford a break-even hedge, but can we afford ANY hedge?
+    if (maxHedgeBudget >= this.config.minHedgeUsd) {
+      const hedgeShares = maxHedgeBudget / opposingPrice;
+      const ifHedgeWins = hedgeShares * 1.0 - originalInvestment - maxHedgeBudget;
+      const ifOriginalWins = position.size * 1.0 - originalInvestment - maxHedgeBudget;
+
+      // Check if hedge reduces worst-case loss compared to just selling
+      const worstCaseWithHedge = Math.min(ifHedgeWins, ifOriginalWins);
+      const lossIfSellNow = currentValue - originalInvestment; // Negative
+
+      if (worstCaseWithHedge > lossIfSellNow) {
+        return {
+          action: "HEDGE",
+          reason: `Partial hedge reduces worst-case loss`,
+          expectedOutcome: `Worst case: $${worstCaseWithHedge.toFixed(2)} vs selling now: $${lossIfSellNow.toFixed(2)}`,
+          opposingPrice,
+        };
+      }
+    }
+
+    // Hedging doesn't help enough - just sell
+    return {
+      action: "SELL",
+      reason: `Hedge too expensive (need $${breakEvenCost.toFixed(2)}, have $${maxHedgeBudget} budget)`,
+      expectedOutcome: `Salvage $${currentValue.toFixed(2)} now`,
+      opposingPrice,
+    };
+  }
+
+  /**
+   * Execute an aggressive hedge - just buy the opposite side
+   * No waiting for optimal timing - if we have funds, BUY THE INVERSE NOW
+   */
+  private async executeAggressiveHedge(position: Position): Promise<boolean> {
+    const originalSide = this.determineSide(position);
+    if (!originalSide) {
+      return false;
+    }
+
+    const opposingTokenId = await this.getOpposingTokenId(
+      position.marketId,
+      position.tokenId,
+      originalSide,
+    );
+
+    if (!opposingTokenId) {
+      this.logger.warn(`[SmartHedging] Could not find opposing token for hedge`);
+      return false;
+    }
+
+    // Get opposing side price
+    let opposingPrice: number;
+    try {
+      const orderbook = await this.client.getOrderBook(opposingTokenId);
+      if (!orderbook.asks || orderbook.asks.length === 0) {
+        this.logger.warn(`[SmartHedging] No asks for ${originalSide === "YES" ? "NO" : "YES"} token - no liquidity`);
+        return false;
+      }
+      opposingPrice = parseFloat(orderbook.asks[0].price);
+    } catch {
+      this.logger.warn(`[SmartHedging] Failed to get opposing token orderbook`);
+      return false;
+    }
+
+    // =================================================================
+    // SMART HEDGE CALCULATION: Calculate exact size to GUARANTEE A WIN
+    // =================================================================
+    // Binary market: YES + NO = $1 at resolution
+    // If we own YES and buy NO, one side WILL pay $1
+    //
+    // Math to GUARANTEE PROFIT on hedge win:
+    //   hedgeShares × $1 > originalInvestment + hedgeCost
+    //   hedgeShares × $1 > originalInvestment + (hedgeShares × opposingPrice)
+    //   hedgeShares × (1 - opposingPrice) > originalInvestment
+    //   hedgeShares > originalInvestment / (1 - opposingPrice)
+    //
+    // Add 10% buffer to ensure actual profit, not just break-even
+    // =================================================================
+    
+    const originalInvestment = position.size * position.entryPrice;
+    const hedgeProfit = 1 - opposingPrice; // Profit per hedge share if hedge wins
+    
+    if (hedgeProfit <= 0) {
+      this.logger.warn(`[SmartHedging] Opposing price ${(opposingPrice * 100).toFixed(1)}¢ too high - cannot hedge profitably`);
+      return false;
+    }
+
+    // Calculate EXACT hedge needed to guarantee profit
+    const breakEvenHedgeShares = originalInvestment / hedgeProfit;
+    const profitableHedgeShares = breakEvenHedgeShares * 1.1; // 10% buffer for profit
+    const profitableHedgeUsd = profitableHedgeShares * opposingPrice;
+
+    // Determine final hedge size based on limits
+    let hedgeUsd: number;
+    let hedgeReason: string;
+
+    if (this.config.allowExceedMaxForProtection) {
+      // With SMART_HEDGING_ALLOW_EXCEED_MAX=true and SMART_HEDGING_ABSOLUTE_MAX_USD set,
+      // we can use up to absoluteMaxHedgeUsd to fully hedge
+      if (profitableHedgeUsd <= this.config.absoluteMaxHedgeUsd) {
+        // We can afford the FULL profitable hedge - GUARANTEED WIN!
+        hedgeUsd = profitableHedgeUsd;
+        hedgeReason = `FULL HEDGE for guaranteed win ($${hedgeUsd.toFixed(2)} ≤ $${this.config.absoluteMaxHedgeUsd} limit)`;
+      } else {
+        // Use max allowed - best effort
+        hedgeUsd = this.config.absoluteMaxHedgeUsd;
+        hedgeReason = `MAX HEDGE (capped at $${this.config.absoluteMaxHedgeUsd}, need $${profitableHedgeUsd.toFixed(2)} for guaranteed win)`;
+      }
+    } else {
+      // Standard mode - use maxHedgeUsd
+      hedgeUsd = Math.min(profitableHedgeUsd, this.config.maxHedgeUsd);
+      hedgeReason = `Standard hedge ($${hedgeUsd.toFixed(2)} capped at $${this.config.maxHedgeUsd})`;
+    }
+
+    // Calculate expected outcomes
+    const hedgeShares = hedgeUsd / opposingPrice;
+    const totalInvested = originalInvestment + hedgeUsd;
+    const ifOriginalWins = position.size * 1.0 - totalInvested; // Original pays $1/share
+    const ifHedgeWins = hedgeShares * 1.0 - totalInvested; // Hedge pays $1/share
+    const canWin = ifOriginalWins > 0 || ifHedgeWins > 0;
+
+    // Ensure minimum viable hedge
+    if (hedgeUsd < this.config.minHedgeUsd) {
+      this.logger.debug(`[SmartHedging] Hedge size $${hedgeUsd.toFixed(2)} below minimum $${this.config.minHedgeUsd}`);
+      return false;
+    }
+
+    const wallet = (this.client as { wallet?: Wallet }).wallet;
+    if (!wallet) {
+      this.logger.error(`[SmartHedging] No wallet attached - cannot execute hedge`);
+      return false;
+    }
+
+    this.logger.info(
+      `[SmartHedging] 🔄 BUYING ${originalSide === "YES" ? "NO" : "YES"} to hedge:` +
+        `\n  ═══════════════════════════════════════` +
+        `\n  📊 ORIGINAL: ${position.size.toFixed(2)} ${originalSide} @ ${(position.entryPrice * 100).toFixed(1)}¢ = $${originalInvestment.toFixed(2)} invested` +
+        `\n  📉 CURRENT:  ${(position.currentPrice * 100).toFixed(1)}¢ (${position.pnlPct.toFixed(1)}% loss)` +
+        `\n  ───────────────────────────────────────` +
+        `\n  🎯 HEDGE: Buy ${hedgeShares.toFixed(2)} ${originalSide === "YES" ? "NO" : "YES"} @ ${(opposingPrice * 100).toFixed(1)}¢ = $${hedgeUsd.toFixed(2)}` +
+        `\n  📝 Reason: ${hedgeReason}` +
+        `\n  ───────────────────────────────────────` +
+        `\n  📈 OUTCOMES:` +
+        `\n     If ${originalSide} wins: ${ifOriginalWins >= 0 ? "+" : ""}$${ifOriginalWins.toFixed(2)}` +
+        `\n     If ${originalSide === "YES" ? "NO" : "YES"} wins: ${ifHedgeWins >= 0 ? "+" : ""}$${ifHedgeWins.toFixed(2)}` +
+        `\n  ${canWin ? "🎉 GUARANTEED WIN on one side!" : "📉 Loss capped - best effort hedge"}` +
+        `\n  ═══════════════════════════════════════`,
+    );
+
+    try {
+      const result = await postOrder({
+        client: this.client,
+        wallet,
+        marketId: position.marketId,
+        tokenId: opposingTokenId,
+        outcome: originalSide === "YES" ? "NO" : "YES",
+        side: "BUY",
+        sizeUsd: hedgeUsd,
+        maxAcceptablePrice: opposingPrice * (1 + SmartHedgingStrategy.HEDGE_SLIPPAGE_PCT),
+        logger: this.logger,
+        priority: true,
+        skipDuplicatePrevention: true,
+        skipMinBuyPriceCheck: true, // Hedge buys are intentional at any price
+        orderConfig: { minOrderUsd: 0 },
+      });
+
+      if (result.status === "submitted") {
+        // Track the hedge
+        const key = `${position.marketId}-${position.tokenId}`;
+        this.hedgedPositions.set(key, {
+          marketId: position.marketId,
+          originalTokenId: position.tokenId,
+          hedgeTokenId: opposingTokenId,
+          originalSide,
+          originalEntryPrice: position.entryPrice,
+          originalSize: position.size,
+          originalInvestment,
+          priceAtHedge: position.currentPrice,
+          unrealizedLossAtHedge: originalInvestment - position.size * position.currentPrice,
+          hedgeEntryPrice: opposingPrice,
+          hedgeSize: hedgeShares,
+          hedgeInvestment: hedgeUsd,
+          hedgeTimestamp: Date.now(),
+          maxLoss: Math.abs(Math.min(ifOriginalWins, ifHedgeWins)),
+          bestCaseProfit: Math.max(ifOriginalWins, ifHedgeWins),
+          calculation: {
+            originalInvestment,
+            currentValue: position.size * position.currentPrice,
+            unrealizedLoss: originalInvestment - position.size * position.currentPrice,
+            hedgePrice: opposingPrice,
+            breakEvenHedgeSize: breakEvenHedgeShares * opposingPrice,
+            profitableHedgeSize: profitableHedgeUsd,
+            actualHedgeSize: hedgeUsd,
+            profitIfOriginalWins: ifOriginalWins,
+            profitIfHedgeWins: ifHedgeWins,
+            canTurnIntoWinner: canWin,
+          },
+        });
+        this.hedgeTokenIds.add(opposingTokenId);
+        return true;
+      }
+
+      this.logger.warn(`[SmartHedging] Hedge order ${result.status}: ${result.reason ?? "unknown"}`);
+      return false;
+    } catch (err) {
+      this.logger.error(`[SmartHedging] Hedge execution error: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Execute a SWAP - sell the losing position and buy the opposite side
+   * This is the nuclear option when we can't hedge directly due to insufficient funds
+   */
+  private async executeSwap(position: Position): Promise<boolean> {
+    const originalSide = this.determineSide(position);
+    if (!originalSide) {
+      return false;
+    }
+
+    const opposingTokenId = await this.getOpposingTokenId(
+      position.marketId,
+      position.tokenId,
+      originalSide,
+    );
+
+    if (!opposingTokenId) {
+      return false;
+    }
+
+    const wallet = (this.client as { wallet?: Wallet }).wallet;
+    if (!wallet) {
+      return false;
+    }
+
+    // STEP 1: Sell the losing position
+    let sellProceeds = 0;
+    try {
+      const orderbook = await this.client.getOrderBook(position.tokenId);
+      if (!orderbook.bids || orderbook.bids.length === 0) {
+        this.logger.warn(`[SmartHedging] No bids to sell ${originalSide} - cannot swap`);
+        return false;
+      }
+
+      const bestBid = parseFloat(orderbook.bids[0].price);
+      sellProceeds = position.size * bestBid;
+
+      this.logger.info(
+        `[SmartHedging] 📤 SWAP STEP 1: Selling ${originalSide}` +
+          `\n  Selling: ${position.size.toFixed(2)} shares @ ${(bestBid * 100).toFixed(1)}¢ = ~$${sellProceeds.toFixed(2)}`,
+      );
+
+      const sellResult = await postOrder({
+        client: this.client,
+        wallet,
+        marketId: position.marketId,
+        tokenId: position.tokenId,
+        outcome: originalSide,
+        side: "SELL",
+        sizeUsd: sellProceeds,
+        maxAcceptablePrice: bestBid * (1 - SmartHedgingStrategy.SELL_SLIPPAGE_PCT),
+        logger: this.logger,
+        priority: true,
+        skipDuplicatePrevention: true,
+        orderConfig: { minOrderUsd: 0 },
+      });
+
+      if (sellResult.status !== "submitted") {
+        this.logger.warn(`[SmartHedging] Sell failed: ${sellResult.reason ?? "unknown"}`);
+        return false;
+      }
+    } catch (err) {
+      this.logger.error(`[SmartHedging] Sell error: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+
+    // STEP 2: Buy the opposite side with the proceeds
+    try {
+      const orderbook = await this.client.getOrderBook(opposingTokenId);
+      if (!orderbook.asks || orderbook.asks.length === 0) {
+        this.logger.warn(
+          `[SmartHedging] ⚠️ PARTIAL SWAP: Sold ${originalSide} but no liquidity for ${originalSide === "YES" ? "NO" : "YES"}. ` +
+            `Bleeding stopped - position closed.`,
+        );
+        // Return true because the main goal (stop bleeding) was achieved
+        return true;
+      }
+
+      const opposingPrice = parseFloat(orderbook.asks[0].price);
+
+      // Use the sell proceeds to buy the opposite side
+      // Keep a small buffer for fees
+      const buyAmount = sellProceeds * (1 - SmartHedgingStrategy.SWAP_FEE_BUFFER_PCT);
+
+      this.logger.info(
+        `[SmartHedging] 📥 SWAP STEP 2: Buying ${originalSide === "YES" ? "NO" : "YES"}` +
+          `\n  Buying: $${buyAmount.toFixed(2)} @ ${(opposingPrice * 100).toFixed(1)}¢`,
+      );
+
+      const buyResult = await postOrder({
+        client: this.client,
+        wallet,
+        marketId: position.marketId,
+        tokenId: opposingTokenId,
+        outcome: originalSide === "YES" ? "NO" : "YES",
+        side: "BUY",
+        sizeUsd: buyAmount,
+        maxAcceptablePrice: opposingPrice * (1 + SmartHedgingStrategy.HEDGE_SLIPPAGE_PCT),
+        logger: this.logger,
+        priority: true,
+        skipDuplicatePrevention: true,
+        skipMinBuyPriceCheck: true, // Swap buys are intentional at any price
+        orderConfig: { minOrderUsd: 0 },
+      });
+
+      if (buyResult.status === "submitted") {
+        this.logger.info(
+          `[SmartHedging] ✅ SWAP COMPLETE! Converted ${originalSide} → ${originalSide === "YES" ? "NO" : "YES"}`,
+        );
+        return true;
+      }
+
+      this.logger.warn(
+        `[SmartHedging] ⚠️ PARTIAL SWAP: Sold ${originalSide} but buy failed: ${buyResult.reason ?? "unknown"}. ` +
+          `Bleeding stopped - position closed.`,
+      );
+      // Return true because the main goal (stop bleeding) was achieved
+      return true;
+    } catch (err) {
+      this.logger.warn(
+        `[SmartHedging] ⚠️ PARTIAL SWAP: Sold ${originalSide} but buy error: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Bleeding stopped - position closed.`,
+      );
+      // Return true because the main goal (stop bleeding) was achieved
+      return true;
+    }
   }
 
   /**
@@ -1124,6 +1668,105 @@ export class SmartHedgingStrategy {
   }
 
   /**
+   * Liquidate a losing position when hedging is not possible
+   * This is a FALLBACK action when:
+   * 1. Hedge failed due to insufficient funds after trying to raise reserves
+   * 2. Position has catastrophic losses (forceLiquidationLossPct)
+   * 3. Market conditions don't allow hedging
+   *
+   * The goal is to STOP THE BLEEDING rather than let positions go to zero.
+   *
+   * @param position - The position to liquidate
+   * @param reason - Why we're liquidating (for logging)
+   * @returns true if liquidation was successful
+   */
+  private async liquidatePosition(
+    position: Position,
+    reason: "FORCE_LIQUIDATION" | "HEDGE_FALLBACK" | "HEDGE_ERROR_FALLBACK",
+  ): Promise<boolean> {
+    try {
+      const wallet = (this.client as { wallet?: Wallet }).wallet;
+      if (!wallet) {
+        this.logger.error(
+          "[SmartHedging] ❌ Cannot liquidate: client has no wallet attached",
+        );
+        return false;
+      }
+
+      // Get current bid price for selling
+      const orderbook = await this.client.getOrderBook(position.tokenId);
+      if (!orderbook.bids || orderbook.bids.length === 0) {
+        this.logger.warn(
+          `[SmartHedging] ⚠️ No bids for position - cannot liquidate (market may be illiquid)`,
+        );
+        return false;
+      }
+
+      const bestBid = parseFloat(orderbook.bids[0].price);
+      const sizeUsd = position.size * bestBid;
+
+      const reasonEmoji =
+        reason === "FORCE_LIQUIDATION"
+          ? "🚨"
+          : reason === "HEDGE_FALLBACK"
+            ? "⚠️"
+            : "❌";
+      const reasonText =
+        reason === "FORCE_LIQUIDATION"
+          ? "Catastrophic loss - force liquidating to stop bleeding"
+          : reason === "HEDGE_FALLBACK"
+            ? "Hedge could not execute - liquidating as fallback"
+            : "Hedge error - liquidating as fallback";
+
+      this.logger.info(
+        `[SmartHedging] ${reasonEmoji} LIQUIDATING POSITION:` +
+          `\n  Reason: ${reasonText}` +
+          `\n  Position: ${position.size.toFixed(2)} ${position.side} @ ${(position.currentPrice * 100).toFixed(1)}¢` +
+          `\n  Loss: ${position.pnlPct.toFixed(1)}%` +
+          `\n  Selling at: ${(bestBid * 100).toFixed(1)}¢ = ~$${sizeUsd.toFixed(2)}` +
+          `\n  💡 This action stops further loss - better to salvage something than lose everything`,
+      );
+
+      const result = await postOrder({
+        client: this.client,
+        wallet,
+        marketId: position.marketId,
+        tokenId: position.tokenId,
+        outcome: position.side as "YES" | "NO",
+        side: "SELL",
+        sizeUsd,
+        maxAcceptablePrice: bestBid * (1 - SmartHedgingStrategy.SELL_SLIPPAGE_PCT),
+        logger: this.logger,
+        priority: true, // High priority for liquidation
+        skipDuplicatePrevention: true, // Must bypass duplicate prevention
+        orderConfig: { minOrderUsd: 0 }, // Bypass minimum for liquidation
+      });
+
+      if (result.status === "submitted") {
+        this.logger.info(
+          `[SmartHedging] ✅ Liquidation successful - salvaged ~$${sizeUsd.toFixed(2)} before further losses`,
+        );
+        return true;
+      } else if (result.reason === "FOK_ORDER_KILLED") {
+        this.logger.warn(
+          `[SmartHedging] ⚠️ Liquidation order not filled (FOK killed) - market has insufficient liquidity`,
+        );
+        return false;
+      } else {
+        this.logger.warn(
+          `[SmartHedging] ⚠️ Liquidation order ${result.status}: ${result.reason ?? "unknown"}`,
+        );
+        return false;
+      }
+    } catch (err) {
+      this.logger.error(
+        `[SmartHedging] ❌ Failed to liquidate position: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
    * Hedge a losing position by buying the opposing outcome
    * Uses pre-computed timing analysis when available
    */
@@ -1380,6 +2023,7 @@ export class SmartHedgingStrategy {
         logger: this.logger,
         priority: true, // High priority for hedging
         skipDuplicatePrevention: true, // Hedging must bypass duplicate prevention
+        skipMinBuyPriceCheck: true, // Hedge buys are intentional at any price
         orderConfig: { minOrderUsd: 0 }, // Bypass minimum for hedging
       });
 
@@ -1791,4 +2435,8 @@ export const DEFAULT_SMART_HEDGING_CONFIG: SmartHedgingConfig = {
   reserveSellMinProfitPct: 2, // Only sell positions with 2%+ profit for reserves (lowered from 5% to enable hedging)
   criticalReserveThresholdPct: 50, // Urgent sell when reserves at 50% of target
   volumeDeclineThresholdPct: 30, // Prioritize selling positions with 30%+ volume decline
+
+  // === FALLBACK LIQUIDATION ===
+  enableFallbackLiquidation: true, // Don't let losers sit and go to zero - liquidate if hedge fails
+  forceLiquidationLossPct: 50, // At 50%+ loss, force liquidate immediately to stop the bleeding
 };

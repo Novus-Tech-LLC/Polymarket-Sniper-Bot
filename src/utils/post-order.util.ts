@@ -26,6 +26,14 @@ import { executeOnChainOrder } from "../trading/onchain-executor";
 export type OrderSide = "BUY" | "SELL";
 export type OrderOutcome = "YES" | "NO";
 
+/**
+ * Global minimum price for BUY orders to prevent buying "loser" positions.
+ * Positions at extremely low prices (e.g., 3¢) are almost certain to lose.
+ * This is a safety net that applies to ALL buy orders unless explicitly skipped.
+ * Default: 0.10 (10¢) - only blocks extreme loser positions
+ */
+export const GLOBAL_MIN_BUY_PRICE = 0.10;
+
 export type PostOrderInput = {
   client: ClobClient;
   wallet?: Wallet; // Required for on-chain mode
@@ -46,6 +54,13 @@ export type PostOrderInput = {
    * regardless of recent orders on the same token.
    */
   skipDuplicatePrevention?: boolean;
+  /**
+   * Skip the global minimum buy price check.
+   * Set to true for legitimate hedge operations where buying at low prices
+   * is intentional (e.g., buying NO at 3¢ when YES is at 97¢ and losing).
+   * Default: false - always enforce minimum buy price safety
+   */
+  skipMinBuyPriceCheck?: boolean;
   logger: Logger;
   orderConfig?: OrderSubmissionConfig;
   now?: number;
@@ -166,11 +181,28 @@ async function postOrderOnChain(
 async function postOrderClob(
   input: PostOrderInput,
 ): Promise<OrderSubmissionResult> {
-  const { tokenId, side, logger } = input;
+  const { tokenId, side, logger, maxAcceptablePrice } = input;
   const liveTradingEnabled = isLiveTradingEnabled();
   if (!liveTradingEnabled) {
     logger.warn("[CLOB] Live trading disabled; skipping order submission.");
     return { status: "skipped", reason: "LIVE_TRADING_DISABLED" };
+  }
+
+  // === GLOBAL MINIMUM BUY PRICE CHECK ===
+  // Prevents buying extremely low-probability "loser" positions (e.g., 3¢)
+  // This is a SAFETY NET that catches orders from any source (ARB, copy trading, etc.)
+  // Skip for legitimate hedge operations where buying at low prices is intentional.
+  if (side === "BUY" && !input.skipMinBuyPriceCheck && maxAcceptablePrice !== undefined) {
+    if (maxAcceptablePrice < GLOBAL_MIN_BUY_PRICE) {
+      logger.warn(
+        `[CLOB] 🚫 Order blocked (LOSER_POSITION): BUY price ${(maxAcceptablePrice * 100).toFixed(1)}¢ < ${(GLOBAL_MIN_BUY_PRICE * 100).toFixed(0)}¢ min. ` +
+          `Positions this cheap are almost certain to lose. Token: ${tokenId.slice(0, 16)}...`,
+      );
+      return {
+        status: "skipped",
+        reason: "LOSER_POSITION_PRICE_TOO_LOW",
+      };
+    }
   }
 
   // Early check for in-flight BUY orders to prevent stacking

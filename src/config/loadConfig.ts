@@ -1168,6 +1168,18 @@ export type StrategyConfig = {
    * Default: 30%
    */
   smartHedgingEmergencyLossPct: number;
+  /**
+   * Enable fallback liquidation when hedging fails
+   * When true, if a hedge cannot execute, the position will be sold to stop further losses
+   * Default: true - don't let losers sit and go to zero
+   */
+  smartHedgingEnableFallbackLiquidation: boolean;
+  /**
+   * Loss percentage threshold for forced liquidation
+   * When position drops beyond this %, force liquidate even if hedging isn't optimal
+   * Default: 50%
+   */
+  smartHedgingForceLiquidationLossPct: number;
   minOrderUsd: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
@@ -1349,6 +1361,34 @@ export function loadStrategyConfig(
             .SMART_HEDGING_EMERGENCY_LOSS_PCT
         : undefined) ??
       30, // Default: emergency mode at 30% loss
+    /**
+     * SMART_HEDGING_ENABLE_FALLBACK_LIQUIDATION: Enable fallback liquidation when hedging fails
+     * When true, if a hedge cannot execute, the position will be sold to stop further losses
+     * Default: true
+     */
+    smartHedgingEnableFallbackLiquidation:
+      parseBool(
+        readEnv("SMART_HEDGING_ENABLE_FALLBACK_LIQUIDATION", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_ENABLE_FALLBACK_LIQUIDATION" in preset
+        ? (preset as { SMART_HEDGING_ENABLE_FALLBACK_LIQUIDATION: boolean })
+            .SMART_HEDGING_ENABLE_FALLBACK_LIQUIDATION
+        : undefined) ??
+      true, // Default: enable fallback liquidation
+    /**
+     * SMART_HEDGING_FORCE_LIQUIDATION_LOSS_PCT: Loss % threshold for forced liquidation
+     * When position drops beyond this %, force liquidate even if hedging isn't optimal
+     * Default: 50%
+     */
+    smartHedgingForceLiquidationLossPct:
+      parseNumber(
+        readEnv("SMART_HEDGING_FORCE_LIQUIDATION_LOSS_PCT", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_FORCE_LIQUIDATION_LOSS_PCT" in preset
+        ? (preset as { SMART_HEDGING_FORCE_LIQUIDATION_LOSS_PCT: number })
+            .SMART_HEDGING_FORCE_LIQUIDATION_LOSS_PCT
+        : undefined) ??
+      50, // Default: force liquidate at 50% loss
     // MIN_ORDER_USD: respect env override > preset > default
     minOrderUsd:
       parseNumber(readEnv("MIN_ORDER_USD", overrides) ?? "") ??

@@ -133,6 +133,8 @@ async function main(): Promise<void> {
         allowExceedMaxForProtection: strategyConfig.smartHedgingAllowExceedMax,
         absoluteMaxHedgeUsd: strategyConfig.smartHedgingAbsoluteMaxUsd,
         emergencyLossThresholdPct: strategyConfig.smartHedgingEmergencyLossPct,
+        enableFallbackLiquidation: strategyConfig.smartHedgingEnableFallbackLiquidation,
+        forceLiquidationLossPct: strategyConfig.smartHedgingForceLiquidationLossPct,
         // Sell positions with minimal positive profit for reserves (avoid break-even)
         reserveSellMinProfitPct: 0.01,
       },

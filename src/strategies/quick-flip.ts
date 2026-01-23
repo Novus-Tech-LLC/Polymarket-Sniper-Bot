@@ -120,43 +120,21 @@ export class QuickFlipStrategy {
         }
       }
 
-      // Check for stop loss (negative P&L beyond threshold)
-      if (position.pnlPct <= -stopLossPct) {
-        // SKIP risky tier positions if smart hedging should handle them
-        // Risky tier = entry price < 60¢ (SPECULATIVE_MIN threshold)
-        // Smart Hedging may turn these losing positions into winners by hedging instead of selling at a loss
-        if (
-          this.config.skipRiskyTierForHedging &&
-          position.entryPrice < PRICE_TIERS.SPECULATIVE_MIN
-        ) {
-          this.logger.debug(
-            `[QuickFlip] ⏭️ Skipping stop-loss for risky tier position (entry: ${(position.entryPrice * 100).toFixed(1)}¢) - deferred to Smart Hedging: ${position.marketId}`,
-          );
-          continue;
-        }
+      // =================================================================
+      // QUICK FLIP = PROFIT ONLY
+      // =================================================================
+      // Quick-flip is for taking PROFITS, not realizing LOSSES.
+      // Stop-losses are handled by:
+      // - Smart Hedging (for risky tier positions - buys the inverse)
+      // - Universal Stop-Loss (as a safety net with proper thresholds)
+      // 
+      // A "quick flip" that sells at a loss is just a "quick loss" - 
+      // that's NOT what this strategy is for!
+      // =================================================================
 
-        // Stop-loss sells immediately - no hold time check
-        const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
-        this.logger.warn(
-          `[QuickFlip] 🔻 Stop-loss at ${position.pnlPct.toFixed(2)}% (threshold: -${stopLossPct}%, net: ${netLossPct.toFixed(2)}%): ${position.marketId}`,
-        );
-
-        try {
-          const sold = await this.sellPosition(
-            position.marketId,
-            position.tokenId,
-            position.size,
-          );
-          if (sold) {
-            soldCount++;
-          }
-        } catch (err) {
-          this.logger.error(
-            `[QuickFlip] ❌ Failed to execute stop-loss for ${position.marketId}`,
-            err as Error,
-          );
-        }
-        continue; // Don't process target for this position
+      // Skip positions that aren't profitable - we only flip for PROFIT
+      if (position.pnlPct <= 0) {
+        continue; // Not profitable yet, keep holding
       }
 
       // Check for target profit

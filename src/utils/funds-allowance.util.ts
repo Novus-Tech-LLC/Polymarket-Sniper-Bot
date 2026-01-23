@@ -57,9 +57,12 @@ const balanceCheckWarnDedup = new Map<
  * The cooldown must be longer than the position tracker refresh interval (5s)
  * to ensure the position tracker has time to detect the new position before
  * allowing another buy on the same token.
+ *
+ * INCREASED to 60 seconds to prevent rapid-fire stacking that was causing
+ * multiple buys on the same position within seconds.
  */
-const IN_FLIGHT_COOLDOWN_MS = 15_000; // 15 second cooldown (> 5s position tracker refresh)
-const STALE_IN_FLIGHT_TIMEOUT_MS = 60_000; // 60s timeout for stale in-flight entries
+const IN_FLIGHT_COOLDOWN_MS = 60_000; // 60 second cooldown (prevents buy stacking)
+const STALE_IN_FLIGHT_TIMEOUT_MS = 120_000; // 120s timeout for stale in-flight entries
 const inFlightBuys = new Map<
   string,
   { startedAt: number; completedAt?: number }
