@@ -220,3 +220,61 @@ test("SMART_HEDGING_MIN_HEDGE_USD env variable overrides default", () => {
   // Env override should take precedence
   assert.equal(config.smartHedgingMinHedgeUsd, 5);
 });
+
+// === STOP_LOSS_MIN_HOLD_SECONDS Tests ===
+
+test("STOP_LOSS_MIN_HOLD_SECONDS defaults to 60 in off preset", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "off",
+  });
+
+  const config = loadStrategyConfig();
+  // Off preset has STOP_LOSS_MIN_HOLD_SECONDS: 60
+  assert.equal(config.stopLossMinHoldSeconds, 60);
+});
+
+test("STOP_LOSS_MIN_HOLD_SECONDS is 120 in conservative preset", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "conservative",
+  });
+
+  const config = loadStrategyConfig();
+  // Conservative preset has STOP_LOSS_MIN_HOLD_SECONDS: 120
+  assert.equal(config.stopLossMinHoldSeconds, 120);
+});
+
+test("STOP_LOSS_MIN_HOLD_SECONDS is 60 in balanced preset", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+  });
+
+  const config = loadStrategyConfig();
+  // Balanced preset has STOP_LOSS_MIN_HOLD_SECONDS: 60
+  assert.equal(config.stopLossMinHoldSeconds, 60);
+});
+
+test("STOP_LOSS_MIN_HOLD_SECONDS is 30 in aggressive preset", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Aggressive preset has STOP_LOSS_MIN_HOLD_SECONDS: 30
+  assert.equal(config.stopLossMinHoldSeconds, 30);
+});
+
+test("STOP_LOSS_MIN_HOLD_SECONDS env variable overrides preset value", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "conservative",
+    STOP_LOSS_MIN_HOLD_SECONDS: "90",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence over preset's 120
+  assert.equal(config.stopLossMinHoldSeconds, 90);
+});

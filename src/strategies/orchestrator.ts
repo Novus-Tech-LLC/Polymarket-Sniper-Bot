@@ -32,6 +32,7 @@ export const DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG: UniversalStopLossConfig = {
   enabled: true,
   maxStopLossPct: 25, // Absolute ceiling - no position should lose more than 25%
   useDynamicTiers: true, // Use entry-price-based stop-loss tiers
+  minHoldSeconds: 60, // Prevent premature sells due to bid-ask spread - wait 60s before stop-loss can trigger
 };
 
 export interface StrategyOrchestratorConfig {

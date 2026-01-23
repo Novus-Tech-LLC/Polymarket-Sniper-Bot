@@ -20,7 +20,10 @@ import {
 } from "../utils/clob-credentials.util";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
-import { StrategyOrchestrator } from "../strategies/orchestrator";
+import {
+  StrategyOrchestrator,
+  DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG,
+} from "../strategies/orchestrator";
 import { DEFAULT_SMART_HEDGING_CONFIG } from "../strategies/smart-hedging";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 import { createEnterpriseOrchestrator } from "../enterprise";
@@ -137,6 +140,11 @@ async function main(): Promise<void> {
         forceLiquidationLossPct: strategyConfig.smartHedgingForceLiquidationLossPct,
         // Sell positions with minimal positive profit for reserves (avoid break-even)
         reserveSellMinProfitPct: 0.01,
+      },
+      // Universal Stop-Loss config - spread defaults and only override minHoldSeconds
+      universalStopLossConfig: {
+        ...DEFAULT_UNIVERSAL_STOP_LOSS_CONFIG,
+        minHoldSeconds: strategyConfig.stopLossMinHoldSeconds, // Prevent immediate sells after buying
       },
     });
 

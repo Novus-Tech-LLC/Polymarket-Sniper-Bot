@@ -1180,6 +1180,12 @@ export type StrategyConfig = {
    * Default: 50%
    */
   smartHedgingForceLiquidationLossPct: number;
+  /**
+   * Universal Stop-Loss: Minimum time (seconds) to hold before stop-loss can trigger.
+   * Prevents selling positions immediately after buying due to bid-ask spread.
+   * Default: 60 seconds
+   */
+  stopLossMinHoldSeconds: number;
   minOrderUsd: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
@@ -1389,6 +1395,18 @@ export function loadStrategyConfig(
             .SMART_HEDGING_FORCE_LIQUIDATION_LOSS_PCT
         : undefined) ??
       50, // Default: force liquidate at 50% loss
+    /**
+     * STOP_LOSS_MIN_HOLD_SECONDS: Minimum time before stop-loss can trigger
+     * Prevents premature stop-loss sells due to bid-ask spread right after buying
+     * Default: 60 seconds
+     */
+    stopLossMinHoldSeconds:
+      parseNumber(readEnv("STOP_LOSS_MIN_HOLD_SECONDS", overrides) ?? "") ??
+      ("STOP_LOSS_MIN_HOLD_SECONDS" in preset
+        ? (preset as { STOP_LOSS_MIN_HOLD_SECONDS: number })
+            .STOP_LOSS_MIN_HOLD_SECONDS
+        : undefined) ??
+      60, // Default: 60 seconds minimum hold before stop-loss
     // MIN_ORDER_USD: respect env override > preset > default
     minOrderUsd:
       parseNumber(readEnv("MIN_ORDER_USD", overrides) ?? "") ??
