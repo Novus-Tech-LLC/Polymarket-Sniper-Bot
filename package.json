@@ -32,12 +32,12 @@
     "format": "prettier --write .",
     "postinstall": "patch-package",
     "arbitrage": "node src/arbitrage/run.js",
-    "check-allowance": "ts-node src/cli/check-allowance.command.ts",
-    "verify-allowance": "ts-node src/cli/verify-allowance.command.ts",
-    "set-token-allowance": "ts-node src/cli/set-token-allowance.command.ts",
-    "manual-sell": "ts-node src/cli/manual-sell.command.ts",
-    "simulate": "ts-node src/cli/run-simulations.command.ts",
-    "redeem": "ts-node src/cli/redeem-positions.command.ts",
+    "check-allowance": "[ -f dist/cli/check-allowance.command.js ] && node dist/cli/check-allowance.command.js || ts-node src/cli/check-allowance.command.ts",
+    "verify-allowance": "[ -f dist/cli/verify-allowance.command.js ] && node dist/cli/verify-allowance.command.js || ts-node src/cli/verify-allowance.command.ts",
+    "set-token-allowance": "[ -f dist/cli/set-token-allowance.command.js ] && node dist/cli/set-token-allowance.command.js || ts-node src/cli/set-token-allowance.command.ts",
+    "manual-sell": "[ -f dist/cli/manual-sell.command.js ] && node dist/cli/manual-sell.command.js || ts-node src/cli/manual-sell.command.ts",
+    "simulate": "[ -f dist/cli/run-simulations.command.js ] && node dist/cli/run-simulations.command.js || ts-node src/cli/run-simulations.command.ts",
+    "redeem": "[ -f dist/cli/redeem-positions.command.js ] && node dist/cli/redeem-positions.command.js || ts-node src/cli/redeem-positions.command.ts",
     "test": "node --test -r ts-node/register/transpile-only tests/**/*.test.ts",
     "preflight": "node dist/tools/preflight.js",
     "test-auth": "node test-auth-harness.js",
@@ -55,7 +55,7 @@
     "auth:validate-logging": "ts-node scripts/validate_auth_logging.ts",
     "wallet:check": "ts-node scripts/check_wallet_status.ts",
     "wallet:detect": "ts-node scripts/detect_wallet_type.ts",
-    "onchain:status": "ts-node src/cli/onchain-status.command.ts"
+    "onchain:status": "[ -f dist/cli/onchain-status.command.js ] && node dist/cli/onchain-status.command.js || ts-node src/cli/onchain-status.command.ts"
   },
   "keywords": [
     "polymarket",

@@ -69,6 +69,12 @@ export class PositionTracker {
   // Price > 0.5 indicates the likely winner in resolved markets
   private static readonly WINNER_THRESHOLD = 0.5;
 
+  // Threshold for detecting resolved positions by price
+  // Prices >= 0.99 (99¢) or <= 0.01 (1¢) indicate likely resolved markets
+  // This helps detect redeemable positions even when API doesn't mark them as redeemable
+  private static readonly RESOLVED_PRICE_HIGH_THRESHOLD = 0.99;
+  private static readonly RESOLVED_PRICE_LOW_THRESHOLD = 0.01;
+
   constructor(config: PositionTrackerConfig) {
     this.client = config.client;
     this.logger = config.logger;
@@ -486,6 +492,37 @@ export class PositionTracker {
                 activeCount++;
               }
 
+              // FALLBACK REDEMPTION DETECTION: Check if position appears resolved based on price
+              // This handles cases where the API doesn't mark positions as redeemable but the market has actually resolved
+              // Positions at 99¢+ or 1¢- are likely resolved markets that should be redeemable
+              let finalRedeemable = isRedeemable;
+              if (
+                !isRedeemable &&
+                (currentPrice >= PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
+                  currentPrice <= PositionTracker.RESOLVED_PRICE_LOW_THRESHOLD)
+              ) {
+                // Price suggests market is resolved - verify with Gamma API
+                const winningOutcome = await this.fetchMarketOutcome(tokenId);
+                if (winningOutcome !== null) {
+                  // Market is confirmed resolved - mark as redeemable
+                  finalRedeemable = true;
+                  // Adjust current price to exact settlement price based on outcome
+                  currentPrice = side === winningOutcome ? 1.0 : 0.0;
+                  resolvedCount++;
+                  activeCount--; // Was counted as active, now resolved
+                  this.logger.info(
+                    `[PositionTracker] Detected resolved position via price fallback: tokenId=${tokenId}, side=${side}, winner=${winningOutcome}, price=${currentPrice === 1.0 ? "100¢ (WIN)" : "0¢ (LOSS)"}`,
+                  );
+                  // Cache the outcome for future refreshes
+                  if (
+                    this.marketOutcomeCache.size <
+                    PositionTracker.MAX_OUTCOME_CACHE_SIZE
+                  ) {
+                    this.marketOutcomeCache.set(marketId, winningOutcome);
+                  }
+                }
+              }
+
               // Calculate P&L
               const pnlUsd = (currentPrice - entryPrice) * size;
               const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
@@ -493,7 +530,7 @@ export class PositionTracker {
               // Fetch market end time for active positions (needed for near-close hedging)
               // Skip for redeemable positions since they're already resolved
               let marketEndTime: number | undefined;
-              if (!isRedeemable) {
+              if (!finalRedeemable) {
                 marketEndTime = await this.fetchMarketEndTime(tokenId);
               }
 
@@ -506,7 +543,7 @@ export class PositionTracker {
                 currentPrice,
                 pnlPct,
                 pnlUsd,
-                redeemable: isRedeemable,
+                redeemable: finalRedeemable,
                 marketEndTime,
               };
             } catch (err) {

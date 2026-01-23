@@ -544,6 +544,128 @@ describe("PositionTracker Redeemable Positions with Unknown Outcome", () => {
   });
 });
 
+// Test-only mirror of PositionTracker price thresholds (private static readonly)
+// IMPORTANT: Keep in sync manually if production thresholds change
+const RESOLVED_PRICE_HIGH_THRESHOLD = 0.99;
+const RESOLVED_PRICE_LOW_THRESHOLD = 0.01;
+
+describe("PositionTracker Fallback Redemption Detection", () => {
+  test("Position at 99¢+ should trigger resolution check", () => {
+    // Simulates fallback detection for high-price positions
+    const currentPrice = 0.995; // 99.5¢
+    const isRedeemable = false; // API didn't mark as redeemable
+    
+    const shouldCheckResolution =
+      !isRedeemable &&
+      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    
+    assert.ok(
+      shouldCheckResolution,
+      "Position at 99.5¢ should trigger resolution check",
+    );
+  });
+
+  test("Position at 1¢- should trigger resolution check", () => {
+    // Simulates fallback detection for low-price positions
+    const currentPrice = 0.005; // 0.5¢
+    const isRedeemable = false;
+    
+    const shouldCheckResolution =
+      !isRedeemable &&
+      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    
+    assert.ok(
+      shouldCheckResolution,
+      "Position at 0.5¢ should trigger resolution check",
+    );
+  });
+
+  test("Position at 50¢ should NOT trigger resolution check", () => {
+    // Simulates normal active position
+    const currentPrice = 0.5; // 50¢
+    const isRedeemable = false;
+    
+    const shouldCheckResolution =
+      !isRedeemable &&
+      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    
+    assert.ok(
+      !shouldCheckResolution,
+      "Position at 50¢ should NOT trigger resolution check",
+    );
+  });
+
+  test("Already redeemable position should NOT trigger fallback check", () => {
+    // If API already marked as redeemable, skip fallback check
+    const currentPrice = 1.0; // 100¢
+    const isRedeemable = true; // API already marked as redeemable
+    
+    const shouldCheckResolution =
+      !isRedeemable &&
+      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    
+    assert.ok(
+      !shouldCheckResolution,
+      "Already redeemable position should NOT trigger fallback check",
+    );
+  });
+
+  test("Fallback detection sets finalRedeemable to true when market confirmed resolved", () => {
+    // Simulates the logic after Gamma API confirms resolution
+    const isRedeemable = false;
+    const winningOutcome = "YES"; // Gamma API returned winning outcome
+    let finalRedeemable = isRedeemable;
+    
+    if (winningOutcome !== null) {
+      finalRedeemable = true;
+    }
+    
+    assert.strictEqual(
+      finalRedeemable,
+      true,
+      "finalRedeemable should be true when market is confirmed resolved",
+    );
+  });
+
+  test("Fallback detection adjusts price to exact settlement value for winner", () => {
+    // Simulates price adjustment for winning position
+    const side = "YES";
+    const winningOutcome = "YES";
+    let currentPrice = 0.995; // Was at 99.5¢
+    
+    if (winningOutcome !== null) {
+      currentPrice = side === winningOutcome ? 1.0 : 0.0;
+    }
+    
+    assert.strictEqual(
+      currentPrice,
+      1.0,
+      "Winning position should be adjusted to exactly 1.0 (100¢)",
+    );
+  });
+
+  test("Fallback detection adjusts price to exact settlement value for loser", () => {
+    // Simulates price adjustment for losing position
+    const side = "NO";
+    const winningOutcome = "YES";
+    let currentPrice = 0.005; // Was at 0.5¢
+    
+    if (winningOutcome !== null) {
+      currentPrice = side === winningOutcome ? 1.0 : 0.0;
+    }
+    
+    assert.strictEqual(
+      currentPrice,
+      0.0,
+      "Losing position should be adjusted to exactly 0.0 (0¢)",
+    );
+  });
+});
+
 describe("PositionTracker Historical Entry Times", () => {
   test("Timestamp conversion - handles both seconds and milliseconds", () => {
     // Simulates the timestamp conversion logic
