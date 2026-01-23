@@ -119,6 +119,27 @@ async function main(): Promise<void> {
         minPositionUsd: strategyConfig.autoRedeemMinPositionUsd,
         checkIntervalMs: strategyConfig.autoRedeemCheckIntervalMs,
       },
+      smartHedgingConfig: {
+        enabled: strategyConfig.smartHedgingEnabled,
+        triggerLossPct: strategyConfig.smartHedgingTriggerLossPct,
+        maxHedgeUsd: strategyConfig.smartHedgingMaxHedgeUsd,
+        reservePct: strategyConfig.smartHedgingReservePct,
+        allowExceedMaxForProtection: strategyConfig.smartHedgingAllowExceedMax,
+        absoluteMaxHedgeUsd: strategyConfig.smartHedgingAbsoluteMaxUsd,
+        emergencyLossThresholdPct: strategyConfig.smartHedgingEmergencyLossPct,
+        // Use defaults for advanced timing/reserve settings not exposed as env vars
+        maxEntryPriceForHedging: 0.6, // Only hedge risky tier (<60¢ entry)
+        minOpposingSidePrice: 0.5,
+        minHoldBeforeHedgeSeconds: 120,
+        maxTotalSpread: 1.05,
+        minConsecutiveDrops: 2,
+        volumeSurgeThresholdPct: 50,
+        optimalOpposingPriceMin: 0.55,
+        optimalOpposingPriceMax: 0.75,
+        reserveSellMinProfitPct: 0, // Sell ANY profitable position for reserves (user expectation)
+        criticalReserveThresholdPct: 50,
+        volumeDeclineThresholdPct: 30,
+      },
     });
 
     await orchestrator.start();

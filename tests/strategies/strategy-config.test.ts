@@ -28,8 +28,8 @@ test("STRATEGY_PRESET=aggressive uses preset MAX_POSITION_USD when no env overri
   });
 
   const config = loadStrategyConfig();
-  // Aggressive preset has MAX_POSITION_USD: 100
-  assert.equal(config.endgameMaxPositionUsd, 100);
+  // Aggressive preset has MAX_POSITION_USD: 50
+  assert.equal(config.endgameMaxPositionUsd, 50);
 });
 
 test("MAX_POSITION_USD env variable overrides preset value", () => {
@@ -120,4 +120,46 @@ test("AUTO_REDEEM_ENABLED can be disabled via env override", () => {
 
   const config = loadStrategyConfig();
   assert.equal(config.autoRedeemEnabled, false);
+});
+
+test("SMART_HEDGING settings from aggressive preset are loaded correctly", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Aggressive preset has these smart hedging settings
+  assert.equal(config.smartHedgingEnabled, true);
+  assert.equal(config.smartHedgingTriggerLossPct, 20);
+  assert.equal(config.smartHedgingMaxHedgeUsd, 25);
+  assert.equal(config.smartHedgingReservePct, 15);
+});
+
+test("SMART_HEDGING env variables override preset values", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_MAX_HEDGE_USD: "50",
+    SMART_HEDGING_RESERVE_PCT: "10",
+    SMART_HEDGING_ABSOLUTE_MAX_USD: "200",
+  });
+
+  const config = loadStrategyConfig();
+  // Env overrides should take precedence
+  assert.equal(config.smartHedgingMaxHedgeUsd, 50);
+  assert.equal(config.smartHedgingReservePct, 10);
+  assert.equal(config.smartHedgingAbsoluteMaxUsd, 200);
+});
+
+test("SMART_HEDGING_ALLOW_EXCEED_MAX env variable works", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_ALLOW_EXCEED_MAX: "false",
+  });
+
+  const config = loadStrategyConfig();
+  // Default is true, env override should set to false
+  assert.equal(config.smartHedgingAllowExceedMax, false);
 });

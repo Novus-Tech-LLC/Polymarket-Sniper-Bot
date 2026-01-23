@@ -941,17 +941,18 @@ export class SmartHedgingStrategy {
       })
       .sort((a, b) => {
         // Prioritize selling positions with:
-        // 1. Higher profit % (lock in gains)
-        // 2. Declining volume (weak conviction)
+        // 1. LOWEST profit % first (keep the big winners, sacrifice small gains)
+        // 2. Declining volume (weak conviction = sell first)
         const aVolume = this.volumeCache.get(a.tokenId);
         const bVolume = this.volumeCache.get(b.tokenId);
         const aDecline = aVolume?.volumeChangePercent ?? 0;
         const bDecline = bVolume?.volumeChangePercent ?? 0;
         
-        // Score: higher profit + more volume decline = sell first
-        const aScore = a.pnlPct + (aDecline < 0 ? Math.abs(aDecline) : 0);
-        const bScore = b.pnlPct + (bDecline < 0 ? Math.abs(bDecline) : 0);
-        return bScore - aScore;
+        // Score: LOWER profit = sell first, declining volume = sell first
+        // We want to keep highly profitable positions, so sell least profitable first
+        const aScore = a.pnlPct - (aDecline < 0 ? Math.abs(aDecline) * 0.5 : 0);
+        const bScore = b.pnlPct - (bDecline < 0 ? Math.abs(bDecline) * 0.5 : 0);
+        return aScore - bScore; // Lower score (less profitable) first
       });
 
     if (profitablePositions.length === 0) {
