@@ -4,19 +4,20 @@ A complete, risk-managed trading system for Polymarket designed for maximizing r
 
 ## Overview
 
-The enterprise trading system provides:
+The enterprise trading system is now **integrated into all strategy presets** (conservative, balanced, aggressive). Every preset provides:
 
-- **Multi-mode execution**: Market-Making + Flow-Following + Inventory Control
-- **Portfolio risk engine**: Exposure limits, circuit breakers, drawdown protection
+- **Centralized RiskManager**: Gates all orders with exposure limits and circuit breakers
+- **Market selection filter**: Only trades liquid, tight-spread markets
 - **Sequential execution**: Prevents stack issues and race conditions
 - **Deterministic PnL accounting**: Real-time tracking of realized/unrealized P&L
 
 ## Quick Start
 
-Set your strategy preset to use enterprise mode:
+Simply set your strategy preset - enterprise features are built-in:
 
 ```bash
-STRATEGY_PRESET=aggressive_enterprise
+# Use any preset - enterprise features are integrated
+STRATEGY_PRESET=aggressive   # or balanced, conservative
 ```
 
 That's it! The system uses sensible defaults that work out of the box.
@@ -31,8 +32,8 @@ PRIVATE_KEY=your_private_key
 RPC_URL=https://polygon-rpc.com
 TARGET_ADDRESSES=0x...
 
-# Enable enterprise mode
-STRATEGY_PRESET=aggressive_enterprise
+# Choose your preset (all use enterprise system)
+STRATEGY_PRESET=aggressive  # or balanced, conservative
 
 # Enable live trading (when ready)
 LIVE_TRADING=I_UNDERSTAND_THE_RISKS
@@ -43,16 +44,16 @@ LIVE_TRADING=I_UNDERSTAND_THE_RISKS
 Only change these if you need to fine-tune:
 
 ```bash
-# Risk limits
-MAX_EXPOSURE_USD=2000           # Total portfolio exposure (default: 2000)
-MAX_DRAWDOWN_PCT=25             # Circuit breaker threshold (default: 25%)
-MAX_SLIPPAGE_CENTS=3            # Max slippage allowed (default: 3)
+# Risk limits (override preset defaults)
+MAX_EXPOSURE_USD=2000           # Total portfolio exposure
+MAX_DRAWDOWN_PCT=25             # Circuit breaker threshold
+MAX_SLIPPAGE_CENTS=3            # Max slippage allowed
 
 # Kill switch
 KILL_SWITCH_FILE=/data/KILL     # Create this file to halt all trading
 ```
 
-## Strategies
+## Strategies (Run Sequentially)
 
 ### 1. Market Making (MM)
 
@@ -61,7 +62,7 @@ Places passive bids and asks to capture spread. Uses post-only orders to avoid t
 - Entry: Quote around fair price with inventory-aware skew
 - Exit: Mean-reversion when price returns to microprice band
 
-### 2. Flow Following (FF)
+### 2. Flow Following (FF) - *Balanced/Aggressive only*
 
 Detects large trades/whale activity and follows momentum with strict slippage protection.
 
@@ -82,21 +83,22 @@ Enforces portfolio constraints:
 
 The system automatically pauses trading when:
 
-1. **Consecutive Rejects**: Too many order rejections (default: 10)
-2. **API Health**: CLOB/Gamma API unhealthy for too long (default: 60s)
-3. **Drawdown**: Session drawdown exceeds limit (default: 25%)
+1. **Consecutive Rejects**: Too many order rejections
+2. **API Health**: CLOB/Gamma API unhealthy for too long
+3. **Drawdown**: Session drawdown exceeds limit
 
 Circuit breakers auto-reset after a cooldown period (default: 5 minutes).
 
-### Exposure Limits
+### Preset Risk Limits
 
-All orders must pass through the RiskManager which enforces:
-
-| Limit | Default | ENV Override |
-|-------|---------|--------------|
-| Total Exposure | $2,000 | MAX_EXPOSURE_USD |
-| Per-Market | $200 | MAX_EXPOSURE_PER_MARKET_USD |
-| Per-Category | $500 | (not configurable) |
+| Setting | Conservative | Balanced | Aggressive |
+|---------|--------------|----------|------------|
+| Max Exposure | $200 | $500 | $2,000 |
+| Max Per-Market | $50 | $100 | $200 |
+| Max Drawdown | 10% | 15% | 25% |
+| MM Enabled | ✅ | ✅ | ✅ |
+| FF Enabled | ❌ | ✅ | ✅ |
+| ICC Enabled | ✅ | ✅ | ✅ |
 
 ### Kill Switch
 
@@ -111,17 +113,12 @@ rm /data/KILL     # Trading resumes
 
 ### Sequential Execution
 
-All strategies run sequentially in priority order:
+All strategies run sequentially in priority order (prevents stack issues):
 
 1. ICC - Enforce portfolio limits first
 2. Stop-Loss / Hedging - Protect existing positions
 3. MM - Spread capture (lower priority)
 4. FF - Momentum capture (lowest priority)
-
-This prevents:
-- Stack overflow issues from parallel execution
-- Race conditions for capital
-- Conflicting orders on same market
 
 ### Cooldown Awareness
 
@@ -133,9 +130,7 @@ The system caches cooldown information from order rejections:
 
 ## Monitoring
 
-### Logs
-
-Key log messages to watch:
+### Key Log Messages
 
 ```
 [RiskManager] 🚨 CIRCUIT BREAKER TRIGGERED: ...  # Trading paused
@@ -155,45 +150,10 @@ Unrealized: $12.50
 Fees: $0.89
 Net: $56.84
 Win Rate: 65.2% (15W / 8L)
-Avg Win: $4.50 | Avg Loss: $2.10
 --- By Strategy ---
   MM: R=$30.00 U=$8.00
   FF: R=$15.23 U=$4.50
 ```
-
-## Presets Comparison
-
-| Setting | Conservative | Balanced | Aggressive | Enterprise |
-|---------|--------------|----------|------------|------------|
-| Max Exposure | $200 | $500 | $2,000 | $2,000 |
-| Max Per-Market | $50 | $100 | $200 | $200 |
-| Max Drawdown | 10% | 15% | 25% | 25% |
-| MM Enabled | ✅ | ✅ | ✅ | ✅ |
-| FF Enabled | ❌ | ✅ | ✅ | ✅ |
-| ICC Enabled | ✅ | ✅ | ✅ | ✅ |
-| Sequential Exec | ✅ | ✅ | ✅ | ✅ |
-
-## Troubleshooting
-
-### "CIRCUIT_BREAKER: CONSECUTIVE_REJECTS"
-
-Too many orders were rejected. Check:
-1. Wallet has sufficient USDC balance
-2. Approvals are set (run with APPROVALS_AUTO=true)
-3. Not geoblocked
-
-### "EXPOSURE_LIMIT" rejections
-
-Portfolio is at capacity. The system will:
-1. Wait for existing positions to close
-2. Reduce position sizes automatically
-
-### "COOLDOWN_CACHED" for all tokens
-
-You may be hitting rate limits. The system automatically:
-1. Caches cooldown until timestamps
-2. Skips tokens in cooldown
-3. Resumes when cooldowns expire
 
 ## Architecture
 
