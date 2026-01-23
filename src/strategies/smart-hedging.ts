@@ -437,16 +437,28 @@ export class SmartHedgingStrategy {
       );
     }
 
-    if (config.minHedgeUsd > config.maxHedgeUsd) {
+    // Validate absoluteMaxHedgeUsd > 0 before using it for auto-correction
+    if (config.absoluteMaxHedgeUsd <= 0) {
       throw new Error(
-        `SmartHedgingConfig.minHedgeUsd must be <= maxHedgeUsd (${config.maxHedgeUsd}), received ${config.minHedgeUsd}`,
+        `SmartHedgingConfig.absoluteMaxHedgeUsd must be > 0, received ${config.absoluteMaxHedgeUsd}`,
       );
     }
 
+    // Auto-correct maxHedgeUsd if absoluteMaxHedgeUsd is lower
+    // This respects user intent: if they set an absolute cap, maxHedgeUsd should not exceed it
     if (config.absoluteMaxHedgeUsd < config.maxHedgeUsd) {
-      throw new Error(
-        `SmartHedgingConfig.absoluteMaxHedgeUsd must be >= maxHedgeUsd (${config.maxHedgeUsd}), received ${config.absoluteMaxHedgeUsd}`,
+      this.logger.info(
+        `[SmartHedging] Auto-adjusting maxHedgeUsd from $${config.maxHedgeUsd} to $${config.absoluteMaxHedgeUsd} (respecting absoluteMaxHedgeUsd cap)`,
       );
+      config.maxHedgeUsd = config.absoluteMaxHedgeUsd;
+    }
+
+    // Auto-correct minHedgeUsd if it exceeds maxHedgeUsd after the above correction
+    if (config.minHedgeUsd > config.maxHedgeUsd) {
+      this.logger.info(
+        `[SmartHedging] Auto-adjusting minHedgeUsd from $${config.minHedgeUsd} to $${config.maxHedgeUsd} (must be <= maxHedgeUsd)`,
+      );
+      config.minHedgeUsd = config.maxHedgeUsd;
     }
 
     if (config.reservePct < 0 || config.reservePct > 100) {
