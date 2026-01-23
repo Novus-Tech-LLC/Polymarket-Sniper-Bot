@@ -97,15 +97,6 @@ export class UniversalStopLossStrategy {
    */
   private stopLossTriggered: Map<string, number> = new Map();
 
-  /**
-   * Tracks when each position was first seen by this strategy.
-   * Key format: "marketId-tokenId"
-   * Value: timestamp (ms) when position was first detected
-   * Used to enforce minimum hold time before stop-loss can trigger.
-   * This prevents selling positions immediately after buying due to bid-ask spread.
-   */
-  private positionFirstSeen: Map<string, number> = new Map();
-
   constructor(strategyConfig: UniversalStopLossStrategyConfig) {
     this.client = strategyConfig.client;
     this.logger = strategyConfig.logger;
@@ -162,19 +153,18 @@ export class UniversalStopLossStrategy {
       [];
 
     for (const position of activePositions) {
-      const positionKey = `${position.marketId}-${position.tokenId}`;
       const stopLossPct = this.getStopLossThreshold(position.entryPrice);
-
-      // Track first-seen time for this position
-      if (!this.positionFirstSeen.has(positionKey)) {
-        this.positionFirstSeen.set(positionKey, now);
-      }
 
       // Check if position exceeds stop-loss (negative P&L beyond threshold)
       if (position.pnlPct <= -stopLossPct) {
         // Check minimum hold time before allowing stop-loss
-        // Use fallback to 'now' if for some reason the entry doesn't exist (race condition protection)
-        const firstSeenTime = this.positionFirstSeen.get(positionKey) ?? now;
+        // Use PositionTracker's entry time as single source of truth
+        const entryTime = this.positionTracker.getPositionEntryTime(
+          position.marketId,
+          position.tokenId,
+        );
+        // Fallback to 'now' if entry time is not available (race condition protection)
+        const firstSeenTime = entryTime ?? now;
         const holdTimeSeconds = (now - firstSeenTime) / 1000;
 
         if (holdTimeSeconds < minHoldSeconds) {
@@ -379,17 +369,6 @@ export class UniversalStopLossStrategy {
     }
     for (const key of triggersToRemove) {
       this.stopLossTriggered.delete(key);
-    }
-
-    // Clean up positionFirstSeen for positions that no longer exist
-    const firstSeenToRemove: string[] = [];
-    for (const key of this.positionFirstSeen.keys()) {
-      if (!currentKeys.has(key)) {
-        firstSeenToRemove.push(key);
-      }
-    }
-    for (const key of firstSeenToRemove) {
-      this.positionFirstSeen.delete(key);
     }
 
     // Clean up no-liquidity cache for tokens we no longer hold
