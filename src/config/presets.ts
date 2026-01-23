@@ -185,6 +185,9 @@ export const STRATEGY_PRESETS = {
     SMART_HEDGING_TRIGGER_LOSS_PCT: 20,
     SMART_HEDGING_MAX_HEDGE_USD: 10,
     SMART_HEDGING_RESERVE_PCT: 20,
+    // Universal Stop-Loss - minimum hold time before stop-loss can trigger
+    // This prevents premature sells due to bid-ask spread right after buying
+    STOP_LOSS_MIN_HOLD_SECONDS: 60, // Wait 60s before stop-loss can trigger
   },
   conservative: {
     STRATEGY_ENABLED: true,
@@ -241,6 +244,12 @@ export const STRATEGY_PRESETS = {
     SMART_HEDGING_TRIGGER_LOSS_PCT: 20, // Hedge when position drops 20%
     SMART_HEDGING_MAX_HEDGE_USD: 10, // Max $10 per hedge
     SMART_HEDGING_RESERVE_PCT: 25, // Keep 25% reserve for hedging (conservative)
+    /**
+     * UNIVERSAL STOP-LOSS - Minimum hold time
+     * Prevents premature stop-loss sells right after buying due to bid-ask spread.
+     * A newly bought position might show immediate "loss" from spread - give it time.
+     */
+    STOP_LOSS_MIN_HOLD_SECONDS: 120, // Wait 2 minutes before stop-loss (conservative)
     // Rate limits
     ORDER_SUBMIT_MAX_PER_HOUR: 30,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
@@ -315,6 +324,11 @@ export const STRATEGY_PRESETS = {
     SMART_HEDGING_TRIGGER_LOSS_PCT: 20, // Hedge when position drops 20%
     SMART_HEDGING_MAX_HEDGE_USD: 15, // Max $15 per hedge (balanced)
     SMART_HEDGING_RESERVE_PCT: 20, // Keep 20% reserve for hedging
+    /**
+     * UNIVERSAL STOP-LOSS - Minimum hold time
+     * Prevents premature stop-loss sells right after buying due to bid-ask spread.
+     */
+    STOP_LOSS_MIN_HOLD_SECONDS: 60, // Wait 60 seconds before stop-loss (balanced)
     // Rate limits (higher for more trades)
     ORDER_SUBMIT_MAX_PER_HOUR: 60,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
@@ -443,6 +457,12 @@ export const STRATEGY_PRESETS = {
     SMART_HEDGING_TRIGGER_LOSS_PCT: 20, // Hedge when position drops 20%
     SMART_HEDGING_MAX_HEDGE_USD: 50, // Max $50 per hedge (aggressive)
     SMART_HEDGING_RESERVE_PCT: 15, // Keep 15% reserve for hedging (less conservative)
+
+    /**
+     * UNIVERSAL STOP-LOSS - Minimum hold time
+     * Prevents premature stop-loss sells right after buying due to bid-ask spread.
+     */
+    STOP_LOSS_MIN_HOLD_SECONDS: 30, // Wait 30 seconds before stop-loss (aggressive - faster reaction)
 
     /**
      * RATE LIMITS - HIGH THROUGHPUT

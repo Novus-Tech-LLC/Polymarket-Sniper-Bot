@@ -138,6 +138,13 @@ async function main(): Promise<void> {
         // Sell positions with minimal positive profit for reserves (avoid break-even)
         reserveSellMinProfitPct: 0.01,
       },
+      // Universal Stop-Loss config - uses minHoldSeconds to prevent premature sells
+      universalStopLossConfig: {
+        enabled: true, // Always enabled as safety net
+        maxStopLossPct: 25, // 25% max loss ceiling
+        useDynamicTiers: true, // Use entry-price-based stop-loss tiers
+        minHoldSeconds: strategyConfig.stopLossMinHoldSeconds, // Prevent immediate sells after buying
+      },
     });
 
     await orchestrator.start();

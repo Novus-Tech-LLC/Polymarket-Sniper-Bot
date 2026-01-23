@@ -22,6 +22,18 @@ export interface UniversalStopLossConfig {
    * Default: true when smart hedging is enabled
    */
   skipRiskyTierForHedging?: boolean;
+  /**
+   * Minimum time (in seconds) a position must be held before stop-loss can trigger.
+   * This prevents selling positions immediately after buying due to bid-ask spread.
+   * The initial "loss" from spread is NOT a real loss - give the market time to move.
+   * 
+   * Default: 60 seconds - prevents premature sells from spread-induced "losses"
+   * 
+   * IMPORTANT: Without this, positions bought at 75¢ might immediately show
+   * a 2-3% "loss" due to bid-ask spread and trigger a stop-loss sell before
+   * the market has any chance to move in our favor.
+   */
+  minHoldSeconds?: number;
 }
 
 export interface UniversalStopLossStrategyConfig {
@@ -85,6 +97,15 @@ export class UniversalStopLossStrategy {
    */
   private stopLossTriggered: Map<string, number> = new Map();
 
+  /**
+   * Tracks when each position was first seen by this strategy.
+   * Key format: "marketId-tokenId"
+   * Value: timestamp (ms) when position was first detected
+   * Used to enforce minimum hold time before stop-loss can trigger.
+   * This prevents selling positions immediately after buying due to bid-ask spread.
+   */
+  private positionFirstSeen: Map<string, number> = new Map();
+
   constructor(strategyConfig: UniversalStopLossStrategyConfig) {
     this.client = strategyConfig.client;
     this.logger = strategyConfig.logger;
@@ -132,15 +153,39 @@ export class UniversalStopLossStrategy {
       return 0;
     }
 
+    // Get minimum hold time from config (default to 60 seconds if not set)
+    const minHoldSeconds = this.config.minHoldSeconds ?? 60;
+    const now = Date.now();
+
     // Find positions exceeding their stop-loss threshold
     const positionsToStop: Array<{ position: Position; stopLossPct: number }> =
       [];
 
     for (const position of activePositions) {
+      const positionKey = `${position.marketId}-${position.tokenId}`;
       const stopLossPct = this.getStopLossThreshold(position.entryPrice);
+
+      // Track first-seen time for this position
+      if (!this.positionFirstSeen.has(positionKey)) {
+        this.positionFirstSeen.set(positionKey, now);
+      }
 
       // Check if position exceeds stop-loss (negative P&L beyond threshold)
       if (position.pnlPct <= -stopLossPct) {
+        // Check minimum hold time before allowing stop-loss
+        const firstSeenTime = this.positionFirstSeen.get(positionKey)!;
+        const holdTimeSeconds = (now - firstSeenTime) / 1000;
+
+        if (holdTimeSeconds < minHoldSeconds) {
+          // Position hasn't been held long enough - skip stop-loss for now
+          // This prevents selling positions immediately after buying due to bid-ask spread
+          this.logger.debug(
+            `[UniversalStopLoss] ⏳ Position at ${position.pnlPct.toFixed(2)}% loss (threshold: -${stopLossPct}%) ` +
+              `held for ${holdTimeSeconds.toFixed(0)}s, need ${minHoldSeconds}s before stop-loss can trigger`,
+          );
+          continue;
+        }
+
         positionsToStop.push({ position, stopLossPct });
       }
     }
@@ -336,6 +381,17 @@ export class UniversalStopLossStrategy {
       this.stopLossTriggered.delete(key);
     }
 
+    // Clean up positionFirstSeen for positions that no longer exist
+    const firstSeenToRemove: string[] = [];
+    for (const key of this.positionFirstSeen.keys()) {
+      if (!currentKeys.has(key)) {
+        firstSeenToRemove.push(key);
+      }
+    }
+    for (const key of firstSeenToRemove) {
+      this.positionFirstSeen.delete(key);
+    }
+
     // Clean up no-liquidity cache for tokens we no longer hold
     const tokensToRemove: string[] = [];
     for (const tokenId of this.noLiquidityTokens) {
@@ -356,12 +412,14 @@ export class UniversalStopLossStrategy {
     maxStopLossPct: number;
     useDynamicTiers: boolean;
     activeStopLossTriggers: number;
+    minHoldSeconds: number;
   } {
     return {
       enabled: this.config.enabled,
       maxStopLossPct: this.config.maxStopLossPct,
       useDynamicTiers: this.config.useDynamicTiers,
       activeStopLossTriggers: this.stopLossTriggered.size,
+      minHoldSeconds: this.config.minHoldSeconds ?? 60,
     };
   }
 }
