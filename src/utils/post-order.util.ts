@@ -13,6 +13,9 @@ import {
   checkFundsAndAllowance,
   formatCollateralLabel,
   resolveSignerAddress,
+  isInFlightOrCooldown,
+  markBuyInFlight,
+  markBuyCompleted,
 } from "./funds-allowance.util";
 import { isLiveTradingEnabled } from "./live-trading.util";
 
@@ -163,21 +166,57 @@ async function postOrderOnChain(
 async function postOrderClob(
   input: PostOrderInput,
 ): Promise<OrderSubmissionResult> {
-  const {
-    client,
-    marketId,
-    tokenId,
-    outcome,
-    side,
-    sizeUsd,
-    maxAcceptablePrice,
-    logger,
-  } = input;
+  const { tokenId, side, logger } = input;
   const liveTradingEnabled = isLiveTradingEnabled();
   if (!liveTradingEnabled) {
     logger.warn("[CLOB] Live trading disabled; skipping order submission.");
     return { status: "skipped", reason: "LIVE_TRADING_DISABLED" };
   }
+
+  // Early check for in-flight BUY orders to prevent stacking
+  // This check runs BEFORE any expensive operations (orderbook fetch, balance check)
+  if (!input.skipDuplicatePrevention && side === "BUY") {
+    const inFlightStatus = isInFlightOrCooldown(tokenId, side);
+    if (inFlightStatus.blocked) {
+      const remainingSec = Math.ceil((inFlightStatus.remainingMs ?? 0) / 1000);
+      logger.warn(
+        `[CLOB] Order skipped (${inFlightStatus.reason}): BUY on token ${tokenId.slice(0, 8)}... blocked for ${remainingSec}s (prevents buy stacking)`,
+      );
+      return {
+        status: "skipped",
+        reason: inFlightStatus.reason ?? "IN_FLIGHT_BUY",
+      };
+    }
+    // Mark this buy as in-flight
+    markBuyInFlight(tokenId);
+  }
+
+  // Wrap the rest in try/finally to ensure we mark completion
+  try {
+    return await postOrderClobInner(input);
+  } finally {
+    // Always mark completion for BUY orders
+    if (!input.skipDuplicatePrevention && side === "BUY") {
+      markBuyCompleted(tokenId);
+    }
+  }
+}
+
+/**
+ * Inner implementation of postOrderClob (after in-flight check)
+ */
+async function postOrderClobInner(
+  input: PostOrderInput,
+): Promise<OrderSubmissionResult> {
+  const {
+    client,
+    marketId,
+    tokenId,
+    side,
+    sizeUsd,
+    maxAcceptablePrice,
+    logger,
+  } = input;
   const settings = toOrderSubmissionSettings({
     minOrderUsd: input.orderConfig?.minOrderUsd,
     orderSubmitMinIntervalMs: input.orderConfig?.orderSubmitMinIntervalMs,
