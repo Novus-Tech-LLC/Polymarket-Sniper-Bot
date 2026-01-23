@@ -395,10 +395,11 @@ export const STRATEGY_PRESETS = {
     // Quick Flip - DYNAMIC SCALPING
     // Higher entry price = lower target needed (more certain)
     // Lower entry price = hold for resolution or larger move
+    // NOTE: Quick-flip ONLY sells for PROFIT - stop-losses are handled by Smart Hedging
     QUICK_FLIP_ENABLED: true,
     QUICK_FLIP_TARGET_PCT: 10, // Base 10% target - adjusted dynamically based on entry
-    QUICK_FLIP_STOP_LOSS_PCT: 5, // 5% stop - 2:1 risk/reward ratio
-    QUICK_FLIP_MIN_HOLD_SECONDS: 0, // Exit immediately when target hit
+    QUICK_FLIP_STOP_LOSS_PCT: 50, // IGNORED - quick-flip no longer does stop-loss (see smart-hedging)
+    QUICK_FLIP_MIN_HOLD_SECONDS: 60, // Hold at least 60 seconds - let the position breathe!
     QUICK_FLIP_MIN_PROFIT_USD: 1.0, // Minimum $1.00 profit per trade
     /** Enable dynamic profit targets based on entry price (uses trade-quality module) */
     QUICK_FLIP_DYNAMIC_TARGETS: true,
@@ -406,7 +407,7 @@ export const STRATEGY_PRESETS = {
     // Auto-sell when price reaches high confidence
     AUTO_SELL_ENABLED: true,
     AUTO_SELL_THRESHOLD: 0.96, // Lock in gains at 96¢ (tighter than before)
-    AUTO_SELL_MIN_HOLD_SECONDS: 0,
+    AUTO_SELL_MIN_HOLD_SECONDS: 30, // Hold at least 30 seconds before auto-selling
 
     /**
      * ENDGAME SWEEP - OPTIMIZED FOR PROFITABLE SCALPING
