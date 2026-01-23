@@ -124,10 +124,10 @@ export class QuickFlipStrategy {
       if (position.pnlPct <= -stopLossPct) {
         // SKIP risky tier positions if smart hedging should handle them
         // Risky tier = entry price < 60¢ (SPECULATIVE_MIN threshold)
-        // Smart Hedging can turn these losing positions into winners by hedging instead of selling at a loss
+        // Smart Hedging may turn these losing positions into winners by hedging instead of selling at a loss
         if (this.config.skipRiskyTierForHedging && position.entryPrice < PRICE_TIERS.SPECULATIVE_MIN) {
           this.logger.debug(
-            `[QuickFlip] ⏭️ Skipping stop-loss for risky tier position (entry: ${(position.entryPrice * 100).toFixed(1)}¢) - smart hedging will handle: ${position.marketId}`,
+            `[QuickFlip] ⏭️ Skipping stop-loss for risky tier position (entry: ${(position.entryPrice * 100).toFixed(1)}¢) - deferred to Smart Hedging: ${position.marketId}`,
           );
           continue;
         }
