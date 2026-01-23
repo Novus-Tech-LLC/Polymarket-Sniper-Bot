@@ -28,6 +28,7 @@ const baseEnv: RuntimeEnv = {
   frontrunSizeMultiplier: 0.1,
   frontrunMaxSizeUsd: 50,
   gasPriceMultiplier: 1.0,
+  minBuyPrice: 0.50,
   minOrderUsd: 10,
   orderSubmitMinIntervalMs: 20000,
   orderSubmitMaxPerHour: 20,
@@ -311,5 +312,190 @@ test("frontrun executes trade when FRONTRUN_MAX_SIZE_USD is set below MIN_ORDER_
   assert.ok(
     !logs.some((line) => line.includes("is below minimum")),
     "Should NOT log warning about order being below minimum when FRONTRUN_MAX_SIZE_USD is intentionally set low",
+  );
+});
+
+test("frontrun skips BUY trade when price is below MIN_BUY_PRICE threshold", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - should NOT be called since price is too low
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: { ...baseEnv, minBuyPrice: 0.15 }, // 15¢ minimum
+    logger,
+  });
+
+  // Try to buy at 3¢ (0.03) - this should be blocked
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-loser",
+    tokenId: "token-loser",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.03, // 3¢ - way below the 15¢ minimum
+    timestamp: Date.now(),
+  });
+
+  // Verify the order was skipped
+  assert.ok(
+    logs.some((line) => line.includes("Skipping BUY - price 3.0¢ is below minimum 15.0¢")),
+    "Should log warning about price being below minimum",
+  );
+  assert.ok(
+    logs.some((line) => line.includes("prevents buying loser positions")),
+    "Should mention loser position protection",
+  );
+  assert.equal(
+    postOrderCalled,
+    false,
+    "postOrder should not be called for low-price BUY orders",
+  );
+});
+
+test("frontrun allows SELL trade even when price is below MIN_BUY_PRICE threshold", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - SHOULD be called for SELL even at low price
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: { ...baseEnv, minBuyPrice: 0.15 }, // 15¢ minimum (only for BUY)
+    logger,
+  });
+
+  // SELL at 3¢ (0.03) - this should be ALLOWED (only BUY is blocked)
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-loser",
+    tokenId: "token-loser",
+    outcome: "YES",
+    side: "SELL",
+    sizeUsd: 100,
+    price: 0.03, // 3¢ - SELL should still be allowed
+    timestamp: Date.now(),
+  });
+
+  // Verify the SELL order was executed
+  assert.ok(
+    !logs.some((line) => line.includes("is below minimum")),
+    "Should NOT block SELL orders based on price",
+  );
+  assert.ok(
+    postOrderCalled,
+    "postOrder should be called for SELL orders at any price",
+  );
+});
+
+test("frontrun allows BUY trade when price is above MIN_BUY_PRICE threshold", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - SHOULD be called for BUY above threshold
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: { ...baseEnv, minBuyPrice: 0.15 }, // 15¢ minimum
+    logger,
+  });
+
+  // BUY at 50¢ (0.50) - this should be ALLOWED (above minimum)
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-good",
+    tokenId: "token-good",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.50, // 50¢ - well above the 15¢ minimum
+    timestamp: Date.now(),
+  });
+
+  // Verify the BUY order was executed
+  assert.ok(
+    logs.some((line) => line.includes("Successfully executed")),
+    "BUY orders above minimum price should be executed",
+  );
+  assert.ok(
+    postOrderCalled,
+    "postOrder should be called for BUY orders above minimum price",
   );
 });

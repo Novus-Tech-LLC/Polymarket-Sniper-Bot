@@ -24,6 +24,27 @@ export const DEFAULT_CONFIG = {
   FETCH_INTERVAL_SECONDS: 1,
   MIN_TRADE_SIZE_USD: 100,
   MIN_ORDER_USD: 10,
+  /**
+   * Minimum price threshold for BUY orders in copy trading (0-1 scale where 1 = $1)
+   * Prevents copying trades into low-probability "loser" positions.
+   *
+   * IMPORTANT: Copy trades at low prices are extremely risky.
+   * - The target trader might have inside info you don't have
+   * - Low-price positions (e.g., 3¢) are almost certain to lose
+   * - These trades cost money and provide no value
+   *
+   * This protection ONLY applies to copy trades (frontrunning).
+   * Other strategies (endgame-sweep) have their own price range controls.
+   *
+   * Recommended values:
+   * - 0.15 (15¢): Aggressive, blocks only extreme losers
+   * - 0.25 (25¢): Moderate, blocks most risky positions
+   * - 0.50 (50¢): Conservative default, only copy trades close to fair odds
+   *
+   * Set via MIN_BUY_PRICE environment variable (0.0-1.0 scale)
+   * Default: 0.50 (50¢) - conservative, avoids risky copy trades
+   */
+  MIN_BUY_PRICE: 0.5,
   FRONTRUN_SIZE_MULTIPLIER: 0.5,
   FRONTRUN_MAX_SIZE_USD: 50,
   GAS_PRICE_MULTIPLIER: 1.2,

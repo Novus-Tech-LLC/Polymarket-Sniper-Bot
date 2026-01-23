@@ -53,6 +53,9 @@ export interface TradeQualityAssessment {
  * - Trades at 46¢, 50¢ are harder to scalp (uncertain outcomes)
  * - Trades at 75¢+ have better scalp potential
  * - Trades at 90¢+ are near-certain, ideal for small reliable profits
+ *
+ * NOTE: Copy trades have additional protection via MIN_BUY_PRICE
+ * which blocks buying low-probability positions entirely.
  */
 export const PRICE_TIERS = {
   /** Premium tier: 90¢+ - Near certain, ideal for quick scalps */
@@ -99,6 +102,9 @@ export const LIQUIDITY_TIERS = {
  * Profit target recommendations based on entry price
  * Higher entry price = smaller profit target (more certain outcome)
  * Lower entry price = larger profit target (need more edge to justify risk)
+ *
+ * NOTE: For copy trades, low-price positions are blocked by MIN_BUY_PRICE.
+ * These targets apply to positions from other strategies (endgame-sweep, etc.)
  */
 export const PROFIT_TARGETS = {
   /** Premium tier (90¢+): 5-10% target */

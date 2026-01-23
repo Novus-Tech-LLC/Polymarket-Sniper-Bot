@@ -44,6 +44,12 @@ export type MonitorRuntimeConfig = {
   frontrunSizeMultiplier?: number;
   frontrunMaxSizeUsd?: number;
   gasPriceMultiplier?: number;
+  /**
+   * Minimum price threshold for BUY orders (0-1 scale where 1 = $1)
+   * Prevents buying extremely low-probability "loser" positions.
+   * Default: 0.15 (15¢) - blocks positions like 3¢ which are almost certain to lose.
+   */
+  minBuyPrice: number;
   minOrderUsd: number;
   orderBalanceBufferBps: number;
   autoApprove: boolean;
@@ -107,6 +113,7 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   "FRONTRUN_SIZE_MULTIPLIER",
   "FRONTRUN_MAX_SIZE_USD",
   "MONITOR_REQUIRE_CONFIRMED",
+  "MIN_BUY_PRICE",
   "MIN_ORDER_USD",
   "ORDER_BALANCE_BUFFER_BPS",
   "AUTO_APPROVE",
@@ -194,6 +201,7 @@ const MONITOR_LEGACY_DEFAULTS = {
   frontrunSizeMultiplier: DEFAULT_CONFIG.FRONTRUN_SIZE_MULTIPLIER,
   frontrunMaxSizeUsd: DEFAULT_CONFIG.FRONTRUN_MAX_SIZE_USD,
   gasPriceMultiplier: DEFAULT_CONFIG.GAS_PRICE_MULTIPLIER,
+  minBuyPrice: DEFAULT_CONFIG.MIN_BUY_PRICE,
   minOrderUsd: DEFAULT_CONFIG.MIN_ORDER_USD,
   orderBalanceBufferBps: 0,
   autoApprove: false,
@@ -350,6 +358,7 @@ const MONITOR_ENV_MAP = {
   },
   GAS_PRICE_MULTIPLIER: { key: "gasPriceMultiplier", parse: parseNumber },
   MONITOR_REQUIRE_CONFIRMED: { key: "requireConfirmed", parse: parseBool },
+  MIN_BUY_PRICE: { key: "minBuyPrice", parse: parseNumber },
   MIN_ORDER_USD: { key: "minOrderUsd", parse: parseNumber },
   ORDER_BALANCE_BUFFER_BPS: {
     key: "orderBalanceBufferBps",
@@ -943,6 +952,7 @@ export function loadMonitorConfig(
     frontrunSizeMultiplier: MONITOR_LEGACY_DEFAULTS.frontrunSizeMultiplier,
     frontrunMaxSizeUsd: MONITOR_LEGACY_DEFAULTS.frontrunMaxSizeUsd,
     gasPriceMultiplier: MONITOR_LEGACY_DEFAULTS.gasPriceMultiplier,
+    minBuyPrice: MONITOR_LEGACY_DEFAULTS.minBuyPrice,
     minOrderUsd: MONITOR_LEGACY_DEFAULTS.minOrderUsd,
     orderBalanceBufferBps: MONITOR_LEGACY_DEFAULTS.orderBalanceBufferBps,
     autoApprove: MONITOR_LEGACY_DEFAULTS.autoApprove,

@@ -54,6 +54,20 @@ export class TradeExecutorService {
       return;
     }
 
+    // === MINIMUM BUY PRICE CHECK ===
+    // Prevents buying extremely low-probability "loser" positions (e.g., 3¢ positions)
+    // This protects against copying trades into positions that are almost certain to lose.
+    // Default: 0.15 (15¢) - configurable via MIN_BUY_PRICE environment variable
+    if (signal.side === "BUY") {
+      const minBuyPrice = env.minBuyPrice ?? DEFAULT_CONFIG.MIN_BUY_PRICE;
+      if (signal.price < minBuyPrice) {
+        logger.warn(
+          `[Frontrun] 🚫 Skipping BUY - price ${(signal.price * 100).toFixed(1)}¢ is below minimum ${(minBuyPrice * 100).toFixed(1)}¢ (prevents buying loser positions). Market: ${signal.marketId}`,
+        );
+        return;
+      }
+    }
+
     // Check if we already own this exact token (prevents stacking/duplicate buys)
     // NOTE: This does NOT block hedging - hedges buy a different tokenId (opposite outcome)
     if (signal.side === "BUY" && positionTracker) {

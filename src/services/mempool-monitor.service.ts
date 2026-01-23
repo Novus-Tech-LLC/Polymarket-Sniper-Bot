@@ -254,6 +254,7 @@ export class MempoolMonitorService {
         stats.recentTrades += result.stats.recentTrades;
         stats.eligibleTrades += result.stats.eligibleTrades;
         stats.skippedSmallTrades += result.stats.skippedSmallTrades;
+        stats.skippedLowPriceTrades += result.stats.skippedLowPriceTrades;
         stats.skippedUnconfirmedTrades += result.stats.skippedUnconfirmedTrades;
         stats.skippedNonTargetTrades += result.stats.skippedNonTargetTrades;
         stats.skippedParseErrorTrades += result.stats.skippedParseErrorTrades;
@@ -274,7 +275,7 @@ export class MempoolMonitorService {
 
     const durationMs = Date.now() - startTime;
     logger.info(
-      `[Monitor] Checked ${checkedAddresses} address(es) in ${durationMs}ms (${failedAddressChecks} failed) | trades: ${stats.tradesSeen}, recent: ${stats.recentTrades}, eligible: ${stats.eligibleTrades}, skipped_small: ${stats.skippedSmallTrades}, skipped_unconfirmed: ${stats.skippedUnconfirmedTrades}, skipped_non_target: ${stats.skippedNonTargetTrades}, skipped_parse_error: ${stats.skippedParseErrorTrades}, skipped_outside_recent_window: ${stats.skippedOutsideRecentWindowTrades}, skipped_unsupported_action: ${stats.skippedUnsupportedActionTrades}, skipped_missing_fields: ${stats.skippedMissingFieldsTrades}, skipped_api_error: ${stats.skippedApiErrorTrades}, skipped_other: ${stats.skippedOtherTrades}`,
+      `[Monitor] Checked ${checkedAddresses} address(es) in ${durationMs}ms (${failedAddressChecks} failed) | trades: ${stats.tradesSeen}, recent: ${stats.recentTrades}, eligible: ${stats.eligibleTrades}, skipped_small: ${stats.skippedSmallTrades}, skipped_low_price: ${stats.skippedLowPriceTrades}, skipped_unconfirmed: ${stats.skippedUnconfirmedTrades}, skipped_non_target: ${stats.skippedNonTargetTrades}, skipped_parse_error: ${stats.skippedParseErrorTrades}, skipped_outside_recent_window: ${stats.skippedOutsideRecentWindowTrades}, skipped_unsupported_action: ${stats.skippedUnsupportedActionTrades}, skipped_missing_fields: ${stats.skippedMissingFieldsTrades}, skipped_api_error: ${stats.skippedApiErrorTrades}, skipped_other: ${stats.skippedOtherTrades}`,
     );
   }
 
@@ -287,6 +288,7 @@ export class MempoolMonitorService {
       recentTrades: 0,
       eligibleTrades: 0,
       skippedSmallTrades: 0,
+      skippedLowPriceTrades: 0,
       skippedUnconfirmedTrades: 0,
       skippedNonTargetTrades: 0,
       skippedParseErrorTrades: 0,
@@ -363,6 +365,22 @@ export class MempoolMonitorService {
           continue;
         }
 
+        // === MINIMUM BUY PRICE CHECK (early filter) ===
+        // Skip BUY trades for extremely low-probability positions (e.g., 3¢)
+        // This prevents copying trades into positions that are almost certain to lose.
+        // Only applies to BUY - SELL orders can exit at any price.
+        const isBuy = activity.side.toUpperCase() === "BUY";
+        if (isBuy) {
+          const minBuyPrice = env.minBuyPrice ?? DEFAULT_CONFIG.MIN_BUY_PRICE;
+          if (activity.price < minBuyPrice) {
+            stats.skippedLowPriceTrades += 1;
+            logger.debug(
+              `[Monitor] Skipping low-price BUY: ${(activity.price * 100).toFixed(1)}¢ < ${(minBuyPrice * 100).toFixed(1)}¢ min on market ${activity.conditionId}`,
+            );
+            continue;
+          }
+        }
+
         // Check if transaction is still pending (frontrun opportunity)
         if (env.requireConfirmed) {
           const txStatus = await this.checkTransactionStatus(
@@ -425,6 +443,7 @@ type MonitorStats = {
   recentTrades: number;
   eligibleTrades: number;
   skippedSmallTrades: number;
+  skippedLowPriceTrades: number;
   skippedUnconfirmedTrades: number;
   skippedNonTargetTrades: number;
   skippedParseErrorTrades: number;
