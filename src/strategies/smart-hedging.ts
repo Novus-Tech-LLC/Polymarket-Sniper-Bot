@@ -1172,24 +1172,20 @@ export class SmartHedgingStrategy {
       // - If original wins: original shares × $1 - originalInvestment - (X × P) = profit
       // - If hedge wins: X × $1 - originalInvestment - (X × P) = X × (1 - P) - originalInvestment
 
-      // For hedge win to be PROFITABLE:
+      // For hedge win to be PROFITABLE (not just break-even):
       // X × (1 - opposingPrice) > originalInvestment
       // X > originalInvestment / (1 - opposingPrice)
+      // We add 10% buffer to ensure actual profit, not just break-even
       const hedgeProfit = 1 - opposingPrice; // Profit per hedge share if hedge wins
-      const profitableHedgeShares = originalInvestment / hedgeProfit;
+      const breakEvenHedgeShares = originalInvestment / hedgeProfit;
+      const breakEvenHedgeUsd = breakEvenHedgeShares * opposingPrice;
+      // Add 10% buffer to ensure we PROFIT, not just break even
+      const profitableHedgeShares = breakEvenHedgeShares * 1.1;
       const profitableHedgeUsd = profitableHedgeShares * opposingPrice;
 
-      // Break-even across BOTH outcomes:
-      // We want to find hedge size where worst-case outcome = 0
-      // If original wins: originalShares × $1 - originalInvestment - hedgeCost = 0
-      // If hedge wins: hedgeShares × $1 - originalInvestment - hedgeCost = 0
-      // 
-      // For symmetry, we want both outcomes to be equal:
-      // originalShares - totalInvested = hedgeShares - totalInvested
-      // This means: originalShares = hedgeShares
-      // hedgeShares = originalShares, hedgeCost = originalShares × opposingPrice
-      const breakEvenHedgeShares = position.size; // Match original shares for symmetric outcomes
-      const breakEvenHedgeUsd = breakEvenHedgeShares * opposingPrice;
+      // Symmetric hedge (match original shares for balanced outcomes):
+      const symmetricHedgeShares = position.size;
+      const symmetricHedgeUsd = symmetricHedgeShares * opposingPrice;
 
       // Determine actual hedge size based on strategy
       // KEY INSIGHT: We want to create an inverse trade UP TO THE CEILING to undo loss damage
