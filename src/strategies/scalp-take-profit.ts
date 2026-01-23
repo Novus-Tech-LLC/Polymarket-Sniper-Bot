@@ -2,16 +2,17 @@
  * Scalp Take-Profit Strategy
  *
  * A time-and-momentum-based profit-taking strategy that:
- * 1. Takes profits on positions held 45-90 minutes (configurable)
- * 2. Requires +2-3% profit threshold (configurable per risk preset)
+ * 1. Takes profits on positions held 30-120 minutes (configurable per preset)
+ * 2. Requires +4-12% profit threshold (configurable per risk preset)
+ *    - Conservative: 8-12%, Balanced: 5-8%, Aggressive: 4-6%
  * 3. Checks momentum indicators before exiting:
  *    - Price slope over last N ticks
  *    - Spread widening
  *    - Bid depth thinning
  * 4. CRITICAL SAFEGUARD: Never forces time-based exit on positions where:
  *    - Entry price ≤ 60¢ (speculative tier)
- *    - AND implied probability has increased since entry
- *    These are potential $1.00 winners - let them ride!
+ *    - AND current price ≥ 90¢ (near resolution)
+ *    These are $1.00 winners - let them ride to resolution!
  *
  * This strategy is designed to churn out consistent winners by
  * taking profits when momentum is fading, rather than waiting
@@ -23,7 +24,6 @@ import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker, Position } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
-import { PRICE_TIERS } from "./trade-quality";
 
 /**
  * Scalp Take-Profit Configuration
@@ -46,13 +46,13 @@ export interface ScalpTakeProfitConfig {
 
   /**
    * Minimum profit percentage to trigger scalp exit (after min hold time)
-   * Default: 3.0% (balanced), 2.0% (aggressive)
+   * Default: 5.0% (balanced), 4.0% (aggressive), 8.0% (conservative)
    */
   minProfitPct: number;
 
   /**
-   * Target profit percentage - when reached AND momentum fading, exit
-   * Default: 5.0% (balanced), 3.0% (aggressive)
+   * Target profit percentage - when reached, exit immediately (no momentum check needed)
+   * Default: 8.0% (balanced), 6.0% (aggressive), 12.0% (conservative)
    */
   targetProfitPct: number;
 
@@ -151,7 +151,6 @@ interface PriceHistoryEntry {
  * - Target: 8%+ (meaningful profit after all costs)
  * - Never scalp below 5% - you're just paying fees!
  */
-const MIN_MEANINGFUL_PROFIT_PCT = 5.0; // Below this, fees/slippage eat your profits
 
 /**
  * Default configuration - balanced settings
@@ -379,8 +378,19 @@ export class ScalpTakeProfitStrategy {
 
     const holdMinutes = (now - entryTime) / (60 * 1000);
 
+    // === CRITICAL SAFEGUARD: Resolution exclusion (checked FIRST) ===
+    // Never force exit on positions that are near-certain $1.00 winners!
+    // This check runs BEFORE all other exit logic to protect these positions.
+    if (this.shouldExcludeFromTimeExit(position)) {
+      return {
+        shouldExit: false,
+        reason: `Resolution exclusion: entry ≤${(this.config.resolutionExclusionPrice * 100).toFixed(0)}¢ + current ≥90¢ (near resolution)`,
+      };
+    }
+
     // === SUDDEN SPIKE DETECTION (bypasses hold time) ===
     // If there's been a massive move in a short window, capture it before reversal
+    // Note: This runs AFTER resolution exclusion to protect $1.00 winners
     if (this.config.suddenSpikeEnabled) {
       const spikeCheck = this.checkSuddenSpike(position, now);
       if (spikeCheck.isSpike) {
@@ -415,15 +425,6 @@ export class ScalpTakeProfitStrategy {
       return {
         shouldExit: false,
         reason: `Profit $${position.pnlUsd.toFixed(2)} < min $${this.config.minProfitUsd}`,
-      };
-    }
-
-    // === CRITICAL SAFEGUARD: Resolution exclusion ===
-    // Never force time-based exit on potential winners
-    if (this.shouldExcludeFromTimeExit(position)) {
-      return {
-        shouldExit: false,
-        reason: `Resolution exclusion: entry ≤${(this.config.resolutionExclusionPrice * 100).toFixed(0)}¢ + probability increased`,
       };
     }
 
@@ -683,6 +684,12 @@ export class ScalpTakeProfitStrategy {
         this.priceHistory.set(position.tokenId, history);
 
         // Set entry metrics if not already set
+        // LIMITATION: These "entry" metrics are captured when we first see the position,
+        // not at actual entry time. After a container restart, these will reflect
+        // market conditions at restart time rather than original entry conditions.
+        // This means momentum signals (spread widening, bid depth thinning) may be
+        // less reliable after restarts until the position is seen fresh again.
+        // Entry TIME is still accurate (loaded from wallet activity API).
         if (!this.entryMetrics.has(position.tokenId)) {
           this.entryMetrics.set(position.tokenId, {
             spread,

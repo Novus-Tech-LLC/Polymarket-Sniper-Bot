@@ -1227,7 +1227,7 @@ export type StrategyConfig = {
    */
   scalpMinProfitPct: number;
   /**
-   * Target profit % - when reached AND momentum fading, exit
+   * Target profit % - when reached, exit immediately (no momentum check needed)
    * Default: 8% (balanced), 6% (aggressive), 12% (conservative)
    */
   scalpTargetProfitPct: number;

@@ -257,7 +257,7 @@ export const STRATEGY_PRESETS = {
     /**
      * SCALP TAKE-PROFIT - Conservative settings
      * Time-and-momentum-based profit taking. Patient approach with higher targets.
-     * CRITICAL: Never forces time-exit on positions ≤60¢ with increasing probability.
+     * CRITICAL: Never forces time-exit on positions ≤60¢ that reach 90¢+ (near resolution).
      * 
      * PROFIT TARGETS: Must clear transaction costs (fees + slippage + spread)!
      * Conservative targets 8-12% to ensure meaningful profit after all costs.
@@ -350,7 +350,7 @@ export const STRATEGY_PRESETS = {
     /**
      * SCALP TAKE-PROFIT - Balanced settings
      * Time-and-momentum-based profit taking. Moderate patience with 5-8% targets.
-     * CRITICAL: Never forces time-exit on positions ≤60¢ with increasing probability.
+     * CRITICAL: Never forces time-exit on positions ≤60¢ that reach 90¢+ (near resolution).
      * 
      * PROFIT TARGETS: Must clear transaction costs (fees + slippage + spread)!
      * Balanced targets 5-8% to ensure profit after typical ~3% costs.
@@ -497,7 +497,7 @@ export const STRATEGY_PRESETS = {
      * SCALP TAKE-PROFIT - Aggressive settings
      * Faster exits with 4-6% targets for quicker churn.
      * More sensitive to momentum changes.
-     * CRITICAL: Never forces time-exit on positions ≤60¢ with increasing probability.
+     * CRITICAL: Never forces time-exit on positions ≤60¢ that reach 90¢+ (near resolution).
      * 
      * PROFIT TARGETS: Even aggressive needs 4%+ to clear costs!
      * We're aggressive on TIME, not on accepting tiny profits.
