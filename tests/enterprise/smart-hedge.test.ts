@@ -62,7 +62,7 @@ describe("EnterpriseSmartHedge", () => {
     spread: 2, // 2 cents
     bidDepth: 100,
     askDepth: 100,
-    bestBid: 0.40,
+    bestBid: 0.4,
     bestAsk: 0.42,
   };
 
@@ -203,11 +203,11 @@ describe("EnterpriseSmartHedge", () => {
         state: "OPEN",
         size: 10,
         costBasis: 5,
-        currentPrice: 0.30,
+        currentPrice: 0.3,
         currentValue: 3.0,
         unrealizedPnl: -2.0,
         unrealizedPnlPct: -30, // 30% > 25% PANIC
-        bestBid: 0.30,
+        bestBid: 0.3,
         entryTime: Date.now(),
         lastUpdate: Date.now(),
       };
@@ -235,7 +235,7 @@ describe("EnterpriseSmartHedge", () => {
         spread: 0.5,
         bidDepth: 1000,
         askDepth: 1000,
-        bestBid: 0.50,
+        bestBid: 0.5,
         bestAsk: 0.505,
       };
 
@@ -306,7 +306,7 @@ describe("EnterpriseSmartHedge", () => {
         spread: 2,
         bidDepth: 20, // Below 50 minimum
         askDepth: 20,
-        bestBid: 0.40,
+        bestBid: 0.4,
         bestAsk: 0.42,
       };
 

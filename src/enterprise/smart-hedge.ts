@@ -268,10 +268,11 @@ export class EnterpriseSmartHedge {
     }
 
     // Check depth on the side we'd be buying for hedge
-    // If position is YES, we hedge by buying NO (ask side)
-    // If position is NO, we hedge by buying YES (bid side)
+    // If position is YES, we hedge by buying NO (need to check askDepth for NO)
+    // If position is NO, we hedge by buying YES (need to check bidDepth for YES)
+    // Note: In Polymarket, buying NO uses the ask side of the NO token orderbook
     const hedgeDepth =
-      position.outcome === "YES" ? market.bidDepth : market.askDepth;
+      position.outcome === "YES" ? market.askDepth : market.bidDepth;
     if (hedgeDepth < this.config.minHedgeDepthUsd) {
       decision.outcome = "skipped";
       decision.reason = `Hedge depth $${hedgeDepth.toFixed(2)} < min $${this.config.minHedgeDepthUsd}`;
@@ -282,8 +283,13 @@ export class EnterpriseSmartHedge {
     // ============================================================
     // HEDGE COST CHECK
     // ============================================================
+    // When hedging YES position by buying NO:
+    //   - Use bestAsk price for NO token (market.bestAsk represents ask side)
+    // When hedging NO position by buying YES:
+    //   - Use bestBid price for YES token (since we're buying at the bid)
+    // In practice with Polymarket: YES + NO = $1, so NO price ≈ 1 - YES price
     const hedgePrice =
-      position.outcome === "YES" ? 1 - market.bestBid : market.bestAsk;
+      position.outcome === "YES" ? market.bestAsk : market.bestBid;
     const hedgeCostCents = hedgePrice * 100;
     if (hedgeCostCents > this.config.maxHedgeCostCents) {
       decision.outcome = "skipped";
@@ -349,7 +355,11 @@ export class EnterpriseSmartHedge {
     );
 
     try {
-      const hedgeResult = await this.executeHedge(position, hedgeSize, hedgePrice);
+      const hedgeResult = await this.executeHedge(
+        position,
+        hedgeSize,
+        hedgePrice,
+      );
 
       if (hedgeResult.success) {
         decision.outcome = "success";
@@ -429,9 +439,7 @@ export class EnterpriseSmartHedge {
     }
 
     // Check cycle limit
-    if (
-      this.reserveRaisedThisCycle >= this.config.maxReserveRaisePerCycleUsd
-    ) {
+    if (this.reserveRaisedThisCycle >= this.config.maxReserveRaisePerCycleUsd) {
       this.logger.debug(
         `[SmartHedge] Reserve raise limit reached: $${this.reserveRaisedThisCycle.toFixed(2)}`,
       );
@@ -490,9 +498,7 @@ export class EnterpriseSmartHedge {
     // The RiskManager should allow stop-loss orders for this position
     // This is a signal that SmartHedge has stepped back
     if (this.config.verboseLogging) {
-      this.logger.debug(
-        `[SmartHedge] Stop-loss re-enabled for ${tokenId}`,
-      );
+      this.logger.debug(`[SmartHedge] Stop-loss re-enabled for ${tokenId}`);
     }
   }
 
@@ -605,8 +611,7 @@ export class EnterpriseSmartHedge {
  */
 export function loadSmartHedgeConfigFromEnv(): Partial<EnterpriseSmartHedgeConfig> {
   return {
-    enabled:
-      process.env.SMART_HEDGING_ENABLED?.toLowerCase() !== "false",
+    enabled: process.env.SMART_HEDGING_ENABLED?.toLowerCase() !== "false",
     hedgeWindowMinLossPct: process.env.SMART_HEDGING_TRIGGER_LOSS_PCT
       ? parseFloat(process.env.SMART_HEDGING_TRIGGER_LOSS_PCT) * 0.5
       : undefined,

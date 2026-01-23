@@ -13,6 +13,27 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { MarketData, CooldownEntry } from "./types";
+import { httpGet } from "../utils/fetch-data.util";
+import { POLYMARKET_API } from "../constants/polymarket.constants";
+
+/**
+ * Gamma API market response type
+ */
+interface GammaMarketResponse {
+  id?: string;
+  condition_id?: string;
+  question?: string;
+  group_item_title?: string;
+  volume?: string;
+  closed?: boolean;
+  archived?: boolean;
+  accepting_orders?: boolean;
+  enable_order_book?: boolean;
+  tokens?: Array<{
+    token_id?: string;
+    outcome?: string;
+  }>;
+}
 
 /**
  * Market filter configuration
@@ -256,19 +277,133 @@ export class MarketSelector {
   }
 
   /**
-   * Fetch markets from API
+   * Fetch markets from Gamma API
    */
   private async fetchMarkets(): Promise<MarketData[]> {
-    // This would typically fetch from Gamma API
-    // For now, return empty - real implementation would integrate with API
-    this.logger.debug("[MarketSelector] Fetching markets from API...");
+    this.logger.debug("[MarketSelector] Fetching markets from Gamma API...");
 
-    // Placeholder - in real implementation:
-    // const response = await fetch(`${GAMMA_API_BASE_URL}/markets`);
-    // const data = await response.json();
-    // return data.markets.map(m => this.transformMarket(m));
+    try {
+      // Use the same pattern as endgame-sweep.ts
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets?limit=100&active=true&closed=false`;
 
-    return [];
+      const response = await httpGet<GammaMarketResponse[]>(url, {
+        timeout: 15000,
+      });
+
+      if (!response || response.length === 0) {
+        this.logger.debug("[MarketSelector] No active markets found from API");
+        return [];
+      }
+
+      this.logger.debug(
+        `[MarketSelector] Fetched ${response.length} markets from Gamma API`,
+      );
+
+      // Transform Gamma markets to our MarketData format
+      const markets: MarketData[] = [];
+      const maxConcurrent = 5; // Rate limit orderbook fetches
+
+      for (let i = 0; i < response.length; i += maxConcurrent) {
+        const batch = response.slice(i, i + maxConcurrent);
+
+        const batchResults = await Promise.allSettled(
+          batch.map(async (gammaMarket) => {
+            try {
+              // Skip if market is closed or not accepting orders
+              if (
+                gammaMarket.closed ||
+                gammaMarket.archived ||
+                !gammaMarket.accepting_orders ||
+                !gammaMarket.enable_order_book
+              ) {
+                return null;
+              }
+
+              const marketId = gammaMarket.condition_id ?? gammaMarket.id;
+              if (
+                !marketId ||
+                !gammaMarket.tokens ||
+                gammaMarket.tokens.length === 0
+              ) {
+                return null;
+              }
+
+              // Get the first YES token (typically tokens[0])
+              const yesToken = gammaMarket.tokens.find(
+                (t) => t.outcome === "Yes",
+              );
+              const tokenId =
+                yesToken?.token_id ?? gammaMarket.tokens[0]?.token_id;
+              if (!tokenId) return null;
+
+              // Fetch orderbook for accurate pricing
+              const orderbook = await this.client.getOrderBook(tokenId);
+              if (!orderbook) return null;
+
+              const bestBid = orderbook.bids?.[0]
+                ? parseFloat(orderbook.bids[0].price)
+                : 0;
+              const bestAsk = orderbook.asks?.[0]
+                ? parseFloat(orderbook.asks[0].price)
+                : 1;
+
+              const bidDepth = this.calculateDepth(orderbook.bids ?? []);
+              const askDepth = this.calculateDepth(orderbook.asks ?? []);
+
+              const spread = (bestAsk - bestBid) * 100; // Convert to cents
+              const midPrice = (bestBid + bestAsk) / 2;
+              const spreadBps = midPrice > 0 ? (spread / midPrice) * 100 : 0;
+
+              const market: MarketData = {
+                marketId,
+                tokenId,
+                question: gammaMarket.question ?? "",
+                category: gammaMarket.group_item_title ?? "",
+                midPrice,
+                bestBid,
+                bestAsk,
+                spread,
+                spreadBps,
+                bidDepth,
+                askDepth,
+                volume24h: parseFloat(gammaMarket.volume ?? "0"),
+                lastUpdate: Date.now(),
+                isHealthy: bestBid > 0 && bestAsk < 1 && spread < 50,
+              };
+
+              return market;
+            } catch (err) {
+              this.logger.debug(
+                `[MarketSelector] Error processing market: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              return null;
+            }
+          }),
+        );
+
+        // Collect successful results
+        for (const result of batchResults) {
+          if (result.status === "fulfilled" && result.value) {
+            markets.push(result.value);
+          }
+        }
+
+        // Small delay between batches to respect rate limits
+        if (i + maxConcurrent < response.length) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      }
+
+      this.logger.debug(
+        `[MarketSelector] Processed ${markets.length} eligible markets`,
+      );
+      return markets;
+    } catch (err) {
+      this.logger.error(
+        `[MarketSelector] Failed to fetch markets: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
   }
 
   /**

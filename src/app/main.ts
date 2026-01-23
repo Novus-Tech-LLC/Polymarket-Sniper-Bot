@@ -23,6 +23,7 @@ import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
 import { StrategyOrchestrator } from "../strategies/orchestrator";
 import { DEFAULT_SMART_HEDGING_CONFIG } from "../strategies/smart-hedging";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
+import { createEnterpriseOrchestrator } from "../enterprise";
 
 async function main(): Promise<void> {
   const logger = new ConsoleLogger();
@@ -146,6 +147,49 @@ async function main(): Promise<void> {
       logger.info(
         `💵 Auto-Redeem: Checking for redeemable positions every ${intervalSec} seconds`,
       );
+    }
+
+    // === ENTERPRISE ORCHESTRATOR ===
+    // Start the enterprise system alongside existing strategies
+    // Uses the same preset mode for consistent configuration
+    const enterpriseMode = strategyConfig.presetName as
+      | "conservative"
+      | "balanced"
+      | "aggressive";
+    if (
+      enterpriseMode === "conservative" ||
+      enterpriseMode === "balanced" ||
+      enterpriseMode === "aggressive"
+    ) {
+      logger.info(
+        `🏢 Starting Enterprise Orchestrator (mode: ${enterpriseMode})`,
+      );
+
+      const enterpriseOrchestrator = createEnterpriseOrchestrator(
+        client,
+        logger,
+        enterpriseMode,
+      );
+
+      // Set session start balance for accurate drawdown calculation
+      try {
+        const mempoolEnv = loadMonitorConfig(cliOverrides);
+        const usdcBalance = await getUsdBalanceApprox(
+          client.wallet,
+          mempoolEnv.collateralTokenAddress,
+          mempoolEnv.collateralTokenDecimals,
+        );
+        enterpriseOrchestrator
+          .getRiskManager()
+          .setSessionStartBalance(usdcBalance);
+      } catch (err) {
+        logger.warn(
+          `[Enterprise] Could not set session balance: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      await enterpriseOrchestrator.start();
+      logger.info("✅ Enterprise orchestrator started successfully");
     }
   } else if (strategyConfig && !strategyConfig.enabled) {
     logger.info(

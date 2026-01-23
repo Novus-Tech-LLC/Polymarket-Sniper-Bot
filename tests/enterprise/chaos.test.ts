@@ -14,10 +14,7 @@ import {
   RiskManager,
   createRiskManager,
 } from "../../src/enterprise/risk-manager";
-import type {
-  OrderRequest,
-  TrackedPosition,
-} from "../../src/enterprise/types";
+import type { OrderRequest, TrackedPosition } from "../../src/enterprise/types";
 
 // Mock logger
 const mockLogger = {
