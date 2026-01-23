@@ -160,12 +160,24 @@ export class StrategyOrchestrator {
     }
 
     // Initialize strategies
+    // Auto-configure: skip risky tier if smart hedging is enabled (same as Universal Stop-Loss)
+    const quickFlipConfigWithHedging = {
+      ...config.quickFlipConfig,
+      skipRiskyTierForHedging: smartHedgingConfig.enabled,
+    };
+
     this.quickFlipStrategy = new QuickFlipStrategy({
       client: config.client,
       logger: config.logger,
       positionTracker: this.positionTracker,
-      config: config.quickFlipConfig,
+      config: quickFlipConfigWithHedging,
     });
+
+    if (config.quickFlipConfig.enabled && smartHedgingConfig.enabled) {
+      this.logger.info(
+        `[Orchestrator] 🛡️ QuickFlip: risky tier stop-loss → smart hedging (will hedge instead of sell at loss)`,
+      );
+    }
 
     this.autoSellStrategy = new AutoSellStrategy({
       client: config.client,
