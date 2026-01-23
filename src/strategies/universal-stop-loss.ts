@@ -163,9 +163,20 @@ export class UniversalStopLossStrategy {
           position.marketId,
           position.tokenId,
         );
-        // Fallback to 'now' if entry time is not available (race condition protection)
-        const firstSeenTime = entryTime ?? now;
-        const holdTimeSeconds = (now - firstSeenTime) / 1000;
+        
+        // CRITICAL: If we don't have entry time, skip stop-loss entirely.
+        // This can happen on container restart when we haven't tracked when the position
+        // was first seen. Without knowing when we bought, we can't determine if we've held
+        // long enough for stop-loss. Being conservative here prevents mass sells on restart.
+        // The entry time will be set on the next position tracker refresh cycle.
+        if (!entryTime) {
+          this.logger.debug(
+            `[UniversalStopLoss] ⏳ Position at ${position.pnlPct.toFixed(2)}% loss but no entry time - skipping stop-loss (will check after next refresh)`,
+          );
+          continue;
+        }
+        
+        const holdTimeSeconds = (now - entryTime) / 1000;
 
         if (holdTimeSeconds < minHoldSeconds) {
           // Position hasn't been held long enough - skip stop-loss for now
