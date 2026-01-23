@@ -108,6 +108,18 @@ export class EndgameSweepStrategy {
         continue;
       }
 
+      // === CHECK FOR CONFLICTING POSITIONS ===
+      // CRITICAL: Don't buy the opposite outcome if we already have a winning position in the same market.
+      // This prevents the bot from betting against itself (e.g., buying NO when we have a winning YES).
+      const conflictingPosition = this.getConflictingPosition(market.id, market.tokenId);
+      if (conflictingPosition) {
+        this.logger.info(
+          `[EndgameSweep] ⏭️ Skipping ${market.id} (${market.side}): already have ${conflictingPosition.side} position ` +
+            `at ${(conflictingPosition.pnlPct >= 0 ? "+" : "")}${conflictingPosition.pnlPct.toFixed(1)}% P&L - won't bet against own position`,
+        );
+        continue;
+      }
+
       // === CHECK EXISTING POSITION SIZE ===
       // Prevent exceeding max position size by checking current exposure
       const existingPositionUsd = this.getExistingPositionSize(
@@ -429,6 +441,44 @@ export class EndgameSweepStrategy {
     }
 
     return totalExposureUsd;
+  }
+
+  /**
+   * Check if there's a conflicting position in the same market (different outcome).
+   * Returns the conflicting position if:
+   * 1. We have a position in the same market but different tokenId (opposite outcome)
+   * 2. That position is winning (positive P&L)
+   * 
+   * This prevents the bot from betting against its own winning positions.
+   * For example, if we have YES at +20% profit, we shouldn't buy NO.
+   */
+  private getConflictingPosition(
+    marketId: string,
+    targetTokenId: string,
+  ): { side: string; pnlPct: number; size: number } | null {
+    if (!this.positionTracker) {
+      return null;
+    }
+
+    const positions = this.positionTracker.getPositions();
+
+    for (const pos of positions) {
+      // Check for positions in the same market but with a DIFFERENT token
+      // (i.e., the opposite outcome)
+      if (pos.marketId === marketId && pos.tokenId !== targetTokenId) {
+        // Only block if the existing position is winning (positive P&L)
+        // We don't want to bet against our own winning position
+        if (pos.pnlPct >= 0) {
+          return {
+            side: pos.side,
+            pnlPct: pos.pnlPct,
+            size: pos.size,
+          };
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
