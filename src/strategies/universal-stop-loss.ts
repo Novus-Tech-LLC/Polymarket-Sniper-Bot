@@ -20,20 +20,20 @@ export interface UniversalStopLossConfig {
   /**
    * Skip positions that Smart Hedging will handle (entry < hedgingMaxEntryPrice).
    * When enabled, Universal Stop-Loss defers to Smart Hedging for low-entry positions.
-   * 
+   *
    * Default: true when smart hedging is enabled
    */
   skipForSmartHedging?: boolean;
   /**
    * Entry price threshold for determining which strategy handles a position.
    * Should match Smart Hedging's maxEntryPrice (default: 1.0 = 100¢).
-   * 
+   *
    * When skipForSmartHedging is true:
    * - Positions with entry < this threshold: Handled by Smart Hedging (skipped by Stop-Loss)
    * - Positions with entry >= this threshold: Handled by Universal Stop-Loss
-   * 
+   *
    * This matches Smart Hedging's logic which skips positions where entry >= maxEntryPrice.
-   * 
+   *
    * Default: 1.0 (100¢) - matches Smart Hedging default (handles ALL positions)
    */
   hedgingMaxEntryPrice?: number;
@@ -41,9 +41,9 @@ export interface UniversalStopLossConfig {
    * Minimum time (in seconds) a position must be held before stop-loss can trigger.
    * This prevents selling positions immediately after buying due to bid-ask spread.
    * The initial "loss" from spread is NOT a real loss - give the market time to move.
-   * 
+   *
    * Default: 60 seconds - prevents premature sells from spread-induced "losses"
-   * 
+   *
    * IMPORTANT: Without this, positions bought at 75¢ might immediately show
    * a 2-3% "loss" due to bid-ask spread and trigger a stop-loss sell before
    * the market has any chance to move in our favor.
@@ -175,7 +175,7 @@ export class UniversalStopLossStrategy {
           position.marketId,
           position.tokenId,
         );
-        
+
         // CRITICAL: If we don't have entry time, skip stop-loss entirely.
         // This can happen on container restart when we haven't tracked when the position
         // was first seen. Without knowing when we bought, we can't determine if we've held
@@ -187,7 +187,7 @@ export class UniversalStopLossStrategy {
           );
           continue;
         }
-        
+
         const holdTimeSeconds = (now - entryTime) / 1000;
 
         if (holdTimeSeconds < minHoldSeconds) {

@@ -52,6 +52,34 @@ export interface SimpleSmartHedgingConfig {
    * due to the spread between bid/ask and trigger an unwanted hedge/liquidation.
    */
   minHoldSeconds: number;
+
+  // === NEAR-CLOSE HEDGING BEHAVIOR ===
+  // Near market close, apply stricter hedging thresholds to avoid dumb hedges
+
+  /**
+   * Minutes before market close to apply near-close behavior (default: 15)
+   * When position is within this window, stricter hedge triggers apply
+   */
+  nearCloseWindowMinutes: number;
+
+  /**
+   * Near-close: Minimum adverse price move (in cents) to trigger hedge (default: 12)
+   * In the near-close window, only hedge if price dropped by at least this amount
+   */
+  nearClosePriceDropCents: number;
+
+  /**
+   * Near-close: Minimum loss % to trigger hedge (default: 30)
+   * In the near-close window, only hedge if loss % exceeds this threshold
+   * Note: Either price drop OR loss % can trigger a hedge (OR condition)
+   */
+  nearCloseLossPct: number;
+
+  /**
+   * Minutes before market close to disable hedging entirely (default: 3)
+   * Inside this window, hedging is blocked (too late - just liquidate if needed)
+   */
+  noHedgeWindowMinutes: number;
 }
 
 export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
@@ -64,6 +92,11 @@ export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
   maxEntryPrice: 1.0, // Hedge ALL positions regardless of entry price
   forceLiquidationPct: 50,
   minHoldSeconds: 120, // Wait 2 minutes before hedging - prevents immediate sell after buy
+  // Near-close hedging behavior
+  nearCloseWindowMinutes: 15, // Apply near-close rules in last 15 minutes
+  nearClosePriceDropCents: 12, // Near close: hedge only on >= 12¢ adverse move
+  nearCloseLossPct: 30, // Near close: hedge only on >= 30% loss
+  noHedgeWindowMinutes: 3, // Don't hedge at all in last 3 minutes (too late)
 };
 
 /**
@@ -159,6 +192,55 @@ export class SimpleSmartHedgingStrategy {
       }
 
       const lossPct = Math.abs(position.pnlPct);
+
+      // === NEAR-CLOSE HEDGING BEHAVIOR ===
+      // Near market close, apply stricter rules to avoid "dumb hedges"
+      if (position.marketEndTime && position.marketEndTime > now) {
+        const minutesToClose = (position.marketEndTime - now) / (60 * 1000);
+
+        // Inside no-hedge window (last 2-3 minutes): skip hedging entirely
+        // It's too late to hedge - just liquidate if loss is bad enough
+        if (minutesToClose <= this.config.noHedgeWindowMinutes) {
+          if (lossPct >= this.config.forceLiquidationPct) {
+            this.logger.warn(
+              `[SimpleHedging] 🚨 No-hedge window (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% >= ${this.config.forceLiquidationPct}% - LIQUIDATING`,
+            );
+            const sold = await this.sellPosition(position);
+            if (sold) {
+              actionsCount++;
+              this.hedgedPositions.add(key);
+            }
+          } else {
+            this.logger.debug(
+              `[SimpleHedging] ⏳ No-hedge window (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% - skipping (too late to hedge)`,
+            );
+          }
+          continue;
+        }
+
+        // Inside near-close window (last 10-15 minutes): apply stricter thresholds
+        // Only hedge if it's a BIG adverse move (≥12¢) OR a BIG loss (≥30%)
+        if (minutesToClose <= this.config.nearCloseWindowMinutes) {
+          const priceDropCents =
+            (position.entryPrice - position.currentPrice) * 100;
+          const meetsDropThreshold =
+            priceDropCents >= this.config.nearClosePriceDropCents;
+          const meetsLossThreshold = lossPct >= this.config.nearCloseLossPct;
+
+          if (!meetsDropThreshold && !meetsLossThreshold) {
+            this.logger.debug(
+              `[SimpleHedging] ⏳ Near-close (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% / drop ${priceDropCents.toFixed(1)}¢ - skipping (thresholds: ${this.config.nearCloseLossPct}% or ${this.config.nearClosePriceDropCents}¢)`,
+            );
+            continue;
+          }
+
+          this.logger.info(
+            `[SimpleHedging] 📍 Near-close hedge triggered: ${minutesToClose.toFixed(1)}min to close, ` +
+              `loss=${lossPct.toFixed(1)}%${meetsLossThreshold ? " ✓" : ""}, ` +
+              `drop=${priceDropCents.toFixed(1)}¢${meetsDropThreshold ? " ✓" : ""}`,
+          );
+        }
+      }
 
       // Force liquidation if loss is catastrophic
       if (lossPct >= this.config.forceLiquidationPct) {

@@ -613,14 +613,8 @@ describe("PositionTracker Historical Entry Times", () => {
       isValidAddress("0x1234567890abcdef1234567890abcdef12345678"),
       "Valid address should pass",
     );
-    assert.ok(
-      !isValidAddress("unknown"),
-      "'unknown' should be rejected",
-    );
-    assert.ok(
-      !isValidAddress("0x123"),
-      "Too short address should be rejected",
-    );
+    assert.ok(!isValidAddress("unknown"), "'unknown' should be rejected");
+    assert.ok(!isValidAddress("0x123"), "Too short address should be rejected");
     assert.ok(
       !isValidAddress("1234567890abcdef1234567890abcdef12345678"),
       "Address without 0x prefix should be rejected",
@@ -639,14 +633,44 @@ describe("PositionTracker Historical Entry Times", () => {
 
     const activities: ActivityItem[] = [
       // Multiple BUYs for same token - should keep earliest
-      { type: "TRADE", timestamp: 1700000000, conditionId: "market1", asset: "token1", side: "BUY" },
-      { type: "TRADE", timestamp: 1700001000, conditionId: "market1", asset: "token1", side: "BUY" }, // Later BUY
+      {
+        type: "TRADE",
+        timestamp: 1700000000,
+        conditionId: "market1",
+        asset: "token1",
+        side: "BUY",
+      },
+      {
+        type: "TRADE",
+        timestamp: 1700001000,
+        conditionId: "market1",
+        asset: "token1",
+        side: "BUY",
+      }, // Later BUY
       // SELL should be ignored
-      { type: "TRADE", timestamp: 1699999000, conditionId: "market1", asset: "token1", side: "SELL" },
+      {
+        type: "TRADE",
+        timestamp: 1699999000,
+        conditionId: "market1",
+        asset: "token1",
+        side: "SELL",
+      },
       // Different token
-      { type: "TRADE", timestamp: 1700002000, conditionId: "market2", asset: "token2", side: "BUY" },
+      {
+        type: "TRADE",
+        timestamp: 1700002000,
+        conditionId: "market2",
+        asset: "token2",
+        side: "BUY",
+      },
       // Non-TRADE type should be ignored
-      { type: "DEPOSIT", timestamp: 1699998000, conditionId: "market1", asset: "token1", side: "BUY" },
+      {
+        type: "DEPOSIT",
+        timestamp: 1699998000,
+        conditionId: "market1",
+        asset: "token1",
+        side: "BUY",
+      },
     ];
 
     const earliestBuyTimes = new Map<string, number>();
@@ -665,7 +689,11 @@ describe("PositionTracker Historical Entry Times", () => {
       }
     }
 
-    assert.strictEqual(earliestBuyTimes.size, 2, "Should have 2 unique positions");
+    assert.strictEqual(
+      earliestBuyTimes.size,
+      2,
+      "Should have 2 unique positions",
+    );
     assert.strictEqual(
       earliestBuyTimes.get("market1-token1"),
       1700000000 * 1000,
@@ -713,7 +741,10 @@ describe("PositionTracker Historical Entry Times", () => {
     }
 
     const entryTime = positionEntryTimes.get(newPositionKey);
-    assert.ok(entryTime !== undefined, "New position should have entry time set");
+    assert.ok(
+      entryTime !== undefined,
+      "New position should have entry time set",
+    );
     assert.ok(
       entryTime! >= now - 1000 && entryTime! <= now + 1000,
       "New position entry time should be close to 'now'",
@@ -732,7 +763,9 @@ describe("Stop-Loss Entry Time Validation", () => {
       entryPrice: 0.7,
     };
 
-    const entryTime = positionEntryTimes.get(`${position.marketId}-${position.tokenId}`);
+    const entryTime = positionEntryTimes.get(
+      `${position.marketId}-${position.tokenId}`,
+    );
 
     // If no entry time, should skip stop-loss
     const shouldSkip = !entryTime;
@@ -754,9 +787,14 @@ describe("Stop-Loss Entry Time Validation", () => {
 
     // Position has historical entry time (bought 5 minutes ago)
     const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-    positionEntryTimes.set(`${position.marketId}-${position.tokenId}`, fiveMinutesAgo);
+    positionEntryTimes.set(
+      `${position.marketId}-${position.tokenId}`,
+      fiveMinutesAgo,
+    );
 
-    const entryTime = positionEntryTimes.get(`${position.marketId}-${position.tokenId}`);
+    const entryTime = positionEntryTimes.get(
+      `${position.marketId}-${position.tokenId}`,
+    );
     const shouldSkip = !entryTime;
 
     assert.ok(
@@ -786,9 +824,14 @@ describe("Stop-Loss Entry Time Validation", () => {
 
     // Position was just bought (30 seconds ago)
     const thirtySecondsAgo = Date.now() - 30 * 1000;
-    positionEntryTimes.set(`${position.marketId}-${position.tokenId}`, thirtySecondsAgo);
+    positionEntryTimes.set(
+      `${position.marketId}-${position.tokenId}`,
+      thirtySecondsAgo,
+    );
 
-    const entryTime = positionEntryTimes.get(`${position.marketId}-${position.tokenId}`);
+    const entryTime = positionEntryTimes.get(
+      `${position.marketId}-${position.tokenId}`,
+    );
     const minHoldSeconds = 60;
     const now = Date.now();
     const holdTimeSeconds = (now - entryTime!) / 1000;

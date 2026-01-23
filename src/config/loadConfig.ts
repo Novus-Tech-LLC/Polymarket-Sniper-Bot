@@ -1178,6 +1178,26 @@ export type StrategyConfig = {
    */
   smartHedgingForceLiquidationLossPct: number;
   /**
+   * Near-close window: minutes before market close to apply stricter hedge rules
+   * Default: 15 minutes
+   */
+  smartHedgingNearCloseWindowMinutes: number;
+  /**
+   * Near-close: minimum adverse price drop in cents to trigger hedge
+   * Default: 12 cents
+   */
+  smartHedgingNearClosePriceDropCents: number;
+  /**
+   * Near-close: minimum loss % to trigger hedge (OR condition with price drop)
+   * Default: 30%
+   */
+  smartHedgingNearCloseLossPct: number;
+  /**
+   * No-hedge window: minutes before market close to disable hedging entirely
+   * Default: 3 minutes
+   */
+  smartHedgingNoHedgeWindowMinutes: number;
+  /**
    * Universal Stop-Loss: Minimum time (seconds) to hold before stop-loss can trigger.
    * Prevents selling positions immediately after buying due to bid-ask spread.
    * Default: 60 seconds
@@ -1389,6 +1409,62 @@ export function loadStrategyConfig(
             .SMART_HEDGING_FORCE_LIQUIDATION_LOSS_PCT
         : undefined) ??
       50, // Default: force liquidate at 50% loss
+    /**
+     * SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES: Minutes before market close to apply stricter hedge rules
+     * Inside this window, only hedge on big adverse moves or big losses
+     * Default: 15 minutes
+     */
+    smartHedgingNearCloseWindowMinutes:
+      parseNumber(
+        readEnv("SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES" in preset
+        ? (preset as { SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES: number })
+            .SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES
+        : undefined) ??
+      15, // Default: apply near-close rules in last 15 minutes
+    /**
+     * SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS: Minimum price drop (cents) to trigger near-close hedge
+     * Near close, only hedge if price dropped by at least this amount (OR condition with loss %)
+     * Default: 12 cents
+     */
+    smartHedgingNearClosePriceDropCents:
+      parseNumber(
+        readEnv("SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS" in preset
+        ? (preset as { SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS: number })
+            .SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS
+        : undefined) ??
+      12, // Default: near-close hedge on >= 12¢ adverse move
+    /**
+     * SMART_HEDGING_NEAR_CLOSE_LOSS_PCT: Minimum loss % to trigger near-close hedge
+     * Near close, only hedge if loss % exceeds this (OR condition with price drop)
+     * Default: 30%
+     */
+    smartHedgingNearCloseLossPct:
+      parseNumber(
+        readEnv("SMART_HEDGING_NEAR_CLOSE_LOSS_PCT", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_NEAR_CLOSE_LOSS_PCT" in preset
+        ? (preset as { SMART_HEDGING_NEAR_CLOSE_LOSS_PCT: number })
+            .SMART_HEDGING_NEAR_CLOSE_LOSS_PCT
+        : undefined) ??
+      30, // Default: near-close hedge on >= 30% loss
+    /**
+     * SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES: Minutes before close to disable hedging entirely
+     * Inside this window, hedging is blocked (too late - just liquidate if needed)
+     * Default: 3 minutes
+     */
+    smartHedgingNoHedgeWindowMinutes:
+      parseNumber(
+        readEnv("SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES" in preset
+        ? (preset as { SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES: number })
+            .SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES
+        : undefined) ??
+      3, // Default: don't hedge in last 3 minutes
     /**
      * STOP_LOSS_MIN_HOLD_SECONDS: Minimum time before stop-loss can trigger
      * Prevents premature stop-loss sells due to bid-ask spread right after buying

@@ -190,7 +190,8 @@ export class ArbTradeExecutor implements TradeExecutor {
     // Block trades where either side is below the minimum (e.g., 3¢ positions are almost certain losers)
     if (plan.yesAsk < ARB_MIN_BUY_PRICE || plan.noAsk < ARB_MIN_BUY_PRICE) {
       const loserSide = plan.yesAsk < ARB_MIN_BUY_PRICE ? "YES" : "NO";
-      const loserPrice = plan.yesAsk < ARB_MIN_BUY_PRICE ? plan.yesAsk : plan.noAsk;
+      const loserPrice =
+        plan.yesAsk < ARB_MIN_BUY_PRICE ? plan.yesAsk : plan.noAsk;
       this.logger.warn(
         `[ARB] 🚫 Skipping trade - ${loserSide} price ${(loserPrice * 100).toFixed(1)}¢ < ${(ARB_MIN_BUY_PRICE * 100).toFixed(0)}¢ min. ` +
           `Positions this cheap are almost certain losers if the other leg fails.`,

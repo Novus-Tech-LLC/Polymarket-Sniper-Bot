@@ -27,7 +27,7 @@ const baseEnv: RuntimeEnv = {
   frontrunSizeMultiplier: 0.1,
   frontrunMaxSizeUsd: 50,
   gasPriceMultiplier: 1.0,
-  minBuyPrice: 0.50,
+  minBuyPrice: 0.5,
   minOrderUsd: 10,
   orderSubmitMinIntervalMs: 20000,
   orderSubmitMaxPerHour: 20,
@@ -301,7 +301,7 @@ test("monitor skips low-price BUY trades and increments skippedLowPriceTrades", 
 
   const service = new MempoolMonitorService({
     client: {} as never,
-    env: { ...baseEnv, requireConfirmed: false, minBuyPrice: 0.50 }, // 50¢ minimum
+    env: { ...baseEnv, requireConfirmed: false, minBuyPrice: 0.5 }, // 50¢ minimum
     logger: testLogger,
     onDetectedTrade: async (signal) => {
       detected.push(signal.marketId);
@@ -334,9 +334,21 @@ test("monitor skips low-price BUY trades and increments skippedLowPriceTrades", 
   ).checkRecentActivity(baseEnv.targetAddresses[0], stats);
 
   // Verify the low-price BUY was skipped
-  assert.equal(stats.skippedLowPriceTrades, 1, "Should increment skippedLowPriceTrades for low-price BUY");
-  assert.equal(stats.eligibleTrades, 0, "Should not count low-price BUY as eligible");
-  assert.equal(detected.length, 0, "Should not call onDetectedTrade for low-price BUY");
+  assert.equal(
+    stats.skippedLowPriceTrades,
+    1,
+    "Should increment skippedLowPriceTrades for low-price BUY",
+  );
+  assert.equal(
+    stats.eligibleTrades,
+    0,
+    "Should not count low-price BUY as eligible",
+  );
+  assert.equal(
+    detected.length,
+    0,
+    "Should not call onDetectedTrade for low-price BUY",
+  );
 });
 
 test("monitor blocks SELL copy trades - only BUY orders are copied", async () => {
@@ -362,7 +374,7 @@ test("monitor blocks SELL copy trades - only BUY orders are copied", async () =>
   const detected: string[] = [];
   const service = new MempoolMonitorService({
     client: {} as never,
-    env: { ...baseEnv, requireConfirmed: false, minBuyPrice: 0.50 },
+    env: { ...baseEnv, requireConfirmed: false, minBuyPrice: 0.5 },
     logger,
     onDetectedTrade: async (signal) => {
       detected.push(signal.marketId);

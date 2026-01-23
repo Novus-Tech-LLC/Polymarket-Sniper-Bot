@@ -13,6 +13,7 @@ export interface Position {
   pnlPct: number;
   pnlUsd: number;
   redeemable?: boolean; // True if market is resolved/closed
+  marketEndTime?: number; // Market close time (Unix timestamp ms) - used for near-close hedging behavior
 }
 
 // Price display constants
@@ -54,6 +55,12 @@ export class PositionTracker {
   // Flag to track whether historical entry times have been loaded from API
   // This prevents immediate sells on container restart by ensuring we know actual entry times
   private historicalEntryTimesLoaded: boolean = false;
+
+  // Cache market end times (Unix timestamp ms). Market end times are fetched from Gamma API
+  // and cached to avoid redundant API calls on every 30-second refresh cycle.
+  // End times can change, so callers should be prepared to refetch or invalidate entries as needed.
+  private marketEndTimeCache: Map<string, number> = new Map();
+  private static readonly MAX_END_TIME_CACHE_SIZE = 1000;
 
   // API timeout constant for external API calls
   private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
@@ -520,6 +527,13 @@ export class PositionTracker {
               const pnlUsd = (currentPrice - entryPrice) * size;
               const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
 
+              // Fetch market end time for active positions (needed for near-close hedging)
+              // Skip for redeemable positions since they're already resolved
+              let marketEndTime: number | undefined;
+              if (!isRedeemable) {
+                marketEndTime = await this.fetchMarketEndTime(tokenId);
+              }
+
               return {
                 marketId,
                 tokenId,
@@ -529,7 +543,8 @@ export class PositionTracker {
                 currentPrice,
                 pnlPct,
                 pnlUsd,
-                redeemable: finalRedeemable,
+                redeemable: isRedeemable,
+                marketEndTime,
               };
             } catch (err) {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;
@@ -856,6 +871,77 @@ export class PositionTracker {
   }
 
   /**
+   * Fetch market end time from Gamma API
+   * Returns Unix timestamp in milliseconds, or undefined if not available
+   * Uses cache to avoid redundant API calls
+   */
+  private async fetchMarketEndTime(
+    tokenId: string,
+  ): Promise<number | undefined> {
+    // Check cache first
+    const cached = this.marketEndTimeCache.get(tokenId);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    try {
+      const { httpGet } = await import("../utils/fetch-data.util");
+      const { POLYMARKET_API } =
+        await import("../constants/polymarket.constants");
+
+      interface GammaMarketResponse {
+        end_date?: string;
+        end_time?: string;
+        endDate?: string;
+        endTime?: string;
+      }
+
+      const encodedTokenId = encodeURIComponent(tokenId.trim());
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets?clob_token_ids=${encodedTokenId}`;
+
+      const markets = await httpGet<GammaMarketResponse[]>(url, {
+        timeout: PositionTracker.API_TIMEOUT_MS,
+      });
+
+      if (!markets || !Array.isArray(markets) || markets.length === 0) {
+        return undefined;
+      }
+
+      const market = markets[0];
+      const endDateStr =
+        market.end_date ?? market.end_time ?? market.endDate ?? market.endTime;
+
+      if (!endDateStr) {
+        return undefined;
+      }
+
+      // Parse the date string to Unix timestamp (milliseconds)
+      const endTime = new Date(endDateStr).getTime();
+      if (!Number.isFinite(endTime) || endTime <= 0) {
+        return undefined;
+      }
+
+      // Cache the result (enforce max size)
+      if (
+        this.marketEndTimeCache.size >= PositionTracker.MAX_END_TIME_CACHE_SIZE
+      ) {
+        const firstKey = this.marketEndTimeCache.keys().next().value;
+        if (firstKey) {
+          this.marketEndTimeCache.delete(firstKey);
+        }
+      }
+      this.marketEndTimeCache.set(tokenId, endTime);
+
+      return endTime;
+    } catch (err) {
+      this.logger.debug(
+        `[PositionTracker] Failed to fetch market end time for tokenId ${tokenId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
    * Get entry time for a position (when it was first seen)
    */
   getPositionEntryTime(marketId: string, tokenId: string): number | undefined {
@@ -875,14 +961,15 @@ export class PositionTracker {
    * Load historical entry times from the Polymarket activity API.
    * This fetches the user's trade history and finds the earliest BUY timestamp
    * for each position, which represents when the position was acquired.
-   * 
+   *
    * This is critical for preventing mass sells on container restart - without
    * knowing when positions were actually bought, strategies might incorrectly
    * assume positions are "new" and trigger stop-loss or hedging immediately.
    */
   private async loadHistoricalEntryTimes(): Promise<void> {
     try {
-      const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
+      const { resolveSignerAddress } =
+        await import("../utils/funds-allowance.util");
       const walletAddress = resolveSignerAddress(this.client);
 
       // Validate wallet address - must be a valid Ethereum address (0x + 40 hex chars)
@@ -929,7 +1016,10 @@ export class PositionTracker {
 
       for (const activity of activities) {
         // Only process BUY trades (these are when we acquired positions)
-        if (activity.type !== "TRADE" || activity.side?.toUpperCase() !== "BUY") {
+        if (
+          activity.type !== "TRADE" ||
+          activity.side?.toUpperCase() !== "BUY"
+        ) {
           continue;
         }
 
@@ -941,15 +1031,16 @@ export class PositionTracker {
         }
 
         const key = `${marketId}-${tokenId}`;
-        
+
         // Handle timestamp - check if it's in seconds or milliseconds
         // Timestamps > 1e12 are already in milliseconds (year 2001+)
         // Timestamps < 1e12 are in seconds and need conversion
         let timestamp: number;
         if (typeof activity.timestamp === "number") {
-          timestamp = activity.timestamp > 1e12 
-            ? activity.timestamp 
-            : activity.timestamp * 1000;
+          timestamp =
+            activity.timestamp > 1e12
+              ? activity.timestamp
+              : activity.timestamp * 1000;
         } else {
           timestamp = new Date(activity.timestamp).getTime();
         }
@@ -985,7 +1076,6 @@ export class PositionTracker {
       this.logger.info(
         `[PositionTracker] ✅ Loaded ${earliestBuyTimes.size} historical entry times from ${activities.length} activities (${buyCount} unique positions)`,
       );
-
     } catch (err) {
       // Log the error but don't fail - strategies will be conservative without historical data
       const errMsg = err instanceof Error ? err.message : String(err);

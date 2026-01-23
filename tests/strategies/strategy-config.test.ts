@@ -278,3 +278,97 @@ test("STOP_LOSS_MIN_HOLD_SECONDS env variable overrides preset value", () => {
   // Env override should take precedence over preset's 120
   assert.equal(config.stopLossMinHoldSeconds, 90);
 });
+
+// === SMART_HEDGING Near-Close Behavior Tests ===
+
+test("SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES defaults to 15", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Default near-close window is 15 minutes
+  assert.equal(config.smartHedgingNearCloseWindowMinutes, 15);
+});
+
+test("SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES env variable overrides default", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_NEAR_CLOSE_WINDOW_MINUTES: "10",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence
+  assert.equal(config.smartHedgingNearCloseWindowMinutes, 10);
+});
+
+test("SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS defaults to 12", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Default near-close price drop threshold is 12 cents
+  assert.equal(config.smartHedgingNearClosePriceDropCents, 12);
+});
+
+test("SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS env variable overrides default", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_NEAR_CLOSE_PRICE_DROP_CENTS: "15",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence
+  assert.equal(config.smartHedgingNearClosePriceDropCents, 15);
+});
+
+test("SMART_HEDGING_NEAR_CLOSE_LOSS_PCT defaults to 30", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Default near-close loss threshold is 30%
+  assert.equal(config.smartHedgingNearCloseLossPct, 30);
+});
+
+test("SMART_HEDGING_NEAR_CLOSE_LOSS_PCT env variable overrides default", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_NEAR_CLOSE_LOSS_PCT: "25",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence
+  assert.equal(config.smartHedgingNearCloseLossPct, 25);
+});
+
+test("SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES defaults to 3", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Default no-hedge window is 3 minutes
+  assert.equal(config.smartHedgingNoHedgeWindowMinutes, 3);
+});
+
+test("SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES env variable overrides default", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES: "2",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence
+  assert.equal(config.smartHedgingNoHedgeWindowMinutes, 2);
+});

@@ -2,7 +2,7 @@
  * Quick Flip Strategy - PROFIT ONLY
  *
  * CRITICAL RULE: This strategy ONLY sells for PROFIT. NEVER for a loss.
- * 
+ *
  * If a position is losing money, Quick Flip does NOTHING.
  * Losses are handled by Smart Hedging (which hedges or liquidates at configured thresholds).
  *
@@ -44,7 +44,7 @@ export interface SimpleQuickFlipConfig {
  * - Trading fee: 0.01% per side (1 basis point per side)
  * - Round-trip fee: 0.02% (2 basis points total)
  * - Bid-ask spread: typically 1-5% depending on liquidity
- * 
+ *
  * To ensure profit after fees, we need substantial profit targets.
  * The trading fee (0.02%) is negligible, but spread can eat into profits.
  */
@@ -55,12 +55,12 @@ export const DEFAULT_SIMPLE_QUICKFLIP_CONFIG: SimpleQuickFlipConfig = {
   enabled: true,
   targetPct: 5, // 5% target - reasonable profit after spread/fees
   minHoldSeconds: 60, // Hold 60 seconds before selling
-  minProfitUsd: 0.50, // Minimum $0.50 profit per trade
+  minProfitUsd: 0.5, // Minimum $0.50 profit per trade
 };
 
 /**
  * Simple Quick Flip Strategy
- * 
+ *
  * PROFIT ONLY - Never sells below entry price.
  * Takes the quickest reasonable profit above trading fees.
  * For loss handling, see Smart Hedging strategy.
@@ -157,16 +157,16 @@ export class SimpleQuickFlipStrategy {
 
   /**
    * Verify profit at actual bid price before selling
-   * 
+   *
    * CRITICAL: Quick Flip NEVER sells below entry price.
    * This method ensures we only sell when:
    * 1. Bid price > entry price (absolute floor - NEVER sell for a loss)
    * 2. Profit % >= EFFECTIVE_MIN_PROFIT_PCT (covers fees + spread)
    * 3. Profit % >= configured target %
    * 4. Profit USD >= minimum USD
-   * 
+   *
    * If ANY condition fails, returns profitable=false and we DO NOT sell.
-   * 
+   *
    * The goal is to take the QUICKEST reasonable profit above trading fees.
    */
   private async verifyProfitAtBidPrice(position: {
@@ -174,18 +174,29 @@ export class SimpleQuickFlipStrategy {
     tokenId: string;
     size: number;
     entryPrice: number;
-  }): Promise<{ profitable: boolean; bidPnlPct: number; bidPnlUsd: number; bidPrice: number }> {
+  }): Promise<{
+    profitable: boolean;
+    bidPnlPct: number;
+    bidPnlUsd: number;
+    bidPrice: number;
+  }> {
     try {
       const orderbook = await this.client.getOrderBook(position.tokenId);
-      
+
       if (!orderbook.bids || orderbook.bids.length === 0) {
         // No bids - can't sell, so not profitable
-        return { profitable: false, bidPnlPct: -100, bidPnlUsd: -position.size * position.entryPrice, bidPrice: 0 };
+        return {
+          profitable: false,
+          bidPnlPct: -100,
+          bidPnlUsd: -position.size * position.entryPrice,
+          bidPrice: 0,
+        };
       }
 
       const bidPrice = parseFloat(orderbook.bids[0].price);
       const bidPnlUsd = (bidPrice - position.entryPrice) * position.size;
-      const bidPnlPct = ((bidPrice - position.entryPrice) / position.entryPrice) * 100;
+      const bidPnlPct =
+        ((bidPrice - position.entryPrice) / position.entryPrice) * 100;
 
       // ABSOLUTE RULE #1: Never sell below entry price
       // This is the hard floor - no matter what, we don't sell for a loss
@@ -207,10 +218,10 @@ export class SimpleQuickFlipStrategy {
 
       // RULE #3: Must meet configured target % (user can set higher if they want)
       const meetsTarget = bidPnlPct >= this.config.targetPct;
-      
+
       // RULE #4: Must meet minimum USD profit
       const meetsMinProfit = bidPnlUsd >= this.config.minProfitUsd;
-      
+
       const profitable = meetsTarget && meetsMinProfit;
 
       if (!profitable) {

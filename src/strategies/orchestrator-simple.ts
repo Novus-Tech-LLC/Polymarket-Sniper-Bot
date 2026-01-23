@@ -31,7 +31,10 @@ import {
   DEFAULT_SIMPLE_QUICKFLIP_CONFIG,
 } from "./quick-flip-simple";
 import { AutoRedeemStrategy, type AutoRedeemConfig } from "./auto-redeem";
-import { UniversalStopLossStrategy, type UniversalStopLossConfig } from "./universal-stop-loss";
+import {
+  UniversalStopLossStrategy,
+  type UniversalStopLossConfig,
+} from "./universal-stop-loss";
 import { RiskManager, createRiskManager } from "./risk-manager";
 import { PnLLedger } from "./pnl-ledger";
 
@@ -193,7 +196,9 @@ export class SimpleOrchestrator {
 
     try {
       // 1. Auto-Redeem - HIGHEST PRIORITY - get money back from resolved positions
-      await this.runStrategy("AutoRedeem", () => this.autoRedeemStrategy.execute());
+      await this.runStrategy("AutoRedeem", () =>
+        this.autoRedeemStrategy.execute(),
+      );
 
       // 2. Smart Hedging - protect losing positions by buying opposite side
       await this.runStrategy("Hedging", () => this.hedgingStrategy.execute());
@@ -205,7 +210,9 @@ export class SimpleOrchestrator {
       await this.runStrategy("Endgame", () => this.endgameStrategy.execute());
 
       // 5. Quick Flip - take profits when target reached
-      await this.runStrategy("QuickFlip", () => this.quickFlipStrategy.execute());
+      await this.runStrategy("QuickFlip", () =>
+        this.quickFlipStrategy.execute(),
+      );
     } catch (err) {
       this.logger.error(
         `[SimpleOrchestrator] Error: ${err instanceof Error ? err.message : String(err)}`,

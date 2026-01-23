@@ -14,9 +14,7 @@ import { startArbitrageEngine } from "../arbitrage/runtime";
 import { suppressClobOrderbookErrors } from "../utils/console-filter.util";
 import { startWireguard } from "../utils/wireguard.util";
 import { startOpenvpn } from "../utils/openvpn.util";
-import {
-  formatClobCredsChecklist,
-} from "../utils/clob-credentials.util";
+import { formatClobCredsChecklist } from "../utils/clob-credentials.util";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
 import {
@@ -97,7 +95,10 @@ async function main(): Promise<void> {
       client,
       logger,
       maxPositionUsd: strategyConfig.endgameMaxPositionUsd,
-      riskPreset: strategyConfig.presetName as "conservative" | "balanced" | "aggressive",
+      riskPreset: strategyConfig.presetName as
+        | "conservative"
+        | "balanced"
+        | "aggressive",
       // Pass hedging config from env
       hedgingConfig: {
         enabled: strategyConfig.smartHedgingEnabled,
@@ -106,6 +107,13 @@ async function main(): Promise<void> {
         absoluteMaxUsd: strategyConfig.smartHedgingAbsoluteMaxUsd,
         allowExceedMax: strategyConfig.smartHedgingAllowExceedMax,
         forceLiquidationPct: strategyConfig.smartHedgingForceLiquidationLossPct,
+        // Near-close hedging behavior
+        nearCloseWindowMinutes:
+          strategyConfig.smartHedgingNearCloseWindowMinutes,
+        nearClosePriceDropCents:
+          strategyConfig.smartHedgingNearClosePriceDropCents,
+        nearCloseLossPct: strategyConfig.smartHedgingNearCloseLossPct,
+        noHedgeWindowMinutes: strategyConfig.smartHedgingNoHedgeWindowMinutes,
       },
       // Pass quick flip config
       quickFlipConfig: {

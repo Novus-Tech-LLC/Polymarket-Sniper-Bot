@@ -28,7 +28,7 @@ const baseEnv: RuntimeEnv = {
   frontrunSizeMultiplier: 0.1,
   frontrunMaxSizeUsd: 50,
   gasPriceMultiplier: 1.0,
-  minBuyPrice: 0.50,
+  minBuyPrice: 0.5,
   minOrderUsd: 10,
   orderSubmitMinIntervalMs: 20000,
   orderSubmitMaxPerHour: 20,
@@ -366,7 +366,9 @@ test("frontrun skips BUY trade when price is below MIN_BUY_PRICE threshold", asy
 
   // Verify the order was skipped
   assert.ok(
-    logs.some((line) => line.includes("Skipping BUY - price 3.0¢ is below minimum 15.0¢")),
+    logs.some((line) =>
+      line.includes("Skipping BUY - price 3.0¢ is below minimum 15.0¢"),
+    ),
     "Should log warning about price being below minimum",
   );
   assert.ok(
@@ -490,7 +492,7 @@ test("frontrun allows BUY trade when price is above MIN_BUY_PRICE threshold", as
     outcome: "YES",
     side: "BUY",
     sizeUsd: 100,
-    price: 0.50, // 50¢ - well above the 15¢ minimum
+    price: 0.5, // 50¢ - well above the 15¢ minimum
     timestamp: Date.now(),
   });
 

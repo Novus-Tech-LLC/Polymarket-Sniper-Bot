@@ -34,7 +34,7 @@ export type OrderOutcome = "YES" | "NO";
  * This is a safety net that applies to ALL buy orders unless explicitly skipped.
  * Default: 0.10 (10¢) - only blocks extreme loser positions
  */
-export const GLOBAL_MIN_BUY_PRICE = 0.10;
+export const GLOBAL_MIN_BUY_PRICE = 0.1;
 
 export type PostOrderInput = {
   client: ClobClient;
@@ -194,7 +194,11 @@ async function postOrderClob(
   // Prevents buying extremely low-probability "loser" positions (e.g., 3¢)
   // This is a SAFETY NET that catches orders from any source (ARB, copy trading, etc.)
   // Skip for legitimate hedge operations where buying at low prices is intentional.
-  if (side === "BUY" && !input.skipMinBuyPriceCheck && maxAcceptablePrice !== undefined) {
+  if (
+    side === "BUY" &&
+    !input.skipMinBuyPriceCheck &&
+    maxAcceptablePrice !== undefined
+  ) {
     if (maxAcceptablePrice < GLOBAL_MIN_BUY_PRICE) {
       logger.warn(
         `[CLOB] 🚫 Order blocked (LOSER_POSITION): BUY price ${(maxAcceptablePrice * 100).toFixed(1)}¢ < ${(GLOBAL_MIN_BUY_PRICE * 100).toFixed(0)}¢ min. ` +
@@ -213,7 +217,9 @@ async function postOrderClob(
   if (!input.skipDuplicatePrevention && side === "BUY" && marketId) {
     const marketCooldownStatus = isMarketInCooldown(marketId);
     if (marketCooldownStatus.blocked) {
-      const remainingSec = Math.ceil((marketCooldownStatus.remainingMs ?? 0) / 1000);
+      const remainingSec = Math.ceil(
+        (marketCooldownStatus.remainingMs ?? 0) / 1000,
+      );
       logger.warn(
         `[CLOB] Order skipped (${marketCooldownStatus.reason}): BUY on market ${marketId.slice(0, 8)}... blocked for ${remainingSec}s (prevents stacked buys on same market)`,
       );

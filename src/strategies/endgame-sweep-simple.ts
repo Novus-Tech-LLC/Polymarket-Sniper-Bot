@@ -129,7 +129,9 @@ export class SimpleEndgameSweepStrategy {
     }
 
     if (purchasedCount > 0) {
-      this.logger.info(`[SimpleEndgame] ✅ Bought ${purchasedCount} position(s)`);
+      this.logger.info(
+        `[SimpleEndgame] ✅ Bought ${purchasedCount} position(s)`,
+      );
     }
 
     return purchasedCount;
@@ -138,12 +140,14 @@ export class SimpleEndgameSweepStrategy {
   /**
    * Scan for markets in the target price range
    */
-  private async scanMarkets(): Promise<Array<{
-    id: string;
-    tokenId: string;
-    price: number;
-    side: "YES" | "NO";
-  }>> {
+  private async scanMarkets(): Promise<
+    Array<{
+      id: string;
+      tokenId: string;
+      price: number;
+      side: "YES" | "NO";
+    }>
+  > {
     const candidates: Array<{
       id: string;
       tokenId: string;
@@ -172,7 +176,10 @@ export class SimpleEndgameSweepStrategy {
             const price = parseFloat(orderbook.asks[0].price);
 
             // Check if in our target range
-            if (price >= this.config.minPrice && price <= this.config.maxPrice) {
+            if (
+              price >= this.config.minPrice &&
+              price <= this.config.maxPrice
+            ) {
               candidates.push({
                 id: market.condition_id || market.id,
                 tokenId: token.token_id,
