@@ -180,11 +180,16 @@ export class OrderSubmissionController {
         // Check if FOK order was actually filled (not killed)
         // A killed FOK order has takingAmount=0 and makingAmount=0
         if (fillInfo) {
-          const takingAmount = parseFloat(fillInfo.takingAmount) || 0;
-          const makingAmount = parseFloat(fillInfo.makingAmount) || 0;
+          // Use explicit null checks to avoid masking NaN from malformed responses
+          const takingAmount = fillInfo.takingAmount ? parseFloat(fillInfo.takingAmount) : 0;
+          const makingAmount = fillInfo.makingAmount ? parseFloat(fillInfo.makingAmount) : 0;
           
-          if (takingAmount === 0 && makingAmount === 0) {
-            // FOK order was killed - no fill occurred
+          // Check for NaN (malformed response) - treat as unknown and allow order to proceed
+          const hasTaking = !isNaN(takingAmount) && takingAmount > 0;
+          const hasMaking = !isNaN(makingAmount) && makingAmount > 0;
+          
+          if (!hasTaking && !hasMaking && !isNaN(takingAmount) && !isNaN(makingAmount)) {
+            // Both amounts are valid numbers but zero - FOK order was killed
             params.logger.warn(
               `[CLOB] FOK order killed (no fill): orderId=${orderId ?? "unknown"} takingAmount=${fillInfo.takingAmount} makingAmount=${fillInfo.makingAmount} status=${fillInfo.status ?? "unknown"}`,
             );
@@ -614,25 +619,6 @@ export function extractFillInfo(response: unknown): {
     };
   }
   return undefined;
-}
-
-/**
- * Check if a FOK order was actually filled (not killed).
- * FOK orders that are killed have takingAmount=0 and makingAmount=0.
- * @returns true if the order appears to have been filled, false if killed
- */
-function isFokOrderFilled(response: unknown): boolean {
-  const fillInfo = extractFillInfo(response);
-  if (!fillInfo) {
-    // No fill info available - assume filled for backwards compatibility
-    return true;
-  }
-  
-  const takingAmount = parseFloat(fillInfo.takingAmount) || 0;
-  const makingAmount = parseFloat(fillInfo.makingAmount) || 0;
-  
-  // Order is filled if either amount is > 0
-  return takingAmount > 0 || makingAmount > 0;
 }
 
 function isOrderAccepted(response: unknown): boolean {
