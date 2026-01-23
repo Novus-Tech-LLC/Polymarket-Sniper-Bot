@@ -64,6 +64,12 @@ export type PostOrderInput = {
    */
   skipMinBuyPriceCheck?: boolean;
   /**
+   * Minimum buy price threshold. Set via MIN_BUY_PRICE env variable.
+   * Set to 0 to allow buying at any price (useful for scalping volatile low-price positions).
+   * If not provided, uses GLOBAL_MIN_BUY_PRICE constant (0.10 = 10¢) as fallback.
+   */
+  minBuyPrice?: number;
+  /**
    * Skip the minimum order size check.
    * Use for liquidations/sells where we need to sell whatever position
    * size we have, even if it's below the normal minimum order size.
@@ -201,15 +207,18 @@ async function postOrderClob(
   // Prevents buying extremely low-probability "loser" positions (e.g., 3¢)
   // This is a SAFETY NET that catches orders from any source (ARB, copy trading, etc.)
   // Skip for legitimate hedge operations where buying at low prices is intentional.
+  // Set MIN_BUY_PRICE=0 to uncap and allow buying at any price (for scalping strategies).
+  const effectiveMinBuyPrice = input.minBuyPrice ?? GLOBAL_MIN_BUY_PRICE;
   if (
     side === "BUY" &&
     !input.skipMinBuyPriceCheck &&
-    maxAcceptablePrice !== undefined
+    maxAcceptablePrice !== undefined &&
+    effectiveMinBuyPrice > 0 // Skip check if minBuyPrice is 0 (uncapped)
   ) {
-    if (maxAcceptablePrice < GLOBAL_MIN_BUY_PRICE) {
+    if (maxAcceptablePrice < effectiveMinBuyPrice) {
       logger.warn(
-        `[CLOB] 🚫 Order blocked (LOSER_POSITION): BUY price ${(maxAcceptablePrice * 100).toFixed(1)}¢ < ${(GLOBAL_MIN_BUY_PRICE * 100).toFixed(0)}¢ min. ` +
-          `Positions this cheap are almost certain to lose. Token: ${tokenId.slice(0, 16)}...`,
+        `[CLOB] 🚫 Order blocked (LOSER_POSITION): BUY price ${(maxAcceptablePrice * 100).toFixed(1)}¢ < ${(effectiveMinBuyPrice * 100).toFixed(0)}¢ min. ` +
+          `Positions this cheap are almost certain to lose. Token: ${tokenId.slice(0, 16)}... (Set MIN_BUY_PRICE=0 to uncap)`,
       );
       return {
         status: "skipped",

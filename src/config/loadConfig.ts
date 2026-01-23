@@ -47,6 +47,7 @@ export type MonitorRuntimeConfig = {
   /**
    * Minimum price threshold for BUY orders (0-1 scale where 1 = $1)
    * Prevents buying extremely low-probability "loser" positions.
+   * Set to 0 to uncap and allow buying at any price (for scalping).
    * Default: 0.50 (50¢) - blocks positions like 3¢ which are almost certain to lose.
    */
   minBuyPrice: number;
@@ -60,6 +61,12 @@ export type MonitorRuntimeConfig = {
   orderDuplicatePreventionSeconds: number;
   cloudflareCooldownSeconds: number;
   authCooldownSeconds: number;
+  /**
+   * Low-price threshold for instant profit-taking (0-1 scale)
+   * Positions bought below this price will take ANY profit immediately.
+   * Set to 0 to disable. Example: 0.20 = take any profit on positions bought below 20¢
+   */
+  scalpLowPriceThreshold: number;
   overridesApplied: string[];
   ignoredOverrides: string[];
   unsafeOverridesApplied: string[];
@@ -125,6 +132,7 @@ const MONITOR_OVERRIDE_ALLOWLIST = new Set([
   "CLOUDFLARE_COOLDOWN_SECONDS",
   "CLOB_AUTH_COOLDOWN_SECONDS",
   "TRADE_MODE",
+  "SCALP_LOW_PRICE_THRESHOLD",
 ]);
 
 const LEGACY_MIN_TRADE_KEYS = [
@@ -215,6 +223,7 @@ const MONITOR_LEGACY_DEFAULTS = {
   cloudflareCooldownSeconds: DEFAULT_CONFIG.CLOUDFLARE_COOLDOWN_SECONDS,
   authCooldownSeconds: DEFAULT_CONFIG.CLOB_AUTH_COOLDOWN_SECONDS,
   tradeMode: DEFAULT_CONFIG.TRADE_MODE,
+  scalpLowPriceThreshold: 0, // Set to e.g. 0.20 to take ANY profit on positions bought below 20¢
 };
 
 type EnvParser<T> = (raw: string) => T | undefined;
@@ -391,6 +400,10 @@ const MONITOR_ENV_MAP = {
     parse: parseNumber,
   },
   TRADE_MODE: { key: "tradeMode", parse: parseTradeMode },
+  SCALP_LOW_PRICE_THRESHOLD: {
+    key: "scalpLowPriceThreshold",
+    parse: parseNumber,
+  },
 } as const satisfies Record<
   string,
   { key: keyof MonitorRuntimeConfig; parse: EnvParser<unknown> }
@@ -967,6 +980,7 @@ export function loadMonitorConfig(
       MONITOR_LEGACY_DEFAULTS.cloudflareCooldownSeconds,
     authCooldownSeconds: MONITOR_LEGACY_DEFAULTS.authCooldownSeconds,
     tradeMode: MONITOR_LEGACY_DEFAULTS.tradeMode,
+    scalpLowPriceThreshold: MONITOR_LEGACY_DEFAULTS.scalpLowPriceThreshold,
     overridesApplied: [],
     ignoredOverrides: [],
     unsafeOverridesApplied: [],

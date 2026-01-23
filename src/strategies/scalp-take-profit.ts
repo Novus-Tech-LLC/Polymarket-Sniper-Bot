@@ -120,6 +120,19 @@ export interface ScalpTakeProfitConfig {
    * Default: 10 minutes
    */
   suddenSpikeWindowMinutes: number;
+
+  // === LOW-PRICE VOLATILE SCALPING ===
+  // Special handling for positions bought at very low prices (high volatility)
+  // These positions can move quickly, so we take ANY profit immediately
+
+  /**
+   * Price threshold for "low price" volatile scalping mode
+   * Positions with entry price below this take ANY profit immediately
+   * Set to 0 to disable low-price scalping mode
+   * Default: 0 (disabled) - set via SCALP_LOW_PRICE_THRESHOLD env
+   * Example: 0.20 (20¢) - positions bought below 20¢ take any profit
+   */
+  lowPriceThreshold: number;
 }
 
 /**
@@ -187,6 +200,8 @@ export const DEFAULT_SCALP_TAKE_PROFIT_CONFIG: ScalpTakeProfitConfig = {
   suddenSpikeEnabled: true,
   suddenSpikeThresholdPct: 15.0, // 15% spike in short window = take it
   suddenSpikeWindowMinutes: 10,
+  // Low-price instant profit mode (disabled by default)
+  lowPriceThreshold: 0, // Set via SCALP_LOW_PRICE_THRESHOLD to enable (e.g., 0.20 for 20¢)
 };
 
 /**
@@ -377,6 +392,20 @@ export class ScalpTakeProfitStrategy {
     }
 
     const holdMinutes = (now - entryTime) / (60 * 1000);
+
+    // === LOW-PRICE INSTANT PROFIT MODE ===
+    // For volatile low-price positions, take ANY profit immediately
+    // Set SCALP_LOW_PRICE_THRESHOLD=0.20 to enable for positions bought below 20¢
+    if (
+      this.config.lowPriceThreshold > 0 &&
+      position.entryPrice < this.config.lowPriceThreshold &&
+      position.pnlPct > 0
+    ) {
+      return {
+        shouldExit: true,
+        reason: `⚡ LOW-PRICE INSTANT PROFIT: Entry ${(position.entryPrice * 100).toFixed(1)}¢ < ${(this.config.lowPriceThreshold * 100).toFixed(0)}¢ threshold, taking +${position.pnlPct.toFixed(1)}% profit immediately`,
+      };
+    }
 
     // === CRITICAL SAFEGUARD: Resolution exclusion (checked FIRST) ===
     // Never force exit on positions that are near-certain $1.00 winners!

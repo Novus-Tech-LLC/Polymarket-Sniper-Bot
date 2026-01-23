@@ -194,6 +194,7 @@ export class TradeExecutorService {
         collateralTokenDecimals: env.collateralTokenDecimals,
         priority: true, // Flag for priority execution
         targetGasPrice: signal.targetGasPrice,
+        minBuyPrice: env.minBuyPrice, // Pass through for unified min price control
         logger,
         orderConfig: {
           minOrderUsd: sizing.effectiveMinOrderUsd,
