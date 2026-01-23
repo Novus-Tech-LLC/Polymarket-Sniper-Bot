@@ -79,14 +79,8 @@ export class PositionTracker {
 
     // Fetch historical entry times from activity API on startup
     // This runs synchronously on startup to ensure we have entry times before strategies run
-    try {
-      await this.loadHistoricalEntryTimes();
-    } catch (err) {
-      this.logger.warn(
-        `[PositionTracker] Failed to load historical entry times: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      // Continue without historical data - strategies will be conservative (skip positions without entry time)
-    }
+    // Note: loadHistoricalEntryTimes handles errors internally and does not throw
+    await this.loadHistoricalEntryTimes();
 
     // Start initial refresh in background (non-blocking) to allow trading to start immediately
     // This prevents slow API calls from delaying the entire orchestrator startup
@@ -854,6 +848,17 @@ export class PositionTracker {
       const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
       const walletAddress = resolveSignerAddress(this.client);
 
+      // Validate wallet address - must be a valid Ethereum address (0x + 40 hex chars)
+      // resolveSignerAddress can return "unknown" if wallet is not available
+      const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(walletAddress);
+      if (!isValidAddress) {
+        this.logger.warn(
+          `[PositionTracker] ⚠️ Invalid wallet address "${walletAddress}" - cannot load historical entry times`,
+        );
+        // Don't set historicalEntryTimesLoaded = true, strategies will be conservative
+        return;
+      }
+
       this.logger.info(
         `[PositionTracker] Loading historical entry times from activity API for ${walletAddress.slice(0, 10)}...`,
       );
@@ -912,6 +917,12 @@ export class PositionTracker {
           timestamp = new Date(activity.timestamp).getTime();
         }
 
+        // Skip activities with invalid timestamps (e.g., unparseable -> NaN)
+        // Storing NaN would cause downstream strategies to behave incorrectly
+        if (!Number.isFinite(timestamp)) {
+          continue;
+        }
+
         // Keep the earliest (oldest) BUY timestamp
         const existing = earliestBuyTimes.get(key);
         if (!existing || timestamp < existing) {
@@ -944,9 +955,8 @@ export class PositionTracker {
       this.logger.warn(
         `[PositionTracker] ⚠️ Could not load historical entry times: ${errMsg}`,
       );
-      // Still mark as "loaded" so we don't block forever, but strategies should check entry times
-      this.historicalEntryTimesLoaded = true;
-      throw err; // Re-throw so caller knows it failed
+      // Do not set historicalEntryTimesLoaded = true on error - strategies should remain conservative
+      // Do not re-throw: callers should treat missing historical data as non-fatal
     }
   }
 

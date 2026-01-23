@@ -579,6 +579,52 @@ describe("PositionTracker Historical Entry Times", () => {
       1700000000000,
       "Should convert ISO string to milliseconds",
     );
+
+    // Test invalid string timestamp returns NaN
+    const invalidTimestamp = "not-a-date";
+    const invalidResult = new Date(invalidTimestamp).getTime();
+    assert.ok(Number.isNaN(invalidResult), "Invalid string should produce NaN");
+  });
+
+  test("Timestamp validation - NaN timestamps should be skipped", () => {
+    // Simulates the validation logic that skips NaN timestamps
+    const timestamps = [
+      { value: 1700000000000, valid: true },
+      { value: NaN, valid: false },
+      { value: Infinity, valid: false },
+      { value: -Infinity, valid: false },
+    ];
+
+    for (const { value, valid } of timestamps) {
+      const isValid = Number.isFinite(value);
+      assert.strictEqual(
+        isValid,
+        valid,
+        `Timestamp ${value} should be ${valid ? "valid" : "invalid"}`,
+      );
+    }
+  });
+
+  test("Wallet address validation - rejects invalid addresses", () => {
+    // Simulates the wallet address validation regex
+    const isValidAddress = (addr: string) => /^0x[a-fA-F0-9]{40}$/.test(addr);
+
+    assert.ok(
+      isValidAddress("0x1234567890abcdef1234567890abcdef12345678"),
+      "Valid address should pass",
+    );
+    assert.ok(
+      !isValidAddress("unknown"),
+      "'unknown' should be rejected",
+    );
+    assert.ok(
+      !isValidAddress("0x123"),
+      "Too short address should be rejected",
+    );
+    assert.ok(
+      !isValidAddress("1234567890abcdef1234567890abcdef12345678"),
+      "Address without 0x prefix should be rejected",
+    );
   });
 
   test("Historical entry times parsing - finds earliest BUY for each token", () => {
