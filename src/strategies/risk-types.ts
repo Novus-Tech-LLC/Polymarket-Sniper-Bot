@@ -31,7 +31,6 @@ export type StrategyId =
   | "ARB"
   | "ENDGAME"
   | "QUICK_FLIP"
-  | "AUTO_SELL"
   | "STOP_LOSS"
   | "HEDGE"
   | "SMART_HEDGE"

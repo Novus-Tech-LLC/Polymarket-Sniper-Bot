@@ -1130,9 +1130,6 @@ export type StrategyConfig = {
   quickFlipMinHoldSeconds: number;
   quickFlipMinProfitUsd: number; // Minimum absolute profit in USD per trade
   quickFlipDynamicTargets: boolean; // Enable dynamic profit targets based on entry price
-  autoSellEnabled: boolean;
-  autoSellThreshold: number;
-  autoSellMinHoldSeconds: number;
   endgameSweepEnabled: boolean;
   endgameMinPrice: number;
   endgameMaxPrice: number;
@@ -1258,9 +1255,6 @@ export function loadStrategyConfig(
             .QUICK_FLIP_DYNAMIC_TARGETS
         : undefined) ??
       false, // Default to static targets
-    autoSellEnabled: preset.AUTO_SELL_ENABLED ?? false,
-    autoSellThreshold: preset.AUTO_SELL_THRESHOLD ?? 0.99,
-    autoSellMinHoldSeconds: preset.AUTO_SELL_MIN_HOLD_SECONDS ?? 120,
     endgameSweepEnabled: preset.ENDGAME_SWEEP_ENABLED ?? false,
     endgameMinPrice: preset.ENDGAME_MIN_PRICE ?? 0.98,
     endgameMaxPrice: preset.ENDGAME_MAX_PRICE ?? 0.995,

@@ -171,9 +171,6 @@ export const STRATEGY_PRESETS = {
     QUICK_FLIP_TARGET_PCT: 5,
     QUICK_FLIP_STOP_LOSS_PCT: 3,
     QUICK_FLIP_MIN_HOLD_SECONDS: 30,
-    AUTO_SELL_ENABLED: false,
-    AUTO_SELL_THRESHOLD: 0.99,
-    AUTO_SELL_MIN_HOLD_SECONDS: 120,
     ENDGAME_SWEEP_ENABLED: false,
     ENDGAME_MIN_PRICE: 0.98,
     ENDGAME_MAX_PRICE: 0.995,
@@ -223,14 +220,10 @@ export const STRATEGY_PRESETS = {
     QUICK_FLIP_STOP_LOSS_PCT: 15, // IGNORED - quick flip never sells for loss, smart hedging handles losses
     QUICK_FLIP_MIN_HOLD_SECONDS: 60,
     QUICK_FLIP_MIN_PROFIT_USD: 2.0, // Minimum $2.00 profit per trade
-    // Auto-sell settings
-    AUTO_SELL_ENABLED: true,
-    AUTO_SELL_THRESHOLD: 0.997, // 99.7¢ (only if price improves above endgame purchases)
-    AUTO_SELL_MIN_HOLD_SECONDS: 300, // Hold at least 5 minutes before auto-selling
     // Endgame sweep settings
     ENDGAME_SWEEP_ENABLED: true,
     ENDGAME_MIN_PRICE: 0.985, // 98.5¢
-    ENDGAME_MAX_PRICE: 0.995, // 99.5¢ (auto-sell threshold is higher to avoid conflict)
+    ENDGAME_MAX_PRICE: 0.995, // 99.5¢
     MAX_POSITION_USD: 15, // Conservative position sizing
     // Auto-Redeem settings (claim resolved positions)
     AUTO_REDEEM_ENABLED: true,
@@ -304,14 +297,10 @@ export const STRATEGY_PRESETS = {
     QUICK_FLIP_STOP_LOSS_PCT: 10, // IGNORED - quick flip never sells for loss, smart hedging handles losses
     QUICK_FLIP_MIN_HOLD_SECONDS: 30,
     QUICK_FLIP_MIN_PROFIT_USD: 1.0, // Minimum $1.00 profit per trade
-    // Auto-sell settings
-    AUTO_SELL_ENABLED: true,
-    AUTO_SELL_THRESHOLD: 0.996, // 99.6¢ (above endgame max to avoid conflict)
-    AUTO_SELL_MIN_HOLD_SECONDS: 120, // Hold at least 2 minutes before auto-selling
     // Endgame sweep settings
     ENDGAME_SWEEP_ENABLED: true,
     ENDGAME_MIN_PRICE: 0.985, // 98.5¢ (ensures 1.3% net profit minimum after 0.2% fees)
-    ENDGAME_MAX_PRICE: 0.995, // 99.5¢ (auto-sell threshold is higher)
+    ENDGAME_MAX_PRICE: 0.995, // 99.5¢
     MAX_POSITION_USD: 25, // Balanced position sizing
     // Auto-Redeem settings (claim resolved positions)
     AUTO_REDEEM_ENABLED: true,
@@ -415,11 +404,6 @@ export const STRATEGY_PRESETS = {
     QUICK_FLIP_MIN_PROFIT_USD: 1.0, // Minimum $1.00 profit per trade
     /** Enable dynamic profit targets based on entry price (uses trade-quality module) */
     QUICK_FLIP_DYNAMIC_TARGETS: true,
-
-    // Auto-sell when price reaches high confidence
-    AUTO_SELL_ENABLED: true,
-    AUTO_SELL_THRESHOLD: 0.96, // Lock in gains at 96¢ (tighter than before)
-    AUTO_SELL_MIN_HOLD_SECONDS: 30, // Hold at least 30 seconds before auto-selling
 
     /**
      * ENDGAME SWEEP - OPTIMIZED FOR PROFITABLE SCALPING

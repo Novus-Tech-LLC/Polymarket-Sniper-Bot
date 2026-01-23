@@ -120,6 +120,10 @@ async function main(): Promise<void> {
         minPrice: strategyConfig.endgameMinPrice,
         maxPrice: strategyConfig.endgameMaxPrice,
       },
+      // Pass stop-loss config from preset
+      stopLossConfig: {
+        minHoldSeconds: strategyConfig.stopLossMinHoldSeconds,
+      },
     });
 
     await orchestrator.start();
