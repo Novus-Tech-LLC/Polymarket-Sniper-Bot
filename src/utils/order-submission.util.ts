@@ -123,6 +123,12 @@ export class OrderSubmissionController {
      * Use for hedging, stop-loss, or other critical operations.
      */
     skipDuplicatePrevention?: boolean;
+    /**
+     * Skip the minimum order size check for this order.
+     * Use for liquidations/sells where we need to sell whatever position
+     * size we have, even if it's below the normal minimum.
+     */
+    skipMinOrderSizeCheck?: boolean;
     logger: Logger;
     submit: () => Promise<unknown>;
     now?: number;
@@ -138,6 +144,7 @@ export class OrderSubmissionController {
       side: params.side,
       orderFingerprint: params.orderFingerprint,
       skipDuplicatePrevention: params.skipDuplicatePrevention,
+      skipMinOrderSizeCheck: params.skipMinOrderSizeCheck,
       logger: params.logger,
       now,
       skipRateLimit: params.skipRateLimit,
@@ -295,13 +302,17 @@ export class OrderSubmissionController {
     side?: "BUY" | "SELL";
     orderFingerprint?: string;
     skipDuplicatePrevention?: boolean;
+    skipMinOrderSizeCheck?: boolean;
     logger: Logger;
     now: number;
     skipRateLimit?: boolean;
     signerAddress?: string;
     collateralLabel?: string;
   }): OrderSubmissionResult | null {
-    if (params.sizeUsd < this.settings.minOrderUsd) {
+    if (
+      !params.skipMinOrderSizeCheck &&
+      params.sizeUsd < this.settings.minOrderUsd
+    ) {
       params.logger.info(
         `[CLOB] Order skipped (SKIP_MIN_ORDER_SIZE): size=${params.sizeUsd.toFixed(2)} USD < min=${this.settings.minOrderUsd.toFixed(2)} USD`,
       );

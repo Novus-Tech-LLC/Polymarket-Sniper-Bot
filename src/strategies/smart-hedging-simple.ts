@@ -463,6 +463,7 @@ export class SimpleSmartHedgingStrategy {
         sizeUsd: currentValue,
         logger: this.logger,
         skipDuplicatePrevention: true,
+        skipMinOrderSizeCheck: true, // Allow selling small positions during liquidation
       });
 
       if (result.status === "submitted") {

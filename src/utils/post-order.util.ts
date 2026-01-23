@@ -63,6 +63,13 @@ export type PostOrderInput = {
    * Default: false - always enforce minimum buy price safety
    */
   skipMinBuyPriceCheck?: boolean;
+  /**
+   * Skip the minimum order size check.
+   * Use for liquidations/sells where we need to sell whatever position
+   * size we have, even if it's below the normal minimum order size.
+   * Default: false - enforce minimum order size
+   */
+  skipMinOrderSizeCheck?: boolean;
   logger: Logger;
   orderConfig?: OrderSubmissionConfig;
   now?: number;
@@ -428,6 +435,7 @@ async function postOrderClobInner(
       side, // Pass side for duplicate prevention
       orderFingerprint,
       skipDuplicatePrevention: input.skipDuplicatePrevention,
+      skipMinOrderSizeCheck: input.skipMinOrderSizeCheck,
       logger,
       now: input.now,
       skipRateLimit: retryCount > 0,

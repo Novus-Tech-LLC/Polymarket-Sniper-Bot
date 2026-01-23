@@ -104,6 +104,36 @@ test("tiny orders are skipped before submission", async () => {
   assert.ok(logs.some((line) => line.includes("SKIP_MIN_ORDER_SIZE")));
 });
 
+test("tiny orders are allowed when skipMinOrderSizeCheck is true", async () => {
+  const { logger } = createLogger();
+  const controller = new OrderSubmissionController({
+    minOrderUsd: 10,
+    minIntervalMs: 0,
+    maxPerHour: 100,
+    marketCooldownMs: 0,
+    duplicatePreventionMs: 0,
+    cloudflareCooldownMs: 1000,
+    authCooldownMs: 1000,
+  });
+
+  let submitCalled = false;
+  const result = await controller.submit({
+    sizeUsd: 2.87, // Below minOrderUsd of 10
+    marketId: "market-liquidate",
+    logger,
+    now: 2000,
+    skipMinOrderSizeCheck: true, // Allow small orders for liquidations
+    submit: async () => {
+      submitCalled = true;
+      return { status: 200, order: { id: "liquidation-order-123" } };
+    },
+  });
+
+  assert.equal(result.status, "submitted");
+  assert.ok(submitCalled, "submit should have been called");
+  assert.equal(result.orderId, "liquidation-order-123");
+});
+
 test("401 auth failure triggers cooldown backoff", async () => {
   const { logs, logger } = createLogger();
   const controller = new OrderSubmissionController({
