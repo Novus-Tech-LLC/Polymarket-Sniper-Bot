@@ -61,7 +61,7 @@ export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
   minHedgeUsd: 1,
   allowExceedMax: true,
   absoluteMaxUsd: 25,
-  maxEntryPrice: 0.75, // Hedge positions up to 75¢ entry price (was 60¢)
+  maxEntryPrice: 1.0, // Hedge ALL positions regardless of entry price
   forceLiquidationPct: 50,
   minHoldSeconds: 120, // Wait 2 minutes before hedging - prevents immediate sell after buy
 };
