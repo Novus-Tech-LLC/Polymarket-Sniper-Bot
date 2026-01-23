@@ -446,10 +446,12 @@ export class SmartHedgingStrategy {
       config.maxHedgeUsd = config.absoluteMaxHedgeUsd;
     }
 
+    // Auto-correct minHedgeUsd if it exceeds maxHedgeUsd after the above correction
     if (config.minHedgeUsd > config.maxHedgeUsd) {
-      throw new Error(
-        `SmartHedgingConfig.minHedgeUsd must be <= maxHedgeUsd (${config.maxHedgeUsd}), received ${config.minHedgeUsd}`,
+      this.logger.info(
+        `[SmartHedging] Auto-adjusting minHedgeUsd from $${config.minHedgeUsd} to $${config.maxHedgeUsd} (must be <= maxHedgeUsd)`,
       );
+      config.minHedgeUsd = config.maxHedgeUsd;
     }
 
     if (config.reservePct < 0 || config.reservePct > 100) {

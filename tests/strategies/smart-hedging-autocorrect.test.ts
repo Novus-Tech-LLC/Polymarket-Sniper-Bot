@@ -67,3 +67,33 @@ test("SmartHedgingStrategy does not auto-correct when absoluteMaxHedgeUsd is alr
   const autoAdjustMessage = mockLogger.messages.find(m => m.includes("Auto-adjusting maxHedgeUsd"));
   assert.equal(autoAdjustMessage, undefined, "Should NOT log auto-adjustment message when config is valid");
 });
+
+test("SmartHedgingStrategy auto-corrects minHedgeUsd when it exceeds auto-corrected maxHedgeUsd", () => {
+  const mockLogger = createMockLogger();
+  
+  // Edge case: minHedgeUsd is valid against original maxHedgeUsd but exceeds absoluteMaxHedgeUsd
+  const userConfig = {
+    ...DEFAULT_SMART_HEDGING_CONFIG,
+    minHedgeUsd: 30,  // Valid against original maxHedgeUsd=50
+    maxHedgeUsd: 50,  // From preset
+    absoluteMaxHedgeUsd: 25,  // User's env override - lower than minHedgeUsd!
+  };
+
+  // Should NOT throw - should auto-correct both values
+  const strategy = new SmartHedgingStrategy({
+    client: {} as any,
+    logger: mockLogger as any,
+    positionTracker: mockPositionTracker,
+    config: userConfig,
+  });
+
+  // Verify both values were auto-corrected
+  const maxAdjustMessage = mockLogger.messages.find(m => m.includes("Auto-adjusting maxHedgeUsd"));
+  const minAdjustMessage = mockLogger.messages.find(m => m.includes("Auto-adjusting minHedgeUsd"));
+  
+  assert.ok(maxAdjustMessage, "Should log maxHedgeUsd auto-adjustment message");
+  assert.ok(maxAdjustMessage.includes("from $50 to $25"), "Should show correct maxHedgeUsd values");
+  
+  assert.ok(minAdjustMessage, "Should log minHedgeUsd auto-adjustment message");
+  assert.ok(minAdjustMessage.includes("from $30 to $25"), "Should show correct minHedgeUsd values");
+});
