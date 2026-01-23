@@ -11,6 +11,7 @@
  * All orders MUST pass through RiskManager.evaluate() before execution.
  */
 
+import * as fs from "fs";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type {
   RiskDecision,
@@ -404,7 +405,6 @@ export class RiskManager {
   private isKillSwitchActive(): boolean {
     if (!this.config.killSwitchFile) return false;
     try {
-      const fs = require("fs");
       return fs.existsSync(this.config.killSwitchFile);
     } catch {
       return false;

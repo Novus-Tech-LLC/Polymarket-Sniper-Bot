@@ -412,6 +412,100 @@ export const STRATEGY_PRESETS = {
     FRONTRUN_MAX_SIZE_USD: 200, // Reduced from 500
     MONITOR_REQUIRE_CONFIRMED: false,
   },
+
+  /**
+   * AGGRESSIVE_ENTERPRISE Mode
+   *
+   * Full enterprise-grade trading system with:
+   * - Multi-mode execution (Market-Making + Flow-Following + Inventory Control)
+   * - Portfolio risk engine with exposure limits and circuit breakers
+   * - Post-only where possible, strict slippage bounds
+   * - Deterministic PnL accounting
+   *
+   * This mode enables all enterprise strategies and uses the enterprise
+   * orchestrator for sequential, risk-gated execution.
+   *
+   * Key differences from 'aggressive':
+   * - Centralized risk management (RiskManager gates all orders)
+   * - Market selection filter (only trade liquid, tight-spread markets)
+   * - Sequential execution (prevents stack issues and race conditions)
+   * - Circuit breakers (consecutive rejects, API health, drawdown)
+   */
+  aggressive_enterprise: {
+    STRATEGY_ENABLED: true,
+    ARB_ENABLED: true,
+    MONITOR_ENABLED: true,
+
+    // === RISK LIMITS ===
+    // These are enforced by the enterprise RiskManager
+    MAX_EXPOSURE_USD: 2000, // Total portfolio exposure
+    MAX_EXPOSURE_PER_MARKET_USD: 200, // Per-market limit
+    MAX_DRAWDOWN_PCT: 25, // Circuit breaker triggers at 25% drawdown
+
+    // === QUICK FLIP (Scalping) ===
+    QUICK_FLIP_ENABLED: true,
+    QUICK_FLIP_TARGET_PCT: 10,
+    QUICK_FLIP_STOP_LOSS_PCT: 5,
+    QUICK_FLIP_MIN_HOLD_SECONDS: 0,
+    QUICK_FLIP_MIN_PROFIT_USD: 1.0,
+    QUICK_FLIP_DYNAMIC_TARGETS: true,
+
+    // === AUTO-SELL ===
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.96,
+    AUTO_SELL_MIN_HOLD_SECONDS: 0,
+
+    // === ENDGAME SWEEP ===
+    ENDGAME_SWEEP_ENABLED: true,
+    ENDGAME_MIN_PRICE: 0.85,
+    ENDGAME_MAX_PRICE: 0.94,
+    MAX_POSITION_USD: 100, // Per-position limit (also enforced by RiskManager)
+
+    // === AUTO-REDEEM ===
+    AUTO_REDEEM_ENABLED: true,
+    AUTO_REDEEM_MIN_POSITION_USD: 0.01,
+
+    // === SMART HEDGING ===
+    SMART_HEDGING_ENABLED: true,
+    SMART_HEDGING_TRIGGER_LOSS_PCT: 20,
+    SMART_HEDGING_MAX_HEDGE_USD: 50,
+    SMART_HEDGING_RESERVE_PCT: 15,
+
+    // === RATE LIMITS ===
+    ORDER_SUBMIT_MAX_PER_HOUR: 100000,
+    ORDER_SUBMIT_MIN_INTERVAL_MS: 10,
+    ORDER_SUBMIT_MARKET_COOLDOWN_SECONDS: 0,
+
+    // === ARBITRAGE ===
+    ARB_SCAN_INTERVAL_MS: 100,
+    ARB_MIN_EDGE_BPS: 200,
+    ARB_MIN_PROFIT_USD: 1.0,
+    ARB_MAX_SPREAD_BPS: 500,
+    ARB_FEE_BPS: 1,
+    ARB_SLIPPAGE_BPS: 20,
+    ARB_TRADE_BASE_USD: 15,
+    ARB_MAX_POSITION_USD: 100,
+    ARB_MAX_WALLET_EXPOSURE_USD: 2000,
+    ARB_MAX_TRADES_PER_HOUR: 50000,
+    ARB_MARKET_COOLDOWN_SECONDS: 1,
+    ARB_MAX_CONSECUTIVE_FAILURES: 10,
+    ARB_MAX_CONCURRENT_TRADES: 15,
+    ARB_STARTUP_COOLDOWN_SECONDS: 0,
+
+    // === MONITOR ===
+    FETCH_INTERVAL: 1,
+    MIN_TRADE_SIZE_USD: 5,
+    MIN_ORDER_USD: 1,
+    FRONTRUN_MAX_SIZE_USD: 200,
+    MONITOR_REQUIRE_CONFIRMED: false,
+
+    // === ENTERPRISE FLAGS ===
+    // Enable enterprise orchestrator with sequential execution
+    ENTERPRISE_MODE: "aggressive",
+    ENTERPRISE_ENABLE_MM: true, // Market Making strategy
+    ENTERPRISE_ENABLE_FF: true, // Flow Following strategy
+    ENTERPRISE_ENABLE_ICC: true, // Inventory & Correlation Controller
+  },
 } as const;
 
 export type ArbPresetName = keyof typeof ARB_PRESETS;

@@ -138,13 +138,13 @@ export class MarketSelector {
   }
 
   /**
-   * Check if a specific market is eligible
+   * Check if a specific token is eligible for trading
    */
   async isMarketEligible(
-    marketId: string,
+    tokenId: string,
   ): Promise<{ eligible: boolean; reason?: string }> {
     try {
-      const market = await this.getMarketData(marketId);
+      const market = await this.getMarketData(tokenId);
       if (!market) {
         return { eligible: false, reason: "MARKET_NOT_FOUND" };
       }
@@ -158,21 +158,21 @@ export class MarketSelector {
   }
 
   /**
-   * Get market data for a specific market
+   * Get market data for a specific market/token
+   * Note: In Polymarket, tokenId is the unique identifier for an outcome position.
+   * The caller should provide the correct tokenId.
    */
-  async getMarketData(marketId: string): Promise<MarketData | null> {
+  async getMarketData(tokenId: string): Promise<MarketData | null> {
     // Check cache first
-    const cached = this.marketCache.get(marketId);
+    const cached = this.marketCache.get(tokenId);
     const cacheAge = (Date.now() - this.lastCacheUpdate) / 1000;
     if (cached && cacheAge < this.config.cacheTtlSeconds) {
       return cached;
     }
 
     try {
-      // Fetch fresh data
-      // Note: This is a simplified implementation
-      // Real implementation would fetch from Gamma API and CLOB
-      const orderbook = await this.client.getOrderBook(marketId);
+      // Fetch fresh data using tokenId (the CLOB orderbook uses tokenId)
+      const orderbook = await this.client.getOrderBook(tokenId);
 
       if (!orderbook) return null;
 
@@ -190,9 +190,14 @@ export class MarketSelector {
       const midPrice = (bestBid + bestAsk) / 2;
       const spreadBps = midPrice > 0 ? (spread / midPrice) * 100 : 0;
 
+      // Extract marketId from orderbook if available, otherwise derive from context
+      // In real usage, the caller should know the marketId
+      const marketId =
+        (orderbook as { market_id?: string }).market_id ?? tokenId;
+
       const market: MarketData = {
         marketId,
-        tokenId: marketId, // May differ in real implementation
+        tokenId, // Use the provided tokenId
         question: "",
         midPrice,
         bestBid,
@@ -205,11 +210,11 @@ export class MarketSelector {
         isHealthy: bestBid > 0 && bestAsk < 1 && spread < 50, // Basic sanity check
       };
 
-      this.marketCache.set(marketId, market);
+      this.marketCache.set(tokenId, market);
       return market;
     } catch (err) {
       this.logger.debug(
-        `[MarketSelector] Error fetching market ${marketId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[MarketSelector] Error fetching market ${tokenId}: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
     }

@@ -320,6 +320,7 @@ export class EnterpriseOrchestrator {
             strategyId: "MM",
             marketId: market.marketId,
             tokenId: market.tokenId,
+            outcome: "YES", // MM typically trades YES tokens
             side: "BUY",
             size: opportunity.size,
             price: opportunity.bidPrice,

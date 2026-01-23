@@ -250,7 +250,7 @@ export class ExecutionEngine {
         client: this.client,
         tokenId: request.tokenId,
         marketId: request.marketId,
-        outcome: "YES", // Default; real impl would determine from context
+        outcome: request.outcome, // Use outcome from request (YES or NO)
         side: request.side,
         sizeUsd: request.sizeUsd,
         maxAcceptablePrice: request.price,

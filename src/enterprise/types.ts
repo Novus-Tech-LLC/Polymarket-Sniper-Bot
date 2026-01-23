@@ -26,6 +26,7 @@ export type StrategyId =
 
 export type OrderSide = "BUY" | "SELL";
 export type OrderType = "LIMIT" | "POST_ONLY" | "IOC" | "FOK" | "MARKET";
+export type OrderOutcome = "YES" | "NO";
 
 export interface RiskDecision {
   approved: boolean;
@@ -38,6 +39,7 @@ export interface OrderRequest {
   strategyId: StrategyId;
   marketId: string;
   tokenId: string;
+  outcome: OrderOutcome; // YES or NO outcome
   side: OrderSide;
   size: number;
   price: number;
