@@ -947,7 +947,7 @@ export class SmartHedgingStrategy {
         const bVolume = this.volumeCache.get(b.tokenId);
         const aDecline = aVolume?.volumeChangePercent ?? 0;
         const bDecline = bVolume?.volumeChangePercent ?? 0;
-        
+
         // Score: LOWER profit = sell first, declining volume = sell first
         // We want to keep highly profitable positions, so sell least profitable first
         const aScore = a.pnlPct - (aDecline < 0 ? Math.abs(aDecline) * 0.5 : 0);

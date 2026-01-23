@@ -21,6 +21,7 @@ import {
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
 import { StrategyOrchestrator } from "../strategies/orchestrator";
+import { DEFAULT_SMART_HEDGING_CONFIG } from "../strategies/smart-hedging";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 
 async function main(): Promise<void> {
@@ -120,6 +121,9 @@ async function main(): Promise<void> {
         checkIntervalMs: strategyConfig.autoRedeemCheckIntervalMs,
       },
       smartHedgingConfig: {
+        // Start with defaults to avoid drift if DEFAULT_SMART_HEDGING_CONFIG changes
+        ...DEFAULT_SMART_HEDGING_CONFIG,
+        // Override with env/preset-driven fields
         enabled: strategyConfig.smartHedgingEnabled,
         triggerLossPct: strategyConfig.smartHedgingTriggerLossPct,
         maxHedgeUsd: strategyConfig.smartHedgingMaxHedgeUsd,
@@ -127,18 +131,8 @@ async function main(): Promise<void> {
         allowExceedMaxForProtection: strategyConfig.smartHedgingAllowExceedMax,
         absoluteMaxHedgeUsd: strategyConfig.smartHedgingAbsoluteMaxUsd,
         emergencyLossThresholdPct: strategyConfig.smartHedgingEmergencyLossPct,
-        // Use defaults for advanced timing/reserve settings not exposed as env vars
-        maxEntryPriceForHedging: 0.6, // Only hedge risky tier (<60¢ entry)
-        minOpposingSidePrice: 0.5,
-        minHoldBeforeHedgeSeconds: 120,
-        maxTotalSpread: 1.05,
-        minConsecutiveDrops: 2,
-        volumeSurgeThresholdPct: 50,
-        optimalOpposingPriceMin: 0.55,
-        optimalOpposingPriceMax: 0.75,
-        reserveSellMinProfitPct: 0, // Sell ANY profitable position for reserves (user expectation)
-        criticalReserveThresholdPct: 50,
-        volumeDeclineThresholdPct: 30,
+        // Sell positions with minimal positive profit for reserves (avoid break-even)
+        reserveSellMinProfitPct: 0.01,
       },
     });
 
