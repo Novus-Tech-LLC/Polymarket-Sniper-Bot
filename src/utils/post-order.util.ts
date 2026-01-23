@@ -290,6 +290,8 @@ async function postOrderClobInner(
     orderSubmitMaxPerHour: input.orderConfig?.orderSubmitMaxPerHour,
     orderSubmitMarketCooldownSeconds:
       input.orderConfig?.orderSubmitMarketCooldownSeconds,
+    orderDuplicatePreventionSeconds:
+      input.orderConfig?.orderDuplicatePreventionSeconds,
     cloudflareCooldownSeconds: input.orderConfig?.cloudflareCooldownSeconds,
     authCooldownSeconds: input.orderConfig?.authCooldownSeconds,
   });

@@ -33,6 +33,7 @@ export class PositionTracker {
   private logger: ConsoleLogger;
   private positions: Map<string, Position> = new Map();
   private positionEntryTimes: Map<string, number> = new Map(); // Track when positions first appeared
+  private positionLastSeen: Map<string, number> = new Map(); // Track when positions were last seen
   private refreshIntervalMs: number;
   private refreshTimer?: NodeJS.Timeout;
   private isRefreshing: boolean = false; // Prevent concurrent refreshes
@@ -148,6 +149,7 @@ export class PositionTracker {
       for (const position of positions) {
         const key = `${position.marketId}-${position.tokenId}`;
         newPositions.set(key, position);
+        this.positionLastSeen.set(key, now);
 
         // Preserve entry time if position already existed
         if (!this.positionEntryTimes.has(key)) {
@@ -158,9 +160,23 @@ export class PositionTracker {
       // Replace positions map atomically to avoid race conditions
       this.positions = newPositions;
 
+      // Clean up stale entry times for positions that have disappeared.
+      // Use a grace window to avoid clearing on transient API glitches.
+      const staleThresholdMs = this.refreshIntervalMs * 2;
+      for (const [key, lastSeen] of this.positionLastSeen.entries()) {
+        if (newPositions.has(key)) {
+          continue;
+        }
+        if (now - lastSeen > staleThresholdMs) {
+          this.positionLastSeen.delete(key);
+          this.positionEntryTimes.delete(key);
+        }
+      }
+
       // Note: Positions that temporarily disappear are handled by keeping their
-      // entry times in positionEntryTimes Map. This provides resilience against
-      // temporary API glitches. Cleanup happens in strategies that use this tracker.
+      // entry times in positionEntryTimes Map for a short grace window. This
+      // provides resilience against temporary API glitches without treating
+      // re-buys as long-held positions.
       // Note: Removed redundant "Refreshed X positions" log - the summary log in fetchPositionsFromAPI provides this info
     } catch (err) {
       this.logger.error(
