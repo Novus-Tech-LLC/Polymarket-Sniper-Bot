@@ -65,6 +65,12 @@ export class PositionTracker {
   // API timeout constant for external API calls
   private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
 
+  // Pagination settings for loading historical trade data from wallet
+  // PAGE_LIMIT: Maximum trades per API request (API max is 500)
+  // MAX_PAGES: Safety limit to prevent infinite loops (500 * 20 = 10,000 trades max)
+  private static readonly TRADES_PAGE_LIMIT = 500;
+  private static readonly TRADES_MAX_PAGES = 20;
+
   // Threshold for determining market winner from outcomePrices
   // Price > 0.5 indicates the likely winner in resolved markets
   private static readonly WINNER_THRESHOLD = 0.5;
@@ -1010,20 +1016,16 @@ export class PositionTracker {
       // Key: "marketId-tokenId", Value: earliest BUY timestamp in ms
       const earliestBuyTimes = new Map<string, number>();
       let totalTrades = 0;
-
-      // Pagination settings
-      const PAGE_LIMIT = 500; // Maximum allowed by the API
-      const MAX_PAGES = 20; // Safety limit to prevent infinite loops (500 * 20 = 10,000 trades max)
       let offset = 0;
       let pageCount = 0;
 
       // Paginate through all BUY trades from the wallet
-      while (pageCount < MAX_PAGES) {
+      while (pageCount < PositionTracker.TRADES_MAX_PAGES) {
         pageCount++;
 
         // Build URL with side=BUY filter and pagination
-        // This fetches only BUY trades from your wallet's history
-        const tradesUrl = `${POLYMARKET_API.TRADES_ENDPOINT(walletAddress)}&side=BUY&limit=${PAGE_LIMIT}&offset=${offset}`;
+        // TRADES_ENDPOINT already includes ?user=, so we use & for additional params
+        const tradesUrl = `${POLYMARKET_API.TRADES_ENDPOINT(walletAddress)}&side=BUY&limit=${PositionTracker.TRADES_PAGE_LIMIT}&offset=${offset}`;
 
         const trades = await httpGet<TradeItem[]>(
           tradesUrl,
@@ -1066,12 +1068,12 @@ export class PositionTracker {
         }
 
         // If we got fewer results than requested, we've reached the end
-        if (trades.length < PAGE_LIMIT) {
+        if (trades.length < PositionTracker.TRADES_PAGE_LIMIT) {
           break;
         }
 
         // Move to next page
-        offset += PAGE_LIMIT;
+        offset += PositionTracker.TRADES_PAGE_LIMIT;
       }
 
       if (totalTrades === 0) {
