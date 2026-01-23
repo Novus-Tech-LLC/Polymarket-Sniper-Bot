@@ -42,6 +42,154 @@ const approvalForAllCache = new Map<
   { approved: boolean; fetchedAt: number }
 >();
 
+// Deduplication for balance/allowance check failure warnings
+const BALANCE_CHECK_WARN_DEDUP_WINDOW_MS = 5_000;
+const balanceCheckWarnDedup = new Map<
+  string,
+  { lastLogged: number; count: number }
+>();
+
+/**
+ * In-flight buy order tracking to prevent order stacking.
+ * Tracks pending balance/allowance checks and order submissions.
+ * Key format: `${tokenId}:BUY` - we only track BUYs since those stack losses.
+ */
+const IN_FLIGHT_COOLDOWN_MS = 10_000; // 10 second cooldown between buys on same token
+const STALE_IN_FLIGHT_TIMEOUT_MS = 60_000; // 60s timeout for stale in-flight entries
+const inFlightBuys = new Map<
+  string,
+  { startedAt: number; completedAt?: number }
+>();
+
+/**
+ * Check if a buy order on this token is already in-flight or in cooldown.
+ * Returns true if order should be blocked, false if it can proceed.
+ */
+export const isInFlightOrCooldown = (
+  tokenId: string,
+  side: "BUY" | "SELL",
+  nowOverride?: number,
+): { blocked: boolean; reason?: string; remainingMs?: number } => {
+  // Only track BUY orders - SELL doesn't stack losses
+  if (side !== "BUY") {
+    return { blocked: false };
+  }
+
+  const key = `${tokenId}:BUY`;
+  const entry = inFlightBuys.get(key);
+  const now = nowOverride ?? Date.now();
+
+  if (!entry) {
+    return { blocked: false };
+  }
+
+  // Check if still in-flight (no completion time)
+  if (!entry.completedAt) {
+    const elapsed = now - entry.startedAt;
+    // If it's been more than the stale timeout without completion, assume it's stale
+    if (elapsed > STALE_IN_FLIGHT_TIMEOUT_MS) {
+      inFlightBuys.delete(key);
+      return { blocked: false };
+    }
+    // For in-flight buys, there is no defined "remaining time" until a new buy is allowed.
+    // The only timer here is the stale timeout, after which this entry is discarded.
+    return {
+      blocked: true,
+      reason: "IN_FLIGHT_BUY",
+    };
+  }
+
+  // Check cooldown after completion
+  const timeSinceCompletion = now - entry.completedAt;
+  if (timeSinceCompletion < IN_FLIGHT_COOLDOWN_MS) {
+    return {
+      blocked: true,
+      reason: "BUY_COOLDOWN",
+      remainingMs: IN_FLIGHT_COOLDOWN_MS - timeSinceCompletion,
+    };
+  }
+
+  // Cooldown expired, clean up
+  inFlightBuys.delete(key);
+  return { blocked: false };
+};
+
+/**
+ * Mark a buy order as in-flight (starting).
+ * Returns true if successfully marked, false if another buy is already in-flight
+ * (prevents race condition where two threads both pass the check before either marks).
+ */
+export const markBuyInFlight = (tokenId: string): boolean => {
+  const key = `${tokenId}:BUY`;
+  const existing = inFlightBuys.get(key);
+  const now = Date.now();
+
+  // If there's an existing in-flight entry that is not stale yet, do not overwrite it
+  if (existing && !existing.completedAt) {
+    const elapsed = now - existing.startedAt;
+    if (elapsed <= STALE_IN_FLIGHT_TIMEOUT_MS) {
+      return false; // Another buy is already in-flight
+    }
+  }
+
+  inFlightBuys.set(key, { startedAt: now });
+  return true;
+};
+
+/**
+ * Mark a buy order as completed (success or failure).
+ */
+export const markBuyCompleted = (tokenId: string): void => {
+  const key = `${tokenId}:BUY`;
+  const entry = inFlightBuys.get(key);
+  if (entry) {
+    entry.completedAt = Date.now();
+  }
+};
+
+/**
+ * Reset in-flight buy tracking state (for testing).
+ */
+export const resetInFlightBuys = (): void => {
+  inFlightBuys.clear();
+};
+
+/**
+ * Reset log deduplication state (for testing).
+ */
+export const resetBalanceCheckWarnDedup = (): void => {
+  balanceCheckWarnDedup.clear();
+};
+
+/**
+ * Deduplicated warning logger for balance/allowance check failures.
+ * Prevents log spam when multiple concurrent checks fail.
+ */
+const logBalanceCheckWarn = (
+  logger: Logger,
+  signerAddress: string,
+  message: string,
+): void => {
+  const now = Date.now();
+  const key = `${signerAddress}:balance-check`;
+  const entry = balanceCheckWarnDedup.get(key);
+
+  if (entry && now - entry.lastLogged < BALANCE_CHECK_WARN_DEDUP_WINDOW_MS) {
+    // Suppress - within dedup window
+    entry.count++;
+    return;
+  }
+
+  // Log full message, include suppressed count if any
+  if (entry && entry.count > 0) {
+    logger.warn(`${message} (suppressed ${entry.count} similar warnings)`);
+    balanceCheckWarnDedup.set(key, { lastLogged: now, count: 0 });
+  } else {
+    logger.warn(message);
+    balanceCheckWarnDedup.set(key, { lastLogged: now, count: 0 });
+  }
+};
+
 export type FundsAllowanceParams = {
   client: ClobClient;
   sizeUsd: number;
@@ -672,7 +820,10 @@ export const checkFundsAndAllowance = async (
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    params.logger.warn(
+    // Use deduplicated warning to prevent log spam during concurrent failures
+    logBalanceCheckWarn(
+      params.logger,
+      signerAddress,
       `[CLOB] Balance/allowance check failed (BALANCE_ALLOWANCE_UNAVAILABLE): required=${formatUsd(requiredUsd)} signer=${signerAddress} collateral=${collateralLabel} error=${message}`,
     );
     try {
@@ -708,7 +859,12 @@ export const checkFundsAndAllowance = async (
         fallbackError instanceof Error
           ? fallbackError.message
           : String(fallbackError);
-      params.logger.warn(`[CLOB] Onchain fallback failed: ${fallbackMessage}`);
+      // Use deduplicated warning for fallback failures too
+      logBalanceCheckWarn(
+        params.logger,
+        signerAddress,
+        `[CLOB] Onchain fallback failed: ${fallbackMessage}`,
+      );
       return {
         ok: true,
         requiredUsd,

@@ -138,7 +138,13 @@ export class OrderSubmissionController {
       return preflight;
     }
 
-    this.recordAttempt(now, params.marketId, params.tokenId, params.side, params.orderFingerprint);
+    this.recordAttempt(
+      now,
+      params.marketId,
+      params.tokenId,
+      params.side,
+      params.orderFingerprint,
+    );
 
     try {
       const response = await params.submit();
@@ -324,7 +330,8 @@ export class OrderSubmissionController {
         return {
           status: "skipped",
           reason: "DUPLICATE_ORDER_PREVENTION",
-          blockedUntil: lastTokenSideSubmit + this.settings.duplicatePreventionMs,
+          blockedUntil:
+            lastTokenSideSubmit + this.settings.duplicatePreventionMs,
         };
       }
     }
