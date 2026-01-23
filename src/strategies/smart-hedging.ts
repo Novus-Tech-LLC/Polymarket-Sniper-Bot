@@ -902,10 +902,15 @@ export class SmartHedgingStrategy {
     }
 
     // Calculate estimated funds needed for hedging
+    // Use absoluteMaxHedgeUsd when allowExceedMaxForProtection is enabled,
+    // otherwise use the standard maxHedgeUsd limit
+    const effectiveMaxHedge = this.config.allowExceedMaxForProtection
+      ? this.config.absoluteMaxHedgeUsd
+      : this.config.maxHedgeUsd;
     const estimatedHedgeFundsNeeded = potentialHedgePositions.reduce((sum, pos) => {
       const positionValue = pos.size * pos.entryPrice;
-      // Estimate hedge cost as position value (worst case)
-      return sum + Math.min(positionValue, this.config.maxHedgeUsd);
+      // Estimate hedge cost as position value (worst case), capped at effective max
+      return sum + Math.min(positionValue, effectiveMaxHedge);
     }, 0);
 
     // Dynamic threshold: lower the min profit requirement when facing severe losses

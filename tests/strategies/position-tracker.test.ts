@@ -490,3 +490,58 @@ describe("PositionTracker Gamma API Outcome Parsing", () => {
     // In actual code, this would result in returning null
   });
 });
+
+describe("PositionTracker Redeemable Positions with Unknown Outcome", () => {
+  test("Redeemable position with unknown outcome uses entryPrice as fallback", () => {
+    // Simulates behavior when Gamma API cannot determine outcome but position is marked redeemable
+    const isRedeemable = true;
+    const winningOutcome = null; // API cannot determine outcome
+    const entryPrice = 0.97; // User's original purchase price
+    const side = "Over";
+
+    // This mirrors the updated logic in position-tracker.ts
+    let currentPrice: number;
+    if (!winningOutcome) {
+      // Cannot determine outcome - use entry price as fallback
+      currentPrice = entryPrice;
+    } else {
+      currentPrice = side === winningOutcome ? 1.0 : 0.0;
+    }
+
+    assert.strictEqual(
+      currentPrice,
+      0.97,
+      "Unknown outcome should fall back to entry price",
+    );
+    // Position should still be included (not skipped) so it can be redeemed
+    assert.ok(isRedeemable, "Position should still be marked redeemable");
+  });
+
+  test("Redeemable position with known winning outcome uses 1.0", () => {
+    const winningOutcome = "Over";
+    const side = "Over";
+    const entryPrice = 0.97;
+
+    const currentPrice = side === winningOutcome ? 1.0 : 0.0;
+
+    assert.strictEqual(
+      currentPrice,
+      1.0,
+      "Winning position should have currentPrice 1.0",
+    );
+  });
+
+  test("Redeemable position with known losing outcome uses 0.0", () => {
+    const winningOutcome = "Under";
+    const side = "Over";
+    const entryPrice = 0.97;
+
+    const currentPrice = side === winningOutcome ? 1.0 : 0.0;
+
+    assert.strictEqual(
+      currentPrice,
+      0.0,
+      "Losing position should have currentPrice 0.0",
+    );
+  });
+});

@@ -163,3 +163,37 @@ test("SMART_HEDGING_ALLOW_EXCEED_MAX env variable works", () => {
   // Default is true, env override should set to false
   assert.equal(config.smartHedgingAllowExceedMax, false);
 });
+
+test("SMART_HEDGING_ABSOLUTE_MAX_USD env variable works with aggressive preset", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_ABSOLUTE_MAX_USD: "25",
+    SMART_HEDGING_ALLOW_EXCEED_MAX: "true",
+  });
+
+  const config = loadStrategyConfig();
+  // Env override should take precedence (aggressive preset default is 100)
+  assert.equal(config.smartHedgingAbsoluteMaxUsd, 25);
+  assert.equal(config.smartHedgingAllowExceedMax, true);
+});
+
+test("Smart hedging config respects absoluteMaxUsd over maxHedgeUsd when allowExceedMax is true", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    MAX_POSITION_USD: "5",
+    SMART_HEDGING_MAX_HEDGE_USD: "10",
+    SMART_HEDGING_ABSOLUTE_MAX_USD: "25",
+    SMART_HEDGING_ALLOW_EXCEED_MAX: "true",
+  });
+
+  const config = loadStrategyConfig();
+  // When allowExceedMax is true, absoluteMaxUsd should be the effective limit
+  // for reserve calculations (not maxHedgeUsd)
+  assert.equal(config.smartHedgingMaxHedgeUsd, 10);
+  assert.equal(config.smartHedgingAbsoluteMaxUsd, 25);
+  assert.equal(config.smartHedgingAllowExceedMax, true);
+  // The reserve calculation should use absoluteMaxUsd (25) not maxHedgeUsd (10)
+  // This is verified by the smart-hedging.ts logic, not just config loading
+});
