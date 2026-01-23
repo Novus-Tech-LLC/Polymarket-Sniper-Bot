@@ -39,11 +39,19 @@ export interface SimpleSmartHedgingConfig {
   /** Absolute max even when exceeding (default: from SMART_HEDGING_ABSOLUTE_MAX_USD) */
   absoluteMaxUsd: number;
 
-  /** Max entry price for hedging - only hedge risky positions (default: 0.6 = 60¢) */
+  /** Max entry price for hedging - only hedge risky positions (default: 0.75 = 75¢) */
   maxEntryPrice: number;
 
   /** Loss % to force liquidation instead of hedge (default: 50) */
   forceLiquidationPct: number;
+
+  /**
+   * Minimum seconds to hold before hedging/liquidating (default: 120)
+   * CRITICAL: Prevents immediate sell after buying due to bid-ask spread.
+   * Without this, a position bought at 65¢ might immediately show a "loss"
+   * due to the spread between bid/ask and trigger an unwanted hedge/liquidation.
+   */
+  minHoldSeconds: number;
 }
 
 export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
@@ -53,8 +61,9 @@ export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
   minHedgeUsd: 1,
   allowExceedMax: true,
   absoluteMaxUsd: 25,
-  maxEntryPrice: 0.6,
+  maxEntryPrice: 0.75, // Hedge positions up to 75¢ entry price (was 60¢)
   forceLiquidationPct: 50,
+  minHoldSeconds: 120, // Wait 2 minutes before hedging - prevents immediate sell after buy
 };
 
 /**
@@ -96,6 +105,7 @@ export class SimpleSmartHedgingStrategy {
 
     const positions = this.positionTracker.getPositions();
     let actionsCount = 0;
+    const now = Date.now();
 
     for (const position of positions) {
       const key = `${position.marketId}-${position.tokenId}`;
@@ -124,6 +134,22 @@ export class SimpleSmartHedgingStrategy {
       // Skip resolved positions
       if (position.redeemable) {
         continue;
+      }
+
+      // CRITICAL: Check minimum hold time before ANY action (hedge or sell)
+      // This prevents immediate sell/hedge after buying due to bid-ask spread
+      const entryTime = this.positionTracker.getPositionEntryTime(
+        position.marketId,
+        position.tokenId,
+      );
+      if (entryTime) {
+        const holdSeconds = (now - entryTime) / 1000;
+        if (holdSeconds < this.config.minHoldSeconds) {
+          this.logger.debug(
+            `[SimpleHedging] ⏳ Position losing ${Math.abs(position.pnlPct).toFixed(1)}% but held only ${holdSeconds.toFixed(0)}s (need ${this.config.minHoldSeconds}s) - waiting`,
+          );
+          continue;
+        }
       }
 
       const lossPct = Math.abs(position.pnlPct);
