@@ -217,10 +217,10 @@ export const STRATEGY_PRESETS = {
     ENTERPRISE_ENABLE_ICC: true, // Inventory & Correlation Controller
 
     // Quick Flip settings - aim for substantial profits to justify trades
-    // Don't trade unless you're making real money
+    // NOTE: Quick-flip ONLY sells for PROFIT - never for a loss (verified at bid price)
     QUICK_FLIP_ENABLED: true,
     QUICK_FLIP_TARGET_PCT: 30, // 30% target - $3 profit on $10 positions
-    QUICK_FLIP_STOP_LOSS_PCT: 15, // 15% stop loss (2:1 reward/risk)
+    QUICK_FLIP_STOP_LOSS_PCT: 15, // IGNORED - quick flip never sells for loss, smart hedging handles losses
     QUICK_FLIP_MIN_HOLD_SECONDS: 60,
     QUICK_FLIP_MIN_PROFIT_USD: 2.0, // Minimum $2.00 profit per trade
     // Auto-sell settings
@@ -298,10 +298,10 @@ export const STRATEGY_PRESETS = {
     ENTERPRISE_ENABLE_ICC: true, // Inventory & Correlation Controller
 
     // Quick Flip settings - aim for substantial profits
-    // Every trade should be worth your time
+    // NOTE: Quick-flip ONLY sells for PROFIT - never for a loss (verified at bid price)
     QUICK_FLIP_ENABLED: true,
     QUICK_FLIP_TARGET_PCT: 20, // 20% gain target - $2 profit on $10 positions
-    QUICK_FLIP_STOP_LOSS_PCT: 10, // 10% stop loss (2:1 reward/risk)
+    QUICK_FLIP_STOP_LOSS_PCT: 10, // IGNORED - quick flip never sells for loss, smart hedging handles losses
     QUICK_FLIP_MIN_HOLD_SECONDS: 30,
     QUICK_FLIP_MIN_PROFIT_USD: 1.0, // Minimum $1.00 profit per trade
     // Auto-sell settings
@@ -406,13 +406,11 @@ export const STRATEGY_PRESETS = {
      * Target: $1+ profit per trade on $5-10 positions (10-20% return)
      */
 
-    // Quick Flip - DYNAMIC SCALPING
-    // Higher entry price = lower target needed (more certain)
-    // Lower entry price = hold for resolution or larger move
-    // NOTE: Quick-flip ONLY sells for PROFIT - stop-losses are handled by Smart Hedging
+    // Quick Flip - PROFIT TAKING
+    // NOTE: Quick-flip ONLY sells for PROFIT - never for a loss (verified at bid price)
     QUICK_FLIP_ENABLED: true,
     QUICK_FLIP_TARGET_PCT: 10, // Base 10% target - adjusted dynamically based on entry
-    QUICK_FLIP_STOP_LOSS_PCT: 50, // IGNORED - quick-flip no longer does stop-loss (see smart-hedging)
+    QUICK_FLIP_STOP_LOSS_PCT: 50, // IGNORED - quick-flip NEVER sells for loss (smart-hedging handles losses)
     QUICK_FLIP_MIN_HOLD_SECONDS: 60, // Hold at least 60 seconds - let the position breathe!
     QUICK_FLIP_MIN_PROFIT_USD: 1.0, // Minimum $1.00 profit per trade
     /** Enable dynamic profit targets based on entry price (uses trade-quality module) */

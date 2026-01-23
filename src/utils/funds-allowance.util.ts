@@ -69,6 +69,70 @@ const inFlightBuys = new Map<
 >();
 
 /**
+ * Market-level cooldown to prevent stacked buys on the SAME MARKET.
+ * This prevents buying multiple outcomes (YES/NO) of the same market in rapid succession.
+ * Key format: `${marketId}` (marketId-only key)
+ * 
+ * CRITICAL FIX: The token-level cooldown wasn't enough because different outcomes
+ * of the same market have different tokenIds, allowing stacked buys like:
+ * - Buy Bucks YES at 65¢
+ * - Buy Bucks YES at 66¢ (different signal, same market)
+ * 
+ * Market cooldown is 180 seconds (3 minutes) to prevent rapid-fire on same market.
+ */
+const MARKET_COOLDOWN_MS = 180_000; // 3 minute market-level cooldown
+const marketBuyCooldowns = new Map<string, number>(); // marketId -> lastBuyCompletedAt
+
+/**
+ * Check if a buy order on this market is in cooldown.
+ * Used to prevent buying the same market multiple times in quick succession.
+ */
+export const isMarketInCooldown = (
+  marketId: string | undefined,
+  nowOverride?: number,
+): { blocked: boolean; reason?: string; remainingMs?: number } => {
+  if (!marketId) {
+    return { blocked: false }; // No market ID, can't check
+  }
+  
+  const now = nowOverride ?? Date.now();
+  const lastBuy = marketBuyCooldowns.get(marketId);
+  
+  if (!lastBuy) {
+    return { blocked: false };
+  }
+  
+  const timeSinceLastBuy = now - lastBuy;
+  if (timeSinceLastBuy < MARKET_COOLDOWN_MS) {
+    return {
+      blocked: true,
+      reason: "MARKET_BUY_COOLDOWN",
+      remainingMs: MARKET_COOLDOWN_MS - timeSinceLastBuy,
+    };
+  }
+  
+  // Cooldown expired, clean up
+  marketBuyCooldowns.delete(marketId);
+  return { blocked: false };
+};
+
+/**
+ * Mark a market as having a recent buy (for cooldown tracking).
+ */
+export const markMarketBuyCompleted = (marketId: string | undefined): void => {
+  if (marketId) {
+    marketBuyCooldowns.set(marketId, Date.now());
+  }
+};
+
+/**
+ * Reset market cooldown tracking state (for testing).
+ */
+export const resetMarketCooldowns = (): void => {
+  marketBuyCooldowns.clear();
+};
+
+/**
  * Check if a buy order on this token is already in-flight or in cooldown.
  * Returns true if order should be blocked, false if it can proceed.
  */

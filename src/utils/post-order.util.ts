@@ -16,6 +16,8 @@ import {
   isInFlightOrCooldown,
   markBuyInFlight,
   markBuyCompleted,
+  isMarketInCooldown,
+  markMarketBuyCompleted,
 } from "./funds-allowance.util";
 import { isLiveTradingEnabled } from "./live-trading.util";
 
@@ -181,7 +183,7 @@ async function postOrderOnChain(
 async function postOrderClob(
   input: PostOrderInput,
 ): Promise<OrderSubmissionResult> {
-  const { tokenId, side, logger, maxAcceptablePrice } = input;
+  const { tokenId, side, logger, maxAcceptablePrice, marketId } = input;
   const liveTradingEnabled = isLiveTradingEnabled();
   if (!liveTradingEnabled) {
     logger.warn("[CLOB] Live trading disabled; skipping order submission.");
@@ -201,6 +203,23 @@ async function postOrderClob(
       return {
         status: "skipped",
         reason: "LOSER_POSITION_PRICE_TOO_LOW",
+      };
+    }
+  }
+
+  // === MARKET-LEVEL COOLDOWN CHECK ===
+  // Prevents stacked buys on the SAME MARKET (different outcomes have different tokenIds)
+  // This is critical to prevent buying multiple times on the same market within minutes
+  if (!input.skipDuplicatePrevention && side === "BUY" && marketId) {
+    const marketCooldownStatus = isMarketInCooldown(marketId);
+    if (marketCooldownStatus.blocked) {
+      const remainingSec = Math.ceil((marketCooldownStatus.remainingMs ?? 0) / 1000);
+      logger.warn(
+        `[CLOB] Order skipped (${marketCooldownStatus.reason}): BUY on market ${marketId.slice(0, 8)}... blocked for ${remainingSec}s (prevents stacked buys on same market)`,
+      );
+      return {
+        status: "skipped",
+        reason: marketCooldownStatus.reason ?? "MARKET_BUY_COOLDOWN",
       };
     }
   }
@@ -234,11 +253,18 @@ async function postOrderClob(
 
   // Wrap the rest in try/finally to ensure we mark completion
   try {
-    return await postOrderClobInner(input);
+    const result = await postOrderClobInner(input);
+    return result;
   } finally {
-    // Always mark completion for BUY orders
+    // Always mark completion for BUY orders (regardless of success/failure)
+    // This prevents rapid-fire retry attempts on the same token/market
     if (!input.skipDuplicatePrevention && side === "BUY") {
       markBuyCompleted(tokenId);
+      // Mark market cooldown regardless of submission success
+      // The intent was to buy on this market, so apply cooldown even if order fails
+      if (marketId) {
+        markMarketBuyCompleted(marketId);
+      }
     }
   }
 }

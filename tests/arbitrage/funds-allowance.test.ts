@@ -8,6 +8,9 @@ import {
   markBuyCompleted,
   resetInFlightBuys,
   resetBalanceCheckWarnDedup,
+  isMarketInCooldown,
+  markMarketBuyCompleted,
+  resetMarketCooldowns,
 } from "../../src/utils/funds-allowance.util";
 
 const createLogger = () => ({
@@ -164,5 +167,93 @@ test("log deduplication", async (t) => {
       true,
       "Suppressed count should be included in message after window expires",
     );
+  });
+});
+
+test("market-level cooldown tracking", async (t) => {
+  // Reset state before each test group
+  resetMarketCooldowns();
+
+  await t.test("allows first buy on a market", () => {
+    resetMarketCooldowns();
+    const marketId = "test-market-first-buy";
+    const result = isMarketInCooldown(marketId);
+    assert.equal(result.blocked, false);
+  });
+
+  await t.test("blocks buy during cooldown after completion", () => {
+    resetMarketCooldowns();
+    const marketId = "test-market-cooldown";
+    markMarketBuyCompleted(marketId);
+    const result = isMarketInCooldown(marketId);
+    assert.equal(result.blocked, true);
+    assert.equal(result.reason, "MARKET_BUY_COOLDOWN");
+    // Should have remainingMs
+    assert.ok(result.remainingMs !== undefined && result.remainingMs > 0);
+  });
+
+  await t.test("does not block buy on different market", () => {
+    resetMarketCooldowns();
+    const marketId1 = "test-market-different-1";
+    const marketId2 = "test-market-different-2";
+    markMarketBuyCompleted(marketId1);
+    const result = isMarketInCooldown(marketId2);
+    assert.equal(result.blocked, false);
+  });
+
+  await t.test("returns not blocked for undefined marketId", () => {
+    resetMarketCooldowns();
+    const result = isMarketInCooldown(undefined);
+    assert.equal(result.blocked, false);
+  });
+
+  await t.test("buy allowed after cooldown expires", () => {
+    resetMarketCooldowns();
+    const marketId = "test-market-cooldown-expired";
+    markMarketBuyCompleted(marketId);
+
+    // Simulate time passing beyond cooldown (180s) using nowOverride
+    const now = Date.now();
+    const afterCooldown = now + 181_000; // 181 seconds later (> 180s cooldown)
+
+    const result = isMarketInCooldown(marketId, afterCooldown);
+    assert.equal(result.blocked, false); // Should be allowed after cooldown
+  });
+
+  await t.test("expired cooldowns are cleaned up", () => {
+    resetMarketCooldowns();
+    const marketId = "test-market-cleanup";
+    markMarketBuyCompleted(marketId);
+
+    // Simulate time passing beyond cooldown
+    const now = Date.now();
+    const afterCooldown = now + 181_000;
+
+    // First call should clean up and return not blocked
+    const result = isMarketInCooldown(marketId, afterCooldown);
+    assert.equal(result.blocked, false);
+
+    // Subsequent call should also not be blocked (entry was cleaned up)
+    const result2 = isMarketInCooldown(marketId, afterCooldown);
+    assert.equal(result2.blocked, false);
+  });
+
+  await t.test("resetMarketCooldowns clears all cooldowns", () => {
+    resetMarketCooldowns();
+    const marketId1 = "test-market-reset-1";
+    const marketId2 = "test-market-reset-2";
+    markMarketBuyCompleted(marketId1);
+    markMarketBuyCompleted(marketId2);
+
+    // Both should be in cooldown
+    assert.equal(isMarketInCooldown(marketId1).blocked, true);
+    assert.equal(isMarketInCooldown(marketId2).blocked, true);
+
+    // Reset all cooldowns
+    resetMarketCooldowns();
+
+    // Both should be allowed now
+    assert.equal(isMarketInCooldown(marketId1).blocked, false);
+    assert.equal(isMarketInCooldown(marketId2).blocked, false);
   });
 });

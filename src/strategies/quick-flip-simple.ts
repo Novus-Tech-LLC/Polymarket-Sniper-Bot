@@ -1,13 +1,19 @@
 /**
- * Quick Flip Strategy - SIMPLIFIED
+ * Quick Flip Strategy - PROFIT ONLY
  *
- * Sell positions when they hit profit target.
+ * CRITICAL RULE: This strategy ONLY sells for PROFIT. NEVER for a loss.
+ * 
+ * If a position is losing money, Quick Flip does NOTHING.
+ * Losses are handled by Smart Hedging (which hedges or liquidates at configured thresholds).
  *
  * SIMPLE LOGIC:
- * 1. Find positions that are profitable
- * 2. If profit >= target AND held long enough, SELL
+ * 1. Find positions that are profitable at ACTUAL BID PRICE (not mid-price)
+ * 2. If profit >= target % AND profit >= min USD AND held long enough, SELL
+ * 3. If ANY of these conditions fail, DO NOTHING - let the position ride
  *
- * That's it. No complex dynamic targets, no elaborate calculations.
+ * The separation of concerns:
+ * - Quick Flip = MAKING money (profit-taking)
+ * - Smart Hedging = PROTECTING money (loss mitigation at configured thresholds)
  */
 
 import type { ClobClient } from "@polymarket/clob-client";
@@ -29,19 +35,35 @@ export interface SimpleQuickFlipConfig {
   /** Minimum seconds to hold before selling (default: 60) */
   minHoldSeconds: number;
 
-  /** Minimum profit in USD to sell (default: 0.25) */
+  /** Minimum profit in USD to sell (default: 0.10) */
   minProfitUsd: number;
 }
 
+/**
+ * Polymarket fee structure:
+ * - Trading fee: 0.01% per side (1 basis point per side)
+ * - Round-trip fee: 0.02% (2 basis points total)
+ * - Bid-ask spread: typically 1-5% depending on liquidity
+ * 
+ * To ensure profit after fees, we need substantial profit targets.
+ * The trading fee (0.02%) is negligible, but spread can eat into profits.
+ */
+const MIN_PROFIT_BUFFER_PCT = 1.0; // 1% buffer to cover spread + fees
+const EFFECTIVE_MIN_PROFIT_PCT = MIN_PROFIT_BUFFER_PCT; // ~1% minimum profit required
+
 export const DEFAULT_SIMPLE_QUICKFLIP_CONFIG: SimpleQuickFlipConfig = {
   enabled: true,
-  targetPct: 5,
-  minHoldSeconds: 60,
-  minProfitUsd: 0.25,
+  targetPct: 5, // 5% target - reasonable profit after spread/fees
+  minHoldSeconds: 60, // Hold 60 seconds before selling
+  minProfitUsd: 0.50, // Minimum $0.50 profit per trade
 };
 
 /**
  * Simple Quick Flip Strategy
+ * 
+ * PROFIT ONLY - Never sells below entry price.
+ * Takes the quickest reasonable profit above trading fees.
+ * For loss handling, see Smart Hedging strategy.
  */
 export class SimpleQuickFlipStrategy {
   private client: ClobClient;
@@ -77,7 +99,7 @@ export class SimpleQuickFlipStrategy {
     let soldCount = 0;
 
     for (const position of positions) {
-      // Skip if not profitable enough
+      // Skip if not profitable enough (based on mid-price from position tracker)
       if (position.pnlPct < this.config.targetPct) {
         continue;
       }
@@ -104,9 +126,20 @@ export class SimpleQuickFlipStrategy {
         continue;
       }
 
+      // CRITICAL: Verify profit at ACTUAL BID PRICE before selling
+      // Position tracker uses mid-price, but we sell at bid price
+      // This prevents selling for a loss when spread is large
+      const actualProfit = await this.verifyProfitAtBidPrice(position);
+      if (!actualProfit.profitable) {
+        this.logger.debug(
+          `[SimpleQuickFlip] ⚠️ Mid-price shows +${position.pnlPct.toFixed(1)}% but bid price shows ${actualProfit.bidPnlPct.toFixed(1)}% - skipping to avoid loss`,
+        );
+        continue;
+      }
+
       // Sell!
       this.logger.info(
-        `[SimpleQuickFlip] 📈 Selling at +${position.pnlPct.toFixed(1)}% (+$${position.pnlUsd.toFixed(2)})`,
+        `[SimpleQuickFlip] 📈 Selling at +${actualProfit.bidPnlPct.toFixed(1)}% (+$${actualProfit.bidPnlUsd.toFixed(2)}) [mid-price was +${position.pnlPct.toFixed(1)}%]`,
       );
 
       const sold = await this.sellPosition(position);
@@ -120,6 +153,80 @@ export class SimpleQuickFlipStrategy {
     }
 
     return soldCount;
+  }
+
+  /**
+   * Verify profit at actual bid price before selling
+   * 
+   * CRITICAL: Quick Flip NEVER sells below entry price.
+   * This method ensures we only sell when:
+   * 1. Bid price > entry price (absolute floor - NEVER sell for a loss)
+   * 2. Profit % >= EFFECTIVE_MIN_PROFIT_PCT (covers fees + spread)
+   * 3. Profit % >= configured target %
+   * 4. Profit USD >= minimum USD
+   * 
+   * If ANY condition fails, returns profitable=false and we DO NOT sell.
+   * 
+   * The goal is to take the QUICKEST reasonable profit above trading fees.
+   */
+  private async verifyProfitAtBidPrice(position: {
+    marketId: string;
+    tokenId: string;
+    size: number;
+    entryPrice: number;
+  }): Promise<{ profitable: boolean; bidPnlPct: number; bidPnlUsd: number; bidPrice: number }> {
+    try {
+      const orderbook = await this.client.getOrderBook(position.tokenId);
+      
+      if (!orderbook.bids || orderbook.bids.length === 0) {
+        // No bids - can't sell, so not profitable
+        return { profitable: false, bidPnlPct: -100, bidPnlUsd: -position.size * position.entryPrice, bidPrice: 0 };
+      }
+
+      const bidPrice = parseFloat(orderbook.bids[0].price);
+      const bidPnlUsd = (bidPrice - position.entryPrice) * position.size;
+      const bidPnlPct = ((bidPrice - position.entryPrice) / position.entryPrice) * 100;
+
+      // ABSOLUTE RULE #1: Never sell below entry price
+      // This is the hard floor - no matter what, we don't sell for a loss
+      if (bidPrice <= position.entryPrice) {
+        this.logger.debug(
+          `[SimpleQuickFlip] 🚫 Bid ${(bidPrice * 100).toFixed(1)}¢ <= entry ${(position.entryPrice * 100).toFixed(1)}¢ - NEVER sell for a loss`,
+        );
+        return { profitable: false, bidPnlPct, bidPnlUsd, bidPrice };
+      }
+
+      // RULE #2: Must be above effective minimum (fees + spread buffer)
+      // This ensures we actually make money after all costs
+      if (bidPnlPct < EFFECTIVE_MIN_PROFIT_PCT) {
+        this.logger.debug(
+          `[SimpleQuickFlip] Profit ${bidPnlPct.toFixed(2)}% below fee threshold ${EFFECTIVE_MIN_PROFIT_PCT.toFixed(2)}% - waiting for better price`,
+        );
+        return { profitable: false, bidPnlPct, bidPnlUsd, bidPrice };
+      }
+
+      // RULE #3: Must meet configured target % (user can set higher if they want)
+      const meetsTarget = bidPnlPct >= this.config.targetPct;
+      
+      // RULE #4: Must meet minimum USD profit
+      const meetsMinProfit = bidPnlUsd >= this.config.minProfitUsd;
+      
+      const profitable = meetsTarget && meetsMinProfit;
+
+      if (!profitable) {
+        this.logger.debug(
+          `[SimpleQuickFlip] Profit ${bidPnlPct.toFixed(1)}% / $${bidPnlUsd.toFixed(2)} below targets (${this.config.targetPct}% / $${this.config.minProfitUsd}) - waiting`,
+        );
+      }
+
+      return { profitable, bidPnlPct, bidPnlUsd, bidPrice };
+    } catch (err) {
+      this.logger.warn(
+        `[SimpleQuickFlip] Could not verify bid price: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // If we can't verify, don't sell (safety first)
+      return { profitable: false, bidPnlPct: 0, bidPnlUsd: 0, bidPrice: 0 };
+    }
   }
 
   /**
