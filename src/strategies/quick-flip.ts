@@ -18,6 +18,13 @@ export interface QuickFlipConfig {
   minOrderUsd: number; // Minimum order size in USD (from MIN_ORDER_USD env)
   minProfitUsd?: number; // Minimum absolute profit in USD (optional, default $0.25)
   dynamicTargets?: boolean; // Enable dynamic profit targets based on entry price
+  /**
+   * Skip risky tier positions (entry < 60¢) for stop-loss - let smart hedging handle them.
+   * When true, QuickFlip will NOT sell risky tier positions at a loss.
+   * Smart Hedging can turn these losing positions into winners by hedging instead of selling.
+   * Default: true when smart hedging is enabled
+   */
+  skipRiskyTierForHedging?: boolean;
 }
 
 export interface QuickFlipStrategyConfig {
@@ -115,6 +122,16 @@ export class QuickFlipStrategy {
 
       // Check for stop loss (negative P&L beyond threshold)
       if (position.pnlPct <= -stopLossPct) {
+        // SKIP risky tier positions if smart hedging should handle them
+        // Risky tier = entry price < 60¢ (SPECULATIVE_MIN threshold)
+        // Smart Hedging may turn these losing positions into winners by hedging instead of selling at a loss
+        if (this.config.skipRiskyTierForHedging && position.entryPrice < PRICE_TIERS.SPECULATIVE_MIN) {
+          this.logger.debug(
+            `[QuickFlip] ⏭️ Skipping stop-loss for risky tier position (entry: ${(position.entryPrice * 100).toFixed(1)}¢) - deferred to Smart Hedging: ${position.marketId}`,
+          );
+          continue;
+        }
+
         // Stop-loss sells immediately - no hold time check
         const netLossPct = position.pnlPct - 0.2; // Include 0.2% fees in loss calculation
         this.logger.warn(
