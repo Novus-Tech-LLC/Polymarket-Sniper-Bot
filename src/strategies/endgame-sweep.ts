@@ -1,5 +1,6 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import type { Wallet } from "ethers";
+import { Contract, formatUnits } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker } from "./position-tracker";
 import {
@@ -9,6 +10,10 @@ import {
 } from "./constants";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 import { assessTradeQuality, SPREAD_TIERS } from "./trade-quality";
+import { resolvePolymarketContracts } from "../polymarket/contracts";
+
+// Minimum spendable balance (in USD) required to execute a buy
+const MIN_SPENDABLE_BALANCE_USD = 1;
 
 export interface EndgameSweepConfig {
   enabled: boolean;
@@ -47,6 +52,8 @@ export interface EndgameSweepStrategyConfig {
   logger: ConsoleLogger;
   config: EndgameSweepConfig;
   positionTracker?: PositionTracker; // Optional: used to check existing positions
+  /** Optional callback to get the reserved balance that should not be spent (e.g., for Smart Hedging) */
+  getReservedBalance?: () => number;
 }
 
 /**
@@ -66,12 +73,14 @@ export class EndgameSweepStrategy {
   private positionTracker?: PositionTracker;
   private purchasedMarkets: Set<string> = new Set();
   private purchaseTimestamps: Map<string, number> = new Map(); // Track when markets were purchased
+  private getReservedBalance?: () => number;
 
   constructor(strategyConfig: EndgameSweepStrategyConfig) {
     this.client = strategyConfig.client;
     this.logger = strategyConfig.logger;
     this.config = strategyConfig.config;
     this.positionTracker = strategyConfig.positionTracker;
+    this.getReservedBalance = strategyConfig.getReservedBalance;
   }
 
   /**
@@ -438,6 +447,48 @@ export class EndgameSweepStrategy {
         `[EndgameSweep] ⚠️ Invalid market price (${market.price}) for ${market.id}, skipping`,
       );
       return;
+    }
+
+    // Check if we need to respect reserved balance (for Smart Hedging)
+    if (this.getReservedBalance) {
+      const reservedBalance = this.getReservedBalance();
+      if (reservedBalance > 0) {
+        // Get wallet balance to check available funds
+        const wallet = (this.client as { wallet?: Wallet }).wallet;
+        if (wallet?.provider) {
+          try {
+            const contracts = resolvePolymarketContracts();
+            const usdcContract = new Contract(
+              contracts.usdcAddress,
+              ["function balanceOf(address) view returns (uint256)"],
+              wallet.provider,
+            );
+            const balanceRaw = await usdcContract.balanceOf(wallet.address);
+            const availableBalance = parseFloat(formatUnits(balanceRaw, 6));
+            const spendableBalance = availableBalance - reservedBalance;
+            
+            if (spendableBalance < MIN_SPENDABLE_BALANCE_USD) {
+              this.logger.debug(
+                `[EndgameSweep] Skipping purchase: insufficient balance after reserve ` +
+                `(available: $${availableBalance.toFixed(2)}, reserved: $${reservedBalance.toFixed(2)}, spendable: $${spendableBalance.toFixed(2)})`,
+              );
+              return;
+            }
+            
+            // Reduce maxBuyUsd to respect reserve
+            if (maxBuyUsd === undefined || maxBuyUsd > spendableBalance) {
+              this.logger.debug(
+                `[EndgameSweep] Limiting buy to spendable balance: $${spendableBalance.toFixed(2)} (reserved $${reservedBalance.toFixed(2)} for hedging)`,
+              );
+              maxBuyUsd = spendableBalance;
+            }
+          } catch (err) {
+            this.logger.debug(
+              `[EndgameSweep] Could not check balance for reserve: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
     }
 
     // Use the smaller of maxPositionUsd and maxBuyUsd (remaining capacity)

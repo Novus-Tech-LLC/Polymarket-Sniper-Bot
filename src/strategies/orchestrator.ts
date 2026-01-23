@@ -51,21 +51,29 @@ export interface StrategyOrchestratorConfig {
 /**
  * Strategy Orchestrator
  *
- * MULTI-STRATEGY SYSTEM - Runs ALL strategies in PARALLEL for maximum throughput
+ * MULTI-STRATEGY SYSTEM - Hybrid sequential + parallel execution
+ *
+ * EXECUTION MODEL:
+ * - Phase 1 (Sequential): Capital-critical strategies that need guaranteed funds
+ *   - Auto-Redeem: Frees up capital from resolved positions
+ *   - Smart Hedging: Sells positions AND buys hedges atomically
+ * - Phase 2 (Parallel): All other strategies compete for available capital
+ *
+ * This prevents race conditions where Smart Hedging sells positions to free up
+ * capital for hedges, but other strategies "steal" that capital before the hedge executes.
  *
  * As you compound money and positions grow, the system scales:
- * - All strategies execute concurrently (not sequentially)
  * - Position tracking refreshes every 5 seconds
  * - Strategy execution every 2 seconds
  * - Parallel sell execution for Quick Flip / Auto-Sell
  *
- * Strategy Priority (for capital allocation, but execution is parallel):
- * 1. Auto-Redeem - Claim resolved positions (capital recovery)
- * 2. Risk-Free Arb - YES + NO < $1.00 (runs in ARB engine loop)
- * 3. Endgame Sweep - Buy 75-92¢ positions (scalping range)
- * 4. Auto-Sell - Sell at threshold (free up capital)
- * 5. Quick Flip - Take profits at target %
- * 6. Whale Copy - Follow whale trades (runs in Monitor loop)
+ * Strategy Priority:
+ * 1. Auto-Redeem - Claim resolved positions (capital recovery) [SEQUENTIAL]
+ * 2. Smart Hedging - Hedge risky positions (sells + buys atomically) [SEQUENTIAL]
+ * 3. Universal Stop-Loss - Protect higher-tier positions [PARALLEL]
+ * 4. Endgame Sweep - Buy 75-92¢ positions (scalping range) [PARALLEL]
+ * 5. Auto-Sell - Sell at threshold (free up capital) [PARALLEL]
+ * 6. Quick Flip - Take profits at target % [PARALLEL]
  *
  * The ARB engine and Monitor service run in their own continuous loops
  * alongside this orchestrator for maximum parallelism.
@@ -112,8 +120,11 @@ export class StrategyOrchestrator {
     });
 
     if (smartHedgingConfig.enabled) {
+      const exceedMsg = smartHedgingConfig.allowExceedMaxForProtection
+        ? `allowExceed=true, absMax=$${smartHedgingConfig.absoluteMaxHedgeUsd}`
+        : `allowExceed=false`;
       this.logger.info(
-        `[Orchestrator] 🛡️ Smart Hedging: ENABLED (trigger: -${smartHedgingConfig.triggerLossPct}%, max hedge: $${smartHedgingConfig.maxHedgeUsd}, reserve: ${smartHedgingConfig.reservePct}%)`,
+        `[Orchestrator] 🛡️ Smart Hedging: ENABLED (trigger: -${smartHedgingConfig.triggerLossPct}%, max hedge: $${smartHedgingConfig.maxHedgeUsd}, ${exceedMsg}, reserve: ${smartHedgingConfig.reservePct}%)`,
       );
     }
 
@@ -177,6 +188,11 @@ export class StrategyOrchestrator {
       logger: config.logger,
       config: config.endgameSweepConfig,
       positionTracker: this.positionTracker, // Pass position tracker to check existing positions
+      // Pass callback to get reserved balance from Smart Hedging
+      // This ensures Endgame Sweep doesn't spend capital that Smart Hedging needs for hedges
+      getReservedBalance: smartHedgingConfig.enabled
+        ? () => this.smartHedgingStrategy.getRequiredReserve()
+        : undefined,
     });
 
     // Initialize auto-redeem strategy (claims resolved positions)
@@ -310,74 +326,100 @@ export class StrategyOrchestrator {
   /**
    * Execute all strategies in priority order
    *
-   * For HFT with many positions, we run strategies in PARALLEL
-   * to maximize throughput and catch opportunities faster.
+   * EXECUTION MODEL:
+   * - Phase 1 (Sequential): Capital-critical strategies that need guaranteed funds
+   *   - Auto-Redeem: Frees up capital from resolved positions
+   *   - Smart Hedging: Sells positions AND buys hedges (needs capital reservation)
+   * - Phase 2 (Parallel): All other strategies that compete for available capital
    *
-   * Priority still matters for capital allocation, but execution is concurrent.
+   * This prevents race conditions where Smart Hedging sells positions to free up
+   * capital for hedges, but other strategies "steal" that capital before the hedge executes.
    */
   private async executeStrategies(): Promise<void> {
-    this.logger.debug("[Orchestrator] Executing strategies in parallel");
+    this.logger.debug("[Orchestrator] Executing strategies (sequential + parallel phases)");
 
     try {
-      // Run ALL strategies in parallel for maximum speed
-      // Each strategy handles its own position checking and execution
-      const results = await Promise.allSettled([
-        // Priority 1: Auto-Redeem (claim resolved positions - highest priority for capital recovery)
-        this.executeWithLogging(
+      // PHASE 1: Sequential execution for capital-critical strategies
+      // These strategies need to complete atomically (sell + buy) without interference
+      // Each strategy is wrapped in try-catch to prevent blocking subsequent execution
+      
+      // Priority 1: Auto-Redeem (claim resolved positions - highest priority for capital recovery)
+      try {
+        await this.executeWithLogging(
           "Auto-Redeem",
           1,
           () => this.autoRedeemStrategy.execute(),
           this.autoRedeemStrategy.getStats().enabled,
-        ),
+        );
+      } catch (err) {
+        this.logger.error(
+          `[Orchestrator] Auto-Redeem failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
 
-        // Priority 2: Smart Hedging (HEDGE risky tier positions instead of selling at loss)
-        // Runs BEFORE stop-loss to prevent risky positions from being sold
-        this.executeWithLogging(
+      // Priority 2: Smart Hedging (HEDGE risky tier positions instead of selling at loss)
+      // MUST run sequentially: sells positions to free capital, then immediately uses it for hedges
+      // Running in parallel would allow other strategies to "steal" the freed capital
+      try {
+        await this.executeWithLogging(
           "Smart Hedging",
           2,
           () => this.smartHedgingStrategy.execute(),
           this.smartHedgingStrategy.getStats().enabled,
-        ),
+        );
+      } catch (err) {
+        this.logger.error(
+          `[Orchestrator] Smart Hedging failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
 
-        // Priority 3: Universal Stop-Loss (SAFETY NET - protects higher-tier positions)
-        // Only applies to positions NOT already hedged by Smart Hedging
-        this.executeWithLogging(
-          "Universal Stop-Loss",
-          3,
-          () => this.universalStopLossStrategy.execute(),
-          this.universalStopLossStrategy.getStats().enabled,
-        ),
+      // PHASE 2: Parallel execution for remaining strategies
+      // These can safely compete for available capital
+      // Each strategy is wrapped with its name for proper error logging
+      const parallelStrategies = [
+        {
+          name: "Universal Stop-Loss",
+          priority: 3,
+          execute: () => this.universalStopLossStrategy.execute(),
+          enabled: this.universalStopLossStrategy.getStats().enabled,
+        },
+        {
+          name: "Endgame Sweep",
+          priority: 4,
+          execute: () => this.endgameSweepStrategy.execute(),
+          enabled: this.endgameSweepStrategy.getStats().enabled,
+        },
+        {
+          name: "Auto-Sell",
+          priority: 5,
+          execute: () => this.autoSellStrategy.execute(),
+          enabled: this.autoSellStrategy.getStats().enabled,
+        },
+        {
+          name: "Quick Flip",
+          priority: 6,
+          execute: () => this.quickFlipStrategy.execute(),
+          enabled: this.quickFlipStrategy.getStats().enabled,
+        },
+      ];
 
-        // Priority 4: Endgame Sweep (buy high-probability positions)
-        this.executeWithLogging(
-          "Endgame Sweep",
-          4,
-          () => this.endgameSweepStrategy.execute(),
-          this.endgameSweepStrategy.getStats().enabled,
+      const results = await Promise.allSettled(
+        parallelStrategies.map((strategy) =>
+          this.executeWithLogging(
+            strategy.name,
+            strategy.priority,
+            strategy.execute,
+            strategy.enabled,
+          ),
         ),
+      );
 
-        // Priority 5: Auto-Sell (free up capital at threshold)
-        this.executeWithLogging(
-          "Auto-Sell",
-          5,
-          () => this.autoSellStrategy.execute(),
-          this.autoSellStrategy.getStats().enabled,
-        ),
-
-        // Priority 6: Quick Flip (take profits at target)
-        this.executeWithLogging(
-          "Quick Flip",
-          6,
-          () => this.quickFlipStrategy.execute(),
-          this.quickFlipStrategy.getStats().enabled,
-        ),
-      ]);
-
-      // Log any failures
+      // Log any failures with strategy names
       results.forEach((result, index) => {
         if (result.status === "rejected") {
+          const strategyName = parallelStrategies[index].name;
           this.logger.error(
-            `[Orchestrator] Strategy ${index + 1} failed: ${result.reason}`,
+            `[Orchestrator] ${strategyName} failed: ${result.reason}`,
           );
         }
       });

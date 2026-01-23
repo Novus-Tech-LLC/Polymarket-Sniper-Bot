@@ -370,22 +370,27 @@ export class PositionTracker {
                 }
 
                 if (!winningOutcome) {
-                  // Cannot determine outcome - skip this position
-                  const reason = `Position is redeemable (market resolved) - cannot determine settlement price for tokenId: ${tokenId} (market outcome unavailable)`;
-                  skippedPositions.push({ reason, data: apiPos });
-                  this.logger.debug(`[PositionTracker] ${reason}`);
-                  return null;
-                }
+                  // Cannot determine outcome from Gamma API, but position is marked redeemable
+                  // Use entry price as fallback - the redemption will succeed/fail on chain
+                  // This ensures positions aren't silently dropped when outcome API is unavailable
+                  currentPrice = entryPrice;
+                  resolvedCount++;
+                  if (!wasCached) {
+                    this.logger.debug(
+                      `[PositionTracker] Redeemable position with unknown outcome: tokenId=${tokenId}, side=${side}, using entryPrice=${entryPrice} as fallback`,
+                    );
+                  }
+                } else {
+                  // Calculate settlement price based on whether position won or lost
+                  currentPrice = side === winningOutcome ? 1.0 : 0.0;
+                  resolvedCount++;
 
-                // Calculate settlement price based on whether position won or lost
-                currentPrice = side === winningOutcome ? 1.0 : 0.0;
-                resolvedCount++;
-
-                // Only log on first resolution (not cached) to reduce noise
-                if (!wasCached) {
-                  this.logger.debug(
-                    `[PositionTracker] Resolved position: tokenId=${tokenId}, side=${side}, winner=${winningOutcome}, settlementPrice=${currentPrice}`,
-                  );
+                  // Only log on first resolution (not cached) to reduce noise
+                  if (!wasCached) {
+                    this.logger.debug(
+                      `[PositionTracker] Resolved position: tokenId=${tokenId}, side=${side}, winner=${winningOutcome}, settlementPrice=${currentPrice}`,
+                    );
+                  }
                 }
               } else {
                 // Active market - fetch current orderbook with fallback to price API

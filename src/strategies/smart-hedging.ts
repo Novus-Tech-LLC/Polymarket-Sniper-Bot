@@ -902,10 +902,15 @@ export class SmartHedgingStrategy {
     }
 
     // Calculate estimated funds needed for hedging
+    // Use absoluteMaxHedgeUsd when allowExceedMaxForProtection is enabled,
+    // otherwise use the standard maxHedgeUsd limit
+    const effectiveMaxHedge = this.config.allowExceedMaxForProtection
+      ? this.config.absoluteMaxHedgeUsd
+      : this.config.maxHedgeUsd;
     const estimatedHedgeFundsNeeded = potentialHedgePositions.reduce((sum, pos) => {
       const positionValue = pos.size * pos.entryPrice;
-      // Estimate hedge cost as position value (worst case)
-      return sum + Math.min(positionValue, this.config.maxHedgeUsd);
+      // Estimate hedge cost as position value (worst case), capped at effective max
+      return sum + Math.min(positionValue, effectiveMaxHedge);
     }, 0);
 
     // Dynamic threshold: lower the min profit requirement when facing severe losses
@@ -1561,6 +1566,49 @@ export class SmartHedgingStrategy {
       totalBestCaseProfit,
       hedgesCanWin,
     };
+  }
+
+  /**
+   * Calculate the required reserve amount for potential hedges
+   * This should be respected by other strategies to ensure hedging can occur
+   * 
+   * @returns Required reserve in USD, or 0 if hedging is disabled or no positions need hedging
+   */
+  getRequiredReserve(): number {
+    if (!this.config.enabled) {
+      return 0;
+    }
+
+    const allPositions = this.positionTracker.getPositions();
+    
+    // Find positions that might need hedging soon
+    const potentialHedgePositions = allPositions.filter((pos) => {
+      const key = `${pos.marketId}-${pos.tokenId}`;
+      if (this.hedgedPositions.has(key)) return false;
+      if (this.hedgeTokenIds.has(pos.tokenId)) return false;
+      if (pos.entryPrice >= this.config.maxEntryPriceForHedging) return false;
+      if (pos.redeemable) return false;
+      // Include positions that are losing OR approaching loss threshold
+      return pos.pnlPct <= 0;
+    });
+
+    if (potentialHedgePositions.length === 0) {
+      return 0;
+    }
+
+    // Calculate estimated funds needed for hedging
+    // Use absoluteMaxHedgeUsd when allowExceedMaxForProtection is enabled
+    const effectiveMaxHedge = this.config.allowExceedMaxForProtection
+      ? this.config.absoluteMaxHedgeUsd
+      : this.config.maxHedgeUsd;
+
+    const estimatedHedgeFundsNeeded = potentialHedgePositions.reduce((sum, pos) => {
+      const positionValue = pos.size * pos.entryPrice;
+      return sum + Math.min(positionValue, effectiveMaxHedge);
+    }, 0);
+
+    // Return the target reserve amount
+    return estimatedHedgeFundsNeeded * (this.config.reservePct / 100);
   }
 
   /**
