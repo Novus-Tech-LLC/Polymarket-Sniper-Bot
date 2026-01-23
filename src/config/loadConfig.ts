@@ -1204,6 +1204,60 @@ export type StrategyConfig = {
    */
   stopLossMinHoldSeconds: number;
   minOrderUsd: number;
+  // === SCALP TAKE-PROFIT SETTINGS ===
+  // Time-and-momentum-based profit taking to avoid waiting forever for resolution
+  /**
+   * Enable scalp take-profit strategy
+   * Default: true (on by default across all presets)
+   */
+  scalpTakeProfitEnabled: boolean;
+  /**
+   * Minimum hold time (minutes) before considering scalp exit
+   * Default: 45 (balanced), 30 (aggressive), 60 (conservative)
+   */
+  scalpMinHoldMinutes: number;
+  /**
+   * Maximum hold time (minutes) - force exit if profitable
+   * Default: 90 (balanced), 60 (aggressive), 120 (conservative)
+   */
+  scalpMaxHoldMinutes: number;
+  /**
+   * Minimum profit % to consider scalp exit (after min hold)
+   * Default: 3% (balanced), 2% (aggressive), 5% (conservative)
+   */
+  scalpMinProfitPct: number;
+  /**
+   * Target profit % - when reached AND momentum fading, exit
+   * Default: 5% (balanced), 3% (aggressive), 8% (conservative)
+   */
+  scalpTargetProfitPct: number;
+  /**
+   * Minimum profit in USD for scalp exit
+   * Default: $0.50 (balanced), $0.25 (aggressive), $1.00 (conservative)
+   */
+  scalpMinProfitUsd: number;
+  /**
+   * Entry price threshold for resolution exclusion safeguard
+   * CRITICAL: Never time-exit positions ≤ this price with increasing probability
+   * Default: 0.60 (60¢) - these are potential $1.00 winners
+   */
+  scalpResolutionExclusionPrice: number;
+  /**
+   * Enable sudden spike detection for immediate profit capture
+   * When a massive move happens quickly, take the profit before it reverses
+   * Default: true
+   */
+  scalpSuddenSpikeEnabled: boolean;
+  /**
+   * Profit threshold (%) for sudden spike detection
+   * Default: 15% (balanced), 12% (aggressive), 20% (conservative)
+   */
+  scalpSuddenSpikeThresholdPct: number;
+  /**
+   * Time window (minutes) for detecting sudden spikes
+   * Default: 10 (balanced), 5 (aggressive)
+   */
+  scalpSuddenSpikeWindowMinutes: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
   monitorConfig?: MonitorRuntimeConfig;
@@ -1484,6 +1538,94 @@ export function loadStrategyConfig(
         ? (preset as { MIN_ORDER_USD: number }).MIN_ORDER_USD
         : undefined) ??
       DEFAULT_CONFIG.MIN_ORDER_USD,
+    /**
+     * SCALP TAKE-PROFIT SETTINGS
+     * Time-and-momentum-based profit taking to avoid waiting forever for resolution.
+     * Enabled by default across all presets.
+     */
+    // SCALP_TAKE_PROFIT_ENABLED: enabled by default
+    scalpTakeProfitEnabled:
+      parseBool(readEnv("SCALP_TAKE_PROFIT_ENABLED", overrides) ?? "") ??
+      ("SCALP_TAKE_PROFIT_ENABLED" in preset
+        ? (preset as { SCALP_TAKE_PROFIT_ENABLED: boolean })
+            .SCALP_TAKE_PROFIT_ENABLED
+        : undefined) ??
+      true, // Default: enabled
+    // SCALP_MIN_HOLD_MINUTES: minimum hold time before considering exit
+    scalpMinHoldMinutes:
+      parseNumber(readEnv("SCALP_MIN_HOLD_MINUTES", overrides) ?? "") ??
+      ("SCALP_MIN_HOLD_MINUTES" in preset
+        ? (preset as { SCALP_MIN_HOLD_MINUTES: number }).SCALP_MIN_HOLD_MINUTES
+        : undefined) ??
+      45, // Default: 45 minutes
+    // SCALP_MAX_HOLD_MINUTES: force exit if profitable after this time
+    scalpMaxHoldMinutes:
+      parseNumber(readEnv("SCALP_MAX_HOLD_MINUTES", overrides) ?? "") ??
+      ("SCALP_MAX_HOLD_MINUTES" in preset
+        ? (preset as { SCALP_MAX_HOLD_MINUTES: number }).SCALP_MAX_HOLD_MINUTES
+        : undefined) ??
+      90, // Default: 90 minutes
+    // SCALP_MIN_PROFIT_PCT: minimum profit % to consider exit
+    // IMPORTANT: Must be high enough to clear transaction costs (fees + slippage + spread)!
+    scalpMinProfitPct:
+      parseNumber(readEnv("SCALP_MIN_PROFIT_PCT", overrides) ?? "") ??
+      ("SCALP_MIN_PROFIT_PCT" in preset
+        ? (preset as { SCALP_MIN_PROFIT_PCT: number }).SCALP_MIN_PROFIT_PCT
+        : undefined) ??
+      5.0, // Default: 5% - must clear ~3% costs to be meaningful
+    // SCALP_TARGET_PROFIT_PCT: target profit % for exit
+    scalpTargetProfitPct:
+      parseNumber(readEnv("SCALP_TARGET_PROFIT_PCT", overrides) ?? "") ??
+      ("SCALP_TARGET_PROFIT_PCT" in preset
+        ? (preset as { SCALP_TARGET_PROFIT_PCT: number }).SCALP_TARGET_PROFIT_PCT
+        : undefined) ??
+      8.0, // Default: 8% - meaningful profit after all costs
+    // SCALP_MIN_PROFIT_USD: minimum profit in USD for exit
+    scalpMinProfitUsd:
+      parseNumber(readEnv("SCALP_MIN_PROFIT_USD", overrides) ?? "") ??
+      ("SCALP_MIN_PROFIT_USD" in preset
+        ? (preset as { SCALP_MIN_PROFIT_USD: number }).SCALP_MIN_PROFIT_USD
+        : undefined) ??
+      1.0, // Default: $1.00 - at least $1 profit or don't bother
+    // SCALP_RESOLUTION_EXCLUSION_PRICE: entry price threshold for resolution exclusion
+    // CRITICAL: Never time-exit positions ≤ this price with increasing probability
+    scalpResolutionExclusionPrice:
+      parseNumber(
+        readEnv("SCALP_RESOLUTION_EXCLUSION_PRICE", overrides) ?? "",
+      ) ??
+      ("SCALP_RESOLUTION_EXCLUSION_PRICE" in preset
+        ? (preset as { SCALP_RESOLUTION_EXCLUSION_PRICE: number })
+            .SCALP_RESOLUTION_EXCLUSION_PRICE
+        : undefined) ??
+      0.6, // Default: 60¢ - these are potential $1.00 winners
+    // SCALP_SUDDEN_SPIKE_ENABLED: enable sudden spike detection
+    scalpSuddenSpikeEnabled:
+      parseBool(readEnv("SCALP_SUDDEN_SPIKE_ENABLED", overrides) ?? "") ??
+      ("SCALP_SUDDEN_SPIKE_ENABLED" in preset
+        ? (preset as { SCALP_SUDDEN_SPIKE_ENABLED: boolean })
+            .SCALP_SUDDEN_SPIKE_ENABLED
+        : undefined) ??
+      true, // Default: enabled
+    // SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: profit threshold for spike detection
+    scalpSuddenSpikeThresholdPct:
+      parseNumber(
+        readEnv("SCALP_SUDDEN_SPIKE_THRESHOLD_PCT", overrides) ?? "",
+      ) ??
+      ("SCALP_SUDDEN_SPIKE_THRESHOLD_PCT" in preset
+        ? (preset as { SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: number })
+            .SCALP_SUDDEN_SPIKE_THRESHOLD_PCT
+        : undefined) ??
+      15.0, // Default: 15%
+    // SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: time window for spike detection
+    scalpSuddenSpikeWindowMinutes:
+      parseNumber(
+        readEnv("SCALP_SUDDEN_SPIKE_WINDOW_MINUTES", overrides) ?? "",
+      ) ??
+      ("SCALP_SUDDEN_SPIKE_WINDOW_MINUTES" in preset
+        ? (preset as { SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: number })
+            .SCALP_SUDDEN_SPIKE_WINDOW_MINUTES
+        : undefined) ??
+      10, // Default: 10 minutes
   };
 
   // Apply preset settings to environment for ARB and MONITOR config loaders

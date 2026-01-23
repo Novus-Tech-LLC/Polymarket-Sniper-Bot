@@ -185,6 +185,17 @@ export const STRATEGY_PRESETS = {
     // Universal Stop-Loss - minimum hold time before stop-loss can trigger
     // This prevents premature sells due to bid-ask spread right after buying
     STOP_LOSS_MIN_HOLD_SECONDS: 60, // Wait 60s before stop-loss can trigger
+    /**
+     * SCALP TAKE-PROFIT - Disabled in off preset
+     * Time-and-momentum-based profit taking to avoid waiting forever for resolution.
+     */
+    SCALP_TAKE_PROFIT_ENABLED: false,
+    SCALP_MIN_HOLD_MINUTES: 45,
+    SCALP_MAX_HOLD_MINUTES: 90,
+    SCALP_MIN_PROFIT_PCT: 3.0,
+    SCALP_TARGET_PROFIT_PCT: 5.0,
+    SCALP_MIN_PROFIT_USD: 0.5,
+    SCALP_RESOLUTION_EXCLUSION_PRICE: 0.6, // Never time-exit ≤60¢ entry positions that reach 90¢+ (near resolution)
   },
   conservative: {
     STRATEGY_ENABLED: true,
@@ -243,6 +254,24 @@ export const STRATEGY_PRESETS = {
      * A newly bought position might show immediate "loss" from spread - give it time.
      */
     STOP_LOSS_MIN_HOLD_SECONDS: 120, // Wait 2 minutes before stop-loss (conservative)
+    /**
+     * SCALP TAKE-PROFIT - Conservative settings
+     * Time-and-momentum-based profit taking. Patient approach with higher targets.
+     * CRITICAL: Never forces time-exit on positions ≤60¢ with increasing probability.
+     * 
+     * PROFIT TARGETS: Must clear transaction costs (fees + slippage + spread)!
+     * Conservative targets 8-12% to ensure meaningful profit after all costs.
+     */
+    SCALP_TAKE_PROFIT_ENABLED: true,
+    SCALP_MIN_HOLD_MINUTES: 60, // Wait at least 60 minutes
+    SCALP_MAX_HOLD_MINUTES: 120, // Force exit at 120 minutes if profitable
+    SCALP_MIN_PROFIT_PCT: 8.0, // Minimum 8% - well above costs
+    SCALP_TARGET_PROFIT_PCT: 12.0, // Target 12% profit - real money
+    SCALP_MIN_PROFIT_USD: 2.0, // Don't scalp for less than $2
+    SCALP_RESOLUTION_EXCLUSION_PRICE: 0.6, // Never time-exit ≤60¢ entry positions that reach 90¢+ (near resolution)
+    SCALP_SUDDEN_SPIKE_ENABLED: true,
+    SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 20.0, // Only capture 20%+ spikes (conservative)
+    SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 10,
     // Rate limits
     ORDER_SUBMIT_MAX_PER_HOUR: 30,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
@@ -318,6 +347,24 @@ export const STRATEGY_PRESETS = {
      * Prevents premature stop-loss sells right after buying due to bid-ask spread.
      */
     STOP_LOSS_MIN_HOLD_SECONDS: 60, // Wait 60 seconds before stop-loss (balanced)
+    /**
+     * SCALP TAKE-PROFIT - Balanced settings
+     * Time-and-momentum-based profit taking. Moderate patience with 5-8% targets.
+     * CRITICAL: Never forces time-exit on positions ≤60¢ with increasing probability.
+     * 
+     * PROFIT TARGETS: Must clear transaction costs (fees + slippage + spread)!
+     * Balanced targets 5-8% to ensure profit after typical ~3% costs.
+     */
+    SCALP_TAKE_PROFIT_ENABLED: true,
+    SCALP_MIN_HOLD_MINUTES: 45, // Wait at least 45 minutes
+    SCALP_MAX_HOLD_MINUTES: 90, // Force exit at 90 minutes if profitable
+    SCALP_MIN_PROFIT_PCT: 5.0, // Minimum 5% - clears typical costs
+    SCALP_TARGET_PROFIT_PCT: 8.0, // Target 8% profit - meaningful after costs
+    SCALP_MIN_PROFIT_USD: 1.0, // Don't scalp for less than $1
+    SCALP_RESOLUTION_EXCLUSION_PRICE: 0.6, // Never time-exit ≤60¢ entry positions that reach 90¢+ (near resolution)
+    SCALP_SUDDEN_SPIKE_ENABLED: true,
+    SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 15.0, // Capture 15%+ spikes
+    SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 10,
     // Rate limits (higher for more trades)
     ORDER_SUBMIT_MAX_PER_HOUR: 60,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
@@ -445,6 +492,27 @@ export const STRATEGY_PRESETS = {
      * Prevents premature stop-loss sells right after buying due to bid-ask spread.
      */
     STOP_LOSS_MIN_HOLD_SECONDS: 30, // Wait 30 seconds before stop-loss (aggressive - faster reaction)
+
+    /**
+     * SCALP TAKE-PROFIT - Aggressive settings
+     * Faster exits with 4-6% targets for quicker churn.
+     * More sensitive to momentum changes.
+     * CRITICAL: Never forces time-exit on positions ≤60¢ with increasing probability.
+     * 
+     * PROFIT TARGETS: Even aggressive needs 4%+ to clear costs!
+     * We're aggressive on TIME, not on accepting tiny profits.
+     * A 2% "profit" after fees/slippage is basically break-even - stupid!
+     */
+    SCALP_TAKE_PROFIT_ENABLED: true,
+    SCALP_MIN_HOLD_MINUTES: 30, // Wait at least 30 minutes
+    SCALP_MAX_HOLD_MINUTES: 60, // Force exit at 60 minutes if profitable
+    SCALP_MIN_PROFIT_PCT: 4.0, // Minimum 4% - even aggressive needs real profit
+    SCALP_TARGET_PROFIT_PCT: 6.0, // Target 6% profit
+    SCALP_MIN_PROFIT_USD: 0.50, // Don't scalp for less than $0.50
+    SCALP_RESOLUTION_EXCLUSION_PRICE: 0.6, // Never time-exit ≤60¢ entry positions that reach 90¢+ (near resolution)
+    SCALP_SUDDEN_SPIKE_ENABLED: true,
+    SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 12.0, // Capture 12%+ spikes (more aggressive)
+    SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 5, // Shorter window - faster detection
 
     /**
      * RATE LIMITS - HIGH THROUGHPUT
