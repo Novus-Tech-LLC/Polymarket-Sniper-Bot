@@ -26,7 +26,7 @@ export interface UniversalStopLossConfig {
   skipForSmartHedging?: boolean;
   /**
    * Entry price threshold for determining which strategy handles a position.
-   * Should match Smart Hedging's maxEntryPrice (default: 0.75 = 75¢).
+   * Should match Smart Hedging's maxEntryPrice (default: 1.0 = 100¢).
    * 
    * When skipForSmartHedging is true:
    * - Positions with entry < this threshold: Handled by Smart Hedging (skipped by Stop-Loss)
@@ -34,7 +34,7 @@ export interface UniversalStopLossConfig {
    * 
    * This matches Smart Hedging's logic which skips positions where entry >= maxEntryPrice.
    * 
-   * Default: 0.75 (75¢) - matches Smart Hedging default
+   * Default: 1.0 (100¢) - matches Smart Hedging default (handles ALL positions)
    */
   hedgingMaxEntryPrice?: number;
   /**
@@ -139,10 +139,10 @@ export class UniversalStopLossStrategy {
     let activePositions = allPositions.filter((pos) => !pos.redeemable);
 
     // Skip positions that Smart Hedging will handle
-    // When skipForSmartHedging is true, defer to Smart Hedging for low-entry positions
+    // When skipForSmartHedging is true, defer to Smart Hedging for ALL positions
     if (this.config.skipForSmartHedging) {
-      // Use configured threshold or default to 75¢ (matches Smart Hedging default)
-      const hedgingThreshold = this.config.hedgingMaxEntryPrice ?? 0.75;
+      // Use configured threshold or default to 100¢ (matches Smart Hedging default - handles ALL positions)
+      const hedgingThreshold = this.config.hedgingMaxEntryPrice ?? 1.0;
       const skippedCount = activePositions.filter(
         (pos) => pos.entryPrice < hedgingThreshold,
       ).length;
