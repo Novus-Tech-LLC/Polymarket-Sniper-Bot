@@ -28,8 +28,8 @@ test("STRATEGY_PRESET=aggressive uses preset MAX_POSITION_USD when no env overri
   });
 
   const config = loadStrategyConfig();
-  // Aggressive preset has MAX_POSITION_USD: 50
-  assert.equal(config.endgameMaxPositionUsd, 50);
+  // Aggressive preset has MAX_POSITION_USD: 100 (see presets.ts line 438)
+  assert.equal(config.endgameMaxPositionUsd, 100);
 });
 
 test("MAX_POSITION_USD env variable overrides preset value", () => {
