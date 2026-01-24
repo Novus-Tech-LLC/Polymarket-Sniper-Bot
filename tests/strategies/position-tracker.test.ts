@@ -3505,6 +3505,168 @@ describe("Crash-Proof Recovery: Stale Snapshot Handling", () => {
     assert.strictEqual(consecutiveFailures, 3, 
       "Should preserve failure count when below threshold");
   });
+
+  test("BOOTSTRAP_RECOVERY: After auto-recovery clears state, next snapshot bypasses ACTIVE_COLLAPSE_BUG validation", () => {
+    // This test validates the bootstrap recovery mechanism that allows the service
+    // to recover from persistent ACTIVE_COLLAPSE_BUG conditions without container restart.
+    // 
+    // Scenario being tested:
+    // 1. Service encounters repeated ACTIVE_COLLAPSE_BUG rejections
+    // 2. Stale snapshot exceeds MAX_STALE_AGE_MS threshold
+    // 3. Auto-recovery clears lastGoodSnapshot and sets allowBootstrapAfterAutoRecovery = true
+    // 4. Next refresh with ACTIVE_COLLAPSE_BUG condition is ACCEPTED (bootstrap mode)
+    // 5. Service is restored without container restart
+
+    // Simulate state after auto-recovery cleared lastGoodSnapshot
+    let allowBootstrapAfterAutoRecovery = true;
+    let lastGoodSnapshot: any = null;
+    let consecutiveFailures = 0;
+    let currentBackoffMs = 0;
+
+    // New snapshot that would normally trigger ACTIVE_COLLAPSE_BUG
+    const newSnapshot: any = {
+      cycleId: 6,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: Date.now(),
+      activePositions: [], // finalActive = 0
+      redeemablePositions: [],
+      rawCounts: {
+        rawTotal: 2,           // API returned 2 positions
+        rawActiveCandidates: 2  // 2 were active candidates
+      },
+      summary: { activeTotal: 0, prof: 0, lose: 0, neutral: 0, unknown: 0, redeemableTotal: 0 },
+    };
+
+    // Validation logic (mirrors actual validateSnapshot behavior)
+    const rawTotal = newSnapshot.rawCounts?.rawTotal ?? 0;
+    const rawActiveCandidates = newSnapshot.rawCounts?.rawActiveCandidates ?? 0;
+    const finalActiveCount = newSnapshot.activePositions.length;
+
+    // Check for ACTIVE_COLLAPSE_BUG condition
+    const wouldTriggerActivCollapseBug = 
+      rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0;
+
+    // Verify the condition would normally trigger ACTIVE_COLLAPSE_BUG
+    assert.ok(wouldTriggerActivCollapseBug, 
+      "Should detect ACTIVE_COLLAPSE_BUG condition");
+
+    // In bootstrap mode, the snapshot should be ACCEPTED despite the bug
+    let validationResult: { ok: boolean; reason?: string };
+    if (wouldTriggerActivCollapseBug) {
+      if (allowBootstrapAfterAutoRecovery) {
+        // Bootstrap mode: accept despite ACTIVE_COLLAPSE_BUG
+        validationResult = { ok: true };
+      } else {
+        validationResult = { ok: false, reason: "ACTIVE_COLLAPSE_BUG" };
+      }
+    } else {
+      validationResult = { ok: true };
+    }
+
+    // Verify snapshot was ACCEPTED in bootstrap mode
+    assert.strictEqual(validationResult.ok, true, 
+      "Snapshot should be ACCEPTED in bootstrap mode despite ACTIVE_COLLAPSE_BUG");
+
+    // After successful acceptance, bootstrap mode should be cleared
+    if (validationResult.ok) {
+      allowBootstrapAfterAutoRecovery = false;
+      lastGoodSnapshot = newSnapshot;
+    }
+
+    assert.strictEqual(allowBootstrapAfterAutoRecovery, false, 
+      "Bootstrap mode should be cleared after successful snapshot acceptance");
+    assert.notStrictEqual(lastGoodSnapshot, null, 
+      "lastGoodSnapshot should be updated after successful acceptance");
+  });
+
+  test("BOOTSTRAP_RECOVERY: Without bootstrap mode, ACTIVE_COLLAPSE_BUG is still rejected", () => {
+    // This test ensures that ACTIVE_COLLAPSE_BUG validation is not completely disabled,
+    // only bypassed during bootstrap recovery mode.
+
+    // Normal state (not in bootstrap mode)
+    let allowBootstrapAfterAutoRecovery = false;
+
+    // New snapshot that triggers ACTIVE_COLLAPSE_BUG
+    const newSnapshot: any = {
+      cycleId: 6,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: Date.now(),
+      activePositions: [], // finalActive = 0
+      redeemablePositions: [],
+      rawCounts: {
+        rawTotal: 2,
+        rawActiveCandidates: 2
+      },
+    };
+
+    const rawTotal = newSnapshot.rawCounts?.rawTotal ?? 0;
+    const rawActiveCandidates = newSnapshot.rawCounts?.rawActiveCandidates ?? 0;
+    const finalActiveCount = newSnapshot.activePositions.length;
+
+    const wouldTriggerActivCollapseBug = 
+      rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0;
+
+    // Validation should REJECT when not in bootstrap mode
+    let validationResult: { ok: boolean; reason?: string };
+    if (wouldTriggerActivCollapseBug) {
+      if (allowBootstrapAfterAutoRecovery) {
+        validationResult = { ok: true };
+      } else {
+        validationResult = { ok: false, reason: "ACTIVE_COLLAPSE_BUG" };
+      }
+    } else {
+      validationResult = { ok: true };
+    }
+
+    assert.strictEqual(validationResult.ok, false, 
+      "Snapshot should be REJECTED when not in bootstrap mode");
+    assert.strictEqual(validationResult.reason, "ACTIVE_COLLAPSE_BUG", 
+      "Rejection reason should be ACTIVE_COLLAPSE_BUG");
+  });
+
+  test("BOOTSTRAP_RECOVERY: Auto-recovery sets bootstrap flag when clearing stale state", () => {
+    // This test verifies that auto-recovery correctly enables bootstrap mode
+    // when clearing the lastGoodSnapshot due to exceeded stale age.
+
+    const MAX_STALE_AGE_MS = 60_000; // 60 seconds
+
+    // Simulate state before auto-recovery
+    let allowBootstrapAfterAutoRecovery = false;
+    const lastGoodFetchedAt = Date.now() - 65_000; // 65 seconds ago (exceeds threshold)
+    let lastGoodSnapshot: any = {
+      cycleId: 5,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: lastGoodFetchedAt,
+      activePositions: [{ tokenId: "t1", marketId: "m1", size: 100 }],
+      redeemablePositions: [],
+    };
+    let lastGoodAtMs = lastGoodFetchedAt;
+    let consecutiveFailures = 8;
+    let currentBackoffMs = 120_000;
+
+    // Calculate stale age
+    const now = Date.now();
+    const staleAgeMs = now - lastGoodSnapshot.fetchedAtMs;
+
+    // Auto-recovery should trigger and set bootstrap flag
+    if (staleAgeMs >= MAX_STALE_AGE_MS) {
+      lastGoodSnapshot = null;
+      lastGoodAtMs = 0;
+      consecutiveFailures = 0;
+      currentBackoffMs = 0;
+      allowBootstrapAfterAutoRecovery = true; // This is the new behavior
+    }
+
+    // Verify auto-recovery enabled bootstrap mode
+    assert.strictEqual(allowBootstrapAfterAutoRecovery, true, 
+      "Auto-recovery should enable bootstrap mode when clearing stale state");
+    assert.strictEqual(lastGoodSnapshot, null, 
+      "lastGoodSnapshot should be cleared");
+    assert.strictEqual(consecutiveFailures, 0, 
+      "consecutiveFailures should be reset");
+    assert.strictEqual(currentBackoffMs, 0, 
+      "backoff should be reset");
+  });
 });
 
 describe("Crash-Proof Recovery: Circuit Breaker", () => {

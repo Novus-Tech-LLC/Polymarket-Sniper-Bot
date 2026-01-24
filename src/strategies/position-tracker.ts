@@ -547,6 +547,15 @@ export class PositionTracker {
   private static readonly FETCH_REGRESSION_THRESHOLD = 0.2; // 20% - below this is suspicious
   private static readonly MAX_STALE_AGE_MS = 60_000; // 60 seconds - auto-clear stale snapshot to allow recovery (HFT-friendly)
 
+  /**
+   * AUTO-RECOVERY BOOTSTRAP: When true, the next refresh will skip ACTIVE_COLLAPSE_BUG
+   * validation to allow recovery similar to a container restart.
+   * 
+   * This flag is set when auto-recovery clears lastGoodSnapshot after stale age threshold,
+   * and cleared after successfully accepting a bootstrap snapshot.
+   */
+  private allowBootstrapAfterAutoRecovery: boolean = false;
+
   // Circuit breaker for spammy failing calls per tokenId
   private circuitBreaker: Map<string, CircuitBreakerEntry> = new Map();
   private static readonly CIRCUIT_BREAKER_THRESHOLD = 3; // failures before opening
@@ -1311,13 +1320,24 @@ export class PositionTracker {
 
     // Rule A: ACTIVE_COLLAPSE_BUG
     // If raw total > 0 AND raw active candidates > 0 BUT final active = 0, this is a bug
+    // EXCEPTION: Skip this check in bootstrap mode (after auto-recovery) to allow service
+    // to recover similar to a container restart when there's no baseline to compare
     if (rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0) {
-      return {
-        ok: false,
-        reason: "ACTIVE_COLLAPSE_BUG",
-        diagnostics:
-          `rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} finalActive=${finalActiveCount}`,
-      };
+      if (this.allowBootstrapAfterAutoRecovery) {
+        // Bootstrap mode: log and accept the snapshot despite ACTIVE_COLLAPSE_BUG
+        this.logger.warn(
+          `[PositionTracker] 🚀 BOOTSTRAP_RECOVERY: Accepting snapshot despite ACTIVE_COLLAPSE_BUG ` +
+            `(bootstrap mode after auto-recovery). rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} finalActive=${finalActiveCount}`,
+        );
+        // Continue to other validations (don't return early)
+      } else {
+        return {
+          ok: false,
+          reason: "ACTIVE_COLLAPSE_BUG",
+          diagnostics:
+            `rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} finalActive=${finalActiveCount}`,
+        };
+      }
     }
 
     // Rule B: FETCH_REGRESSION
@@ -1436,12 +1456,14 @@ export class PositionTracker {
       if (staleAgeMs >= PositionTracker.MAX_STALE_AGE_MS) {
         this.logger.warn(
           `[PositionTracker] 🔄 AUTO-RECOVERY: Clearing stale snapshot (age=${staleAgeSec}s >= ${Math.round(PositionTracker.MAX_STALE_AGE_MS / 1000)}s threshold). ` +
-            `Next refresh will accept fresh data. reason="${error.message}" active=${activeCount} redeemable=${redeemableCount}`,
+            `Next refresh will accept fresh data (bootstrap mode). reason="${error.message}" active=${activeCount} redeemable=${redeemableCount}`,
         );
         this.lastGoodSnapshot = null;
         this.lastGoodAtMs = 0;
         this.consecutiveFailures = 0;
         this.currentBackoffMs = 0;
+        // Enable bootstrap mode: next refresh will skip ACTIVE_COLLAPSE_BUG validation
+        this.allowBootstrapAfterAutoRecovery = true;
         return;
       }
 
@@ -1475,14 +1497,19 @@ export class PositionTracker {
    * 2. Clear backoff
    * 3. Update lastGoodSnapshot
    * 4. Log recovery if we were in failed state
+   * 5. Clear bootstrap mode flag if it was set
    */
   private handleRefreshSuccess(): void {
     const wasInFailedState = this.consecutiveFailures > 0;
+    const wasInBootstrapMode = this.allowBootstrapAfterAutoRecovery;
     const previousFailures = this.consecutiveFailures;
 
     // Reset failure tracking
     this.consecutiveFailures = 0;
     this.currentBackoffMs = 0;
+    
+    // Clear bootstrap mode flag
+    this.allowBootstrapAfterAutoRecovery = false;
 
     // Update lastGoodSnapshot (only if current snapshot is valid)
     if (this.lastSnapshot && !this.lastSnapshot.stale) {
@@ -1490,15 +1517,22 @@ export class PositionTracker {
       this.lastGoodAtMs = Date.now();
     }
 
-    // Log recovery if we were in a failed state
-    if (wasInFailedState && this.lastSnapshot) {
+    // Log recovery if we were in a failed state or bootstrap mode
+    if ((wasInFailedState || wasInBootstrapMode) && this.lastSnapshot) {
       const activeCount = this.lastSnapshot.activePositions.length;
       const redeemableCount = this.lastSnapshot.redeemablePositions.length;
 
-      this.logger.info(
-        `[PositionTracker] ✅ recovered after ${previousFailures} failures; ` +
-          `snapshot updated active=${activeCount}, redeemable=${redeemableCount}`,
-      );
+      if (wasInBootstrapMode) {
+        this.logger.info(
+          `[PositionTracker] ✅ BOOTSTRAP_RECOVERY complete: Service restored via bootstrap mode; ` +
+            `snapshot accepted active=${activeCount}, redeemable=${redeemableCount}`,
+        );
+      } else {
+        this.logger.info(
+          `[PositionTracker] ✅ recovered after ${previousFailures} failures; ` +
+            `snapshot updated active=${activeCount}, redeemable=${redeemableCount}`,
+        );
+      }
     }
   }
 
