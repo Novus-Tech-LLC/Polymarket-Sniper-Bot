@@ -3211,11 +3211,14 @@ export class PositionTracker {
    * @param conditionId - The conditionId (same as marketId in Polymarket)
    * @returns true if resolved on-chain (payoutDenominator > 0), false otherwise
    */
+  // Bytes32 hex string length (0x + 64 hex chars) - same as AutoRedeemStrategy
+  private static readonly BYTES32_HEX_LENGTH = 66;
+
   private async checkOnChainRedeemable(conditionId: string): Promise<boolean> {
     // Validate conditionId format (bytes32)
     if (
       !conditionId?.startsWith("0x") ||
-      conditionId.length !== 66 // 0x + 64 hex chars
+      conditionId.length !== PositionTracker.BYTES32_HEX_LENGTH
     ) {
       return false;
     }
@@ -3231,7 +3234,8 @@ export class PositionTracker {
     }
 
     try {
-      // Get wallet from CLOB client
+      // Get wallet from CLOB client (standard pattern used across all strategies)
+      // The ClobClient from @polymarket/clob-client attaches wallet property
       const wallet = (this.client as { wallet?: Wallet }).wallet;
       if (!wallet?.provider) {
         // No wallet/provider available, can't check on-chain
