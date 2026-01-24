@@ -59,6 +59,37 @@ POLY_BUILDER_API_PASSPHRASE=your_builder_passphrase
 
 **Official Documentation:** https://docs.polymarket.com/developers/builders/order-attribution
 
+### How to Enable the Relayer (Gasless Approvals)
+
+If your logs show `⚪ Relayer: DISABLED`, this is **normal** - the bot works fine without it.
+
+**What the relayer does:**
+- Enables gasless approval transactions (you don't pay gas for token approvals)
+- Uses Polymarket's infrastructure to relay transactions
+
+**What happens without the relayer:**
+- Approvals use direct contract calls (you pay gas, typically ~0.01-0.05 MATIC)
+- Trading still works normally
+- You may see: `[AutoRedeem] ⚠️ Relayer not available - using direct contract calls`
+
+**To enable the relayer, you need ONE of:**
+
+1. **Builder API credentials (all 3 required):**
+   ```bash
+   POLY_BUILDER_API_KEY=your_builder_key
+   POLY_BUILDER_API_SECRET=your_builder_secret
+   POLY_BUILDER_API_PASSPHRASE=your_builder_passphrase
+   ```
+   Get these from: https://docs.polymarket.com/developers/builders/builder-profile
+
+2. **Or a remote signer service:**
+   ```bash
+   SIGNER_URL=http://signer:8080/sign
+   SIGNER_AUTH_TOKEN=optional_token  # if your signer requires auth
+   ```
+
+**Important:** Builder credentials are **different** from CLOB credentials (`POLYMARKET_API_*`). You can have both configured - they serve different purposes.
+
 ## The Solution
 
 Based on your logs showing "401 Unauthorized/Invalid api key", you're likely using Builder keys as CLOB keys. Here's how to fix it:

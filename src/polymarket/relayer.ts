@@ -1,4 +1,8 @@
-import { RelayClient, RelayerTxType } from "@polymarket/builder-relayer-client";
+import {
+  RelayClient,
+  RelayerTxType,
+  OperationType,
+} from "@polymarket/builder-relayer-client";
 import {
   deriveProxyWallet,
   deriveSafe,
@@ -76,7 +80,7 @@ export const createRelayerContext = (params: {
     // Only log this message once to avoid duplicate logs in mode=both
     if (!relayerDisabledLogged) {
       params.logger?.info(
-        "[Relayer] Neither SIGNER_URL nor builder credentials provided; relayer disabled.",
+        "[Relayer] Relayer disabled. To enable gasless approvals, set POLY_BUILDER_API_KEY, POLY_BUILDER_API_SECRET, and POLY_BUILDER_API_PASSPHRASE (see docs/CREDENTIALS_EXPLAINED.md).",
       );
       relayerDisabledLogged = true;
     }
@@ -156,20 +160,52 @@ export const executeRelayerTxs = async (params: {
     throw new Error("[Relayer] Client unavailable for execute.");
   }
 
-  const txs = params.txs.map((tx) => ({
-    to: tx.to,
-    data: tx.data,
-    value: tx.value ?? "0",
-  }));
+  // Format transactions with operation type as required by the relayer SDK
+  // The operation field is required for Safe transactions
+  const txs = params.txs.map((tx) => {
+    // Validate hex string format
+    if (!tx.to.startsWith("0x")) {
+      throw new Error(`[Relayer] Invalid 'to' address format: ${tx.to}`);
+    }
+    if (!tx.data.startsWith("0x")) {
+      throw new Error(`[Relayer] Invalid 'data' format: ${tx.data.slice(0, 20)}...`);
+    }
+    return {
+      to: tx.to as `0x${string}`,
+      data: tx.data as `0x${string}`,
+      value: tx.value ?? "0",
+      operation: OperationType.Call,
+    };
+  });
 
   params.logger.info(
     `[Relayer] Executing ${txs.length} tx(s) desc=${params.description}`,
   );
-  const response = await client.execute(txs, params.description);
+
+  let response;
+  try {
+    response = await client.execute(txs, params.description);
+  } catch (executeErr) {
+    const errMsg =
+      executeErr instanceof Error ? executeErr.message : String(executeErr);
+    params.logger.error(`[Relayer] SDK execute() failed: ${errMsg}`);
+    throw new Error(`Relayer SDK execute() failed: ${errMsg}`);
+  }
+
   params.logger.info(
     `[Relayer] Submitted relayer_tx_id=${response.transactionID} state=${response.state} hash=${response.transactionHash ?? "n/a"}`,
   );
-  const result = await response.wait();
+
+  let result;
+  try {
+    result = await response.wait();
+  } catch (waitErr) {
+    const errMsg =
+      waitErr instanceof Error ? waitErr.message : String(waitErr);
+    params.logger.error(`[Relayer] SDK wait() failed: ${errMsg}`);
+    throw new Error(`Relayer SDK wait() failed: ${errMsg}`);
+  }
+
   if (!result) {
     params.logger.warn("[Relayer] Transaction did not reach a final state.");
     return {
