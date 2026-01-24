@@ -1540,7 +1540,7 @@ describe("Liquidation Candidates Logic", () => {
 /**
  * Tests for the corrected P&L calculation using BEST BID as mark price
  * These tests validate the fix for the 0.0% P&L issue described in the problem statement.
- * 
+ *
  * WHY PREVIOUS P&L SHOWED 0.0% AND ALL LOSING:
  * The old code used mid-price ((bestBid + bestAsk) / 2) for P&L calculations.
  * For sell-to-realize-profit scenarios, we MUST use the BEST BID - what we can actually sell at.
@@ -1614,7 +1614,7 @@ describe("PositionTracker P&L Calculation with BEST BID", () => {
   test("Regression: entry 62¢ → bid 60¢ => ~-3.2%", () => {
     // From problem statement: another losing position
     const entryPrice = 0.62;
-    const bestBid = 0.60;
+    const bestBid = 0.6;
     const size = 100;
 
     const markPrice = bestBid;
@@ -1632,7 +1632,7 @@ describe("PositionTracker P&L Calculation with BEST BID", () => {
   });
 
   test("Profitable position: entry 50¢ → bid 55¢ => +10%", () => {
-    const entryPrice = 0.50;
+    const entryPrice = 0.5;
     const bestBid = 0.55;
     const size = 100;
 
@@ -1641,15 +1641,21 @@ describe("PositionTracker P&L Calculation with BEST BID", () => {
     const pnlPct = ((markPrice - entryPrice) / entryPrice) * 100;
 
     // Use approximate comparison due to floating-point precision
-    assert.ok(Math.abs(pnlUsd - 5) < 0.01, `P&L USD should be ~$5, got ${pnlUsd}`);
-    assert.ok(Math.abs(pnlPct - 10) < 0.01, `P&L% should be ~10%, got ${pnlPct}`);
+    assert.ok(
+      Math.abs(pnlUsd - 5) < 0.01,
+      `P&L USD should be ~$5, got ${pnlUsd}`,
+    );
+    assert.ok(
+      Math.abs(pnlPct - 10) < 0.01,
+      `P&L% should be ~10%, got ${pnlPct}`,
+    );
   });
 
   test("Wide spread: entry 50¢, bid 48¢, ask 58¢ - shows loss despite mid > entry", () => {
     // This scenario demonstrates why mid-price is wrong:
     // Mid-price = (48 + 58) / 2 = 53¢ -> would show +6% profit
     // But we can only sell at 48¢ -> actual -4% loss
-    const entryPrice = 0.50;
+    const entryPrice = 0.5;
     const bestBid = 0.48;
     const bestAsk = 0.58;
     const size = 100;
@@ -1664,8 +1670,14 @@ describe("PositionTracker P&L Calculation with BEST BID", () => {
     assert.ok(wrongPnlPct > 0, "Mid-price wrongly shows profit");
     assert.ok(correctPnlPct < 0, "Correct calculation shows loss");
     // Use approximate comparison due to floating-point precision
-    assert.ok(Math.abs(correctPnlUsd - (-2)) < 0.01, `Actual loss should be ~$2, got ${correctPnlUsd}`);
-    assert.ok(Math.abs(correctPnlPct - (-4)) < 0.01, `Actual loss should be ~4%, got ${correctPnlPct}`);
+    assert.ok(
+      Math.abs(correctPnlUsd - -2) < 0.01,
+      `Actual loss should be ~$2, got ${correctPnlUsd}`,
+    );
+    assert.ok(
+      Math.abs(correctPnlPct - -4) < 0.01,
+      `Actual loss should be ~4%, got ${correctPnlPct}`,
+    );
   });
 
   test("'0 profitable' only occurs when all positions have pnlPct <= 0", () => {
@@ -1673,11 +1685,11 @@ describe("PositionTracker P&L Calculation with BEST BID", () => {
     // This should only happen when ALL positions have non-positive P&L
     type SimplePosition = { pnlPct: number; redeemable?: boolean };
     const positions: SimplePosition[] = [
-      { pnlPct: -5.36, redeemable: false },  // losing
-      { pnlPct: -3.23, redeemable: false },  // losing
-      { pnlPct: -1.5, redeemable: false },   // losing
-      { pnlPct: 0, redeemable: false },      // breakeven
-      { pnlPct: -8.2, redeemable: false },   // losing
+      { pnlPct: -5.36, redeemable: false }, // losing
+      { pnlPct: -3.23, redeemable: false }, // losing
+      { pnlPct: -1.5, redeemable: false }, // losing
+      { pnlPct: 0, redeemable: false }, // breakeven
+      { pnlPct: -8.2, redeemable: false }, // losing
     ];
 
     const activePositions = positions.filter((p) => !p.redeemable);
@@ -1740,20 +1752,22 @@ describe("PositionTracker Status and NO_BOOK Handling", () => {
     // because P&L calculation uses fallback pricing which may be inaccurate
     type Position = { status?: string; pnlPct: number; redeemable?: boolean };
     const positions: Position[] = [
-      { status: "ACTIVE", pnlPct: 5.0, redeemable: false },    // Should evaluate
-      { status: "NO_BOOK", pnlPct: 3.0, redeemable: false },   // Should skip
+      { status: "ACTIVE", pnlPct: 5.0, redeemable: false }, // Should evaluate
+      { status: "NO_BOOK", pnlPct: 3.0, redeemable: false }, // Should skip
       { status: "REDEEMABLE", pnlPct: 66.0, redeemable: true }, // Should skip (resolved)
-      { status: "ACTIVE", pnlPct: -2.0, redeemable: false },   // Should skip (losing)
+      { status: "ACTIVE", pnlPct: -2.0, redeemable: false }, // Should skip (losing)
     ];
 
-    const scalpCandidates = positions.filter((p) => 
-      !p.redeemable && 
-      p.status !== "NO_BOOK" && 
-      p.pnlPct > 0
+    const scalpCandidates = positions.filter(
+      (p) => !p.redeemable && p.status !== "NO_BOOK" && p.pnlPct > 0,
     );
 
     assert.strictEqual(scalpCandidates.length, 1, "Only 1 candidate");
-    assert.strictEqual(scalpCandidates[0].pnlPct, 5.0, "Candidate has 5% profit");
+    assert.strictEqual(
+      scalpCandidates[0].pnlPct,
+      5.0,
+      "Candidate has 5% profit",
+    );
   });
 });
 
@@ -1762,7 +1776,7 @@ describe("PositionTracker Cache TTL Logic", () => {
     const ORDERBOOK_CACHE_TTL_MS = 2000;
     const fetchedAt = Date.now() - 1000; // 1 second ago
     const now = Date.now();
-    
+
     const cacheAge = now - fetchedAt;
     const isValid = cacheAge < ORDERBOOK_CACHE_TTL_MS;
 
@@ -1773,7 +1787,7 @@ describe("PositionTracker Cache TTL Logic", () => {
     const ORDERBOOK_CACHE_TTL_MS = 2000;
     const fetchedAt = Date.now() - 3000; // 3 seconds ago
     const now = Date.now();
-    
+
     const cacheAge = now - fetchedAt;
     const isValid = cacheAge < ORDERBOOK_CACHE_TTL_MS;
 
@@ -1783,9 +1797,12 @@ describe("PositionTracker Cache TTL Logic", () => {
   test("Cache age is calculated correctly", () => {
     const fetchedAt = Date.now() - 1500; // 1.5 seconds ago
     const now = Date.now();
-    
+
     const cacheAge = now - fetchedAt;
 
-    assert.ok(cacheAge >= 1500 && cacheAge < 1600, "Cache age should be ~1500ms");
+    assert.ok(
+      cacheAge >= 1500 && cacheAge < 1600,
+      "Cache age should be ~1500ms",
+    );
   });
 });

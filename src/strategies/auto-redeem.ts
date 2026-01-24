@@ -74,6 +74,10 @@ export class AutoRedeemStrategy {
   private positionTracker: PositionTracker;
   private config: AutoRedeemConfig;
 
+  // === SINGLE-FLIGHT GUARD ===
+  // Prevents concurrent execution if called multiple times
+  private inFlight = false;
+
   // Timing constants
   private static readonly API_TIMEOUT_MS = 10_000;
   private static readonly TX_CONFIRMATION_TIMEOUT_MS = 45_000;
@@ -107,6 +111,9 @@ export class AutoRedeemStrategy {
   /**
    * Execute the auto-redeem check cycle
    * Called by the orchestrator on a schedule
+   *
+   * SINGLE-FLIGHT: Skips if already running (returns 0)
+   *
    * @returns The number of successful redemptions
    */
   async execute(): Promise<number> {
@@ -114,6 +121,24 @@ export class AutoRedeemStrategy {
       return 0;
     }
 
+    // Single-flight guard: prevent concurrent execution
+    if (this.inFlight) {
+      this.logger.debug("[AutoRedeem] Skipped - already in flight");
+      return 0;
+    }
+
+    this.inFlight = true;
+    try {
+      return await this.executeInternal();
+    } finally {
+      this.inFlight = false;
+    }
+  }
+
+  /**
+   * Internal execution logic (called by execute() with in-flight guard)
+   */
+  private async executeInternal(): Promise<number> {
     const redeemablePositions = this.getRedeemablePositions();
 
     if (redeemablePositions.length === 0) {
