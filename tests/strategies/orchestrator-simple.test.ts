@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { test, describe } from "node:test";
+import { randomUUID } from "crypto";
 
 /**
  * Unit tests for SimpleOrchestrator single-flight cycle protection
@@ -290,7 +291,6 @@ describe("PositionTracker Single-Flight Refresh", () => {
 describe("Orchestrator Boot ID", () => {
   test("Boot ID should be unique per instance", () => {
     // Simulate boot ID generation like the real orchestrator
-    const { randomUUID } = require("crypto");
     const bootId1 = randomUUID().slice(0, 8);
     const bootId2 = randomUUID().slice(0, 8);
 
