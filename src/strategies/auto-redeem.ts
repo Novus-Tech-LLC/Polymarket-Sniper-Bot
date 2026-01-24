@@ -60,20 +60,24 @@ export interface RedemptionResult {
  * When a market resolves, winning positions can be redeemed for the full $1 per share,
  * and losing positions become worthless (0 redemption value).
  *
+ * REQUIRED ENV VARS (that's all you need!):
+ * - PRIVATE_KEY: Your wallet's private key (to sign transactions)
+ * - RPC_URL: Polygon RPC endpoint (e.g., from Alchemy, Infura, QuickNode)
+ *
+ * NO Polymarket API keys needed - the data APIs are public.
+ *
  * This strategy:
- * 1. Identifies positions marked as "redeemable" (market resolved)
- * 2. Calls the CTF contract's redeemPositions() to claim USDC
- * 3. Frees up capital that would otherwise sit idle
+ * 1. Fetches proxy address from Polymarket public API (if any)
+ * 2. Gets redeemable positions from the position tracker
+ * 3. Calls redeemPositions() via proxy contract or directly on CTF
+ * 4. Supports any number of outcomes (binary YES/NO, multi-outcome, over/under, etc.)
  *
  * Benefits:
  * - Automatic capital recovery without manual intervention
  * - No waiting for Polymarket's 4pm UTC daily settlement
  * - Immediate USDC availability for new trades
  *
- * Execution frequency:
- * - The orchestrator calls execute() every 2 seconds
- * - This strategy throttles internally to check every 30 seconds (configurable via checkIntervalMs)
- * - This prevents excessive blockchain calls while still being responsive to resolved markets
+ * Inspired by: github.com/milanzandbak/polymarketredeemer
  */
 export class AutoRedeemStrategy {
   private client: ClobClient;
@@ -106,6 +110,10 @@ export class AutoRedeemStrategy {
    */
   private static readonly RPC_RATE_LIMIT_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
   private static readonly DEFAULT_GAS_LIMIT = 300000n;
+  /** Timeout for waiting for transaction confirmation */
+  private static readonly TX_CONFIRMATION_TIMEOUT_MS = 45000; // 45 seconds
+  /** Timeout for API calls (profile lookup, etc.) */
+  private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
   // Multiplier to convert USD threshold to minimum share count: minPositionUsd * this = minimum shares to redeem
   // For example, if minPositionUsd = 1, we require at least 0.01 shares to redeem
   // (filters out positions with fractional shares smaller than 0.01 as true dust)
@@ -594,13 +602,15 @@ export class AutoRedeemStrategy {
       let proxyAddress: string | null = null;
       try {
         const profileUrl = POLYMARKET_API.PROFILE_ENDPOINT(wallet.address);
-        const profileData = await httpGet<{ proxyAddress?: string }>(profileUrl);
+        const profileData = await httpGet<{ proxyAddress?: string }>(profileUrl, {
+          timeout: AutoRedeemStrategy.API_TIMEOUT_MS,
+        });
         if (profileData?.proxyAddress) {
           proxyAddress = profileData.proxyAddress;
           this.logger.debug(`[AutoRedeem] Found proxy address: ${proxyAddress}`);
         }
       } catch {
-        // No proxy found - will use direct call
+        // No proxy found or API timeout - will use direct call
         this.logger.debug(`[AutoRedeem] No proxy address found, using direct wallet`);
       }
 
@@ -609,41 +619,57 @@ export class AutoRedeemStrategy {
       this.logger.info(`[AutoRedeem] Redeeming for ${targetAddress} (proxy=${!!proxyAddress})`);
 
       // Step 2: Build the redeemPositions call data
-      // Always use [1, 2] to redeem both YES and NO positions (contract ignores ones you don't hold)
+      // Index sets in CTF are powers of 2: outcome 0 = 1, outcome 1 = 2, outcome 2 = 4, etc.
+      // Generate index sets for up to 16 outcomes (covers any Polymarket market)
+      // The CTF contract safely ignores index sets you don't hold tokens for
+      const indexSets = Array.from({ length: 16 }, (_, i) => Math.pow(2, i));
+      // Results in: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
+      
       const ctfInterface = new Interface(CTF_ABI);
       const redeemData = ctfInterface.encodeFunctionData("redeemPositions", [
         usdcAddress,
         "0x0000000000000000000000000000000000000000000000000000000000000000", // parentCollectionId = bytes32(0)
         conditionId,
-        [1, 2], // Cover both YES (1) and NO (2) outcomes
+        indexSets,
       ]);
 
       // Step 3: Get gas fees with 30% buffer (like reference implementation)
-      const feeData = await wallet.provider!.getFeeData();
-      const maxPriorityFee = (feeData.maxPriorityFeePerGas! * 130n) / 100n;
-      const maxFee = (feeData.maxFeePerGas! * 130n) / 100n;
-      const txOptions = {
-        maxPriorityFeePerGas: maxPriorityFee,
-        maxFeePerGas: maxFee,
-      };
+      if (!wallet.provider) {
+        return {
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          error: "No provider available",
+        };
+      }
+      const feeData = await wallet.provider.getFeeData();
+      const maxPriorityFee = feeData.maxPriorityFeePerGas 
+        ? (feeData.maxPriorityFeePerGas * 130n) / 100n 
+        : undefined;
+      const maxFee = feeData.maxFeePerGas 
+        ? (feeData.maxFeePerGas * 130n) / 100n 
+        : undefined;
+      const txOptions = maxPriorityFee && maxFee
+        ? { maxPriorityFeePerGas: maxPriorityFee, maxFeePerGas: maxFee }
+        : {}; // Fall back to provider defaults if fee data unavailable
 
       // Step 4: Execute the redemption
       let tx: TransactionResponse;
 
-      if (proxyAddress && proxyAddress.toLowerCase() !== wallet.address.toLowerCase()) {
+      if (proxyAddress) {
         // Use proxy contract to execute redemption
         this.logger.info(`[AutoRedeem] 🔄 Sending redemption via proxy ${proxyAddress.slice(0, 10)}...`);
         const proxyContract = new Contract(proxyAddress, PROXY_WALLET_ABI, wallet);
         tx = await proxyContract.proxy(ctfAddress, redeemData, txOptions) as TransactionResponse;
       } else {
-        // Direct call to CTF contract
+        // Direct call to CTF contract (no proxy)
         this.logger.info(`[AutoRedeem] 🔄 Sending direct redemption to CTF...`);
         const ctfContract = new Contract(ctfAddress, CTF_ABI, wallet);
         tx = await ctfContract.redeemPositions(
           usdcAddress,
           "0x0000000000000000000000000000000000000000000000000000000000000000",
           conditionId,
-          [1, 2],
+          indexSets,
           txOptions,
         ) as TransactionResponse;
       }
@@ -654,7 +680,10 @@ export class AutoRedeemStrategy {
       const receipt = await Promise.race([
         tx.wait(),
         new Promise<null>((_, reject) =>
-          setTimeout(() => reject(new Error("Transaction timeout (45s)")), 45000)
+          setTimeout(
+            () => reject(new Error(`Transaction timeout (${AutoRedeemStrategy.TX_CONFIRMATION_TIMEOUT_MS / 1000}s)`)),
+            AutoRedeemStrategy.TX_CONFIRMATION_TIMEOUT_MS
+          )
         ),
       ]);
 
