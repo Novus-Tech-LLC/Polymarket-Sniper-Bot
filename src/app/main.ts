@@ -17,10 +17,7 @@ import { startOpenvpn } from "../utils/openvpn.util";
 import { formatClobCredsChecklist } from "../utils/clob-credentials.util";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
-import {
-  Orchestrator,
-  createOrchestrator,
-} from "../strategies/orchestrator";
+import { Orchestrator, createOrchestrator } from "../strategies/orchestrator";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 
 async function main(): Promise<void> {

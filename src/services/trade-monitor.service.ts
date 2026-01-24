@@ -82,7 +82,13 @@ export class TradeMonitorService {
 
       // Rate-limit "fetched activities" log - only log on count change or heartbeat
       const fetchedFingerprint = `${trader}:${activities.length}`;
-      if (this.logDeduper.shouldLog(`Monitor:fetched:${trader}`, HEARTBEAT_INTERVAL_MS, fetchedFingerprint)) {
+      if (
+        this.logDeduper.shouldLog(
+          `Monitor:fetched:${trader}`,
+          HEARTBEAT_INTERVAL_MS,
+          fetchedFingerprint,
+        )
+      ) {
         this.deps.logger.debug(
           `[Monitor] Fetched ${activities.length} activities for ${trader}`,
         );
@@ -154,7 +160,13 @@ export class TradeMonitorService {
       } else if (tradeCount > 0) {
         // Log summary only on heartbeat if no new trades but there are trades in the window
         const summaryFingerprint = `${trader}:${tradeCount}:${skippedOld}:${skippedProcessed}`;
-        if (this.logDeduper.shouldLog(`Monitor:summary:${trader}`, HEARTBEAT_INTERVAL_MS, summaryFingerprint)) {
+        if (
+          this.logDeduper.shouldLog(
+            `Monitor:summary:${trader}`,
+            HEARTBEAT_INTERVAL_MS,
+            summaryFingerprint,
+          )
+        ) {
           this.deps.logger.debug(
             `[Monitor] ${trader}: ${tradeCount} trades (${skippedOld} too old, ${skippedProcessed} already processed, ${skippedBeforeLastTime} before last time)`,
           );
@@ -164,7 +176,12 @@ export class TradeMonitorService {
       // Handle 404 gracefully - user might have no activities yet or endpoint doesn't exist
       if (axios.isAxiosError(err) && err.response?.status === 404) {
         // Rate-limit 404 warnings
-        if (this.logDeduper.shouldLog(`Monitor:404:${trader}`, HEARTBEAT_INTERVAL_MS)) {
+        if (
+          this.logDeduper.shouldLog(
+            `Monitor:404:${trader}`,
+            HEARTBEAT_INTERVAL_MS,
+          )
+        ) {
           this.deps.logger.warn(
             `[Monitor] ⚠️ No activities found for ${trader} (404)`,
           );

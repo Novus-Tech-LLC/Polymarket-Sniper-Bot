@@ -2605,10 +2605,10 @@ describe("P&L Math Correctness", () => {
 
     // Verify the P&L math (use tolerance for floating point)
     assert.ok(
-      Math.abs(pnlUsd - (-3)) < 0.0001,
+      Math.abs(pnlUsd - -3) < 0.0001,
       `P&L should be -$3.00, got ${pnlUsd}`,
     );
-    
+
     // Calculate expected percentage inline for clarity
     const expectedPct = ((currentPrice - entryPrice) / entryPrice) * 100; // -5.357...%
     assert.ok(
@@ -2619,13 +2619,16 @@ describe("P&L Math Correctness", () => {
 
   test("P&L calculation: 65¢ → 70¢ = +7.69%", () => {
     const entryPrice = 0.65;
-    const currentPrice = 0.70;
+    const currentPrice = 0.7;
     const size = 50;
 
     const pnlUsd = (currentPrice - entryPrice) * size;
     const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
 
-    assert.ok(Math.abs(pnlUsd - 2.5) < 0.0001, `P&L should be +$2.50, got ${pnlUsd}`);
+    assert.ok(
+      Math.abs(pnlUsd - 2.5) < 0.0001,
+      `P&L should be +$2.50, got ${pnlUsd}`,
+    );
     // Calculate expected percentage inline for clarity
     const expectedPct = ((currentPrice - entryPrice) / entryPrice) * 100; // +7.692...%
     assert.ok(
@@ -2660,8 +2663,9 @@ describe("P&L Classification", () => {
     };
 
     // When bestBidPrice is undefined and status is NO_BOOK, pnlTrusted should be false
-    const pnlTrusted = position.currentBidPrice !== undefined && position.status !== "NO_BOOK";
-    
+    const pnlTrusted =
+      position.currentBidPrice !== undefined && position.status !== "NO_BOOK";
+
     // Classification should be UNKNOWN when pnlTrusted is false
     let classification: "PROFITABLE" | "LOSING" | "NEUTRAL" | "UNKNOWN";
     if (!pnlTrusted) {
@@ -2674,14 +2678,22 @@ describe("P&L Classification", () => {
       classification = "NEUTRAL";
     }
 
-    assert.strictEqual(pnlTrusted, false, "P&L should be untrusted when no orderbook");
-    assert.strictEqual(classification, "UNKNOWN", "Classification should be UNKNOWN when P&L is untrusted");
+    assert.strictEqual(
+      pnlTrusted,
+      false,
+      "P&L should be untrusted when no orderbook",
+    );
+    assert.strictEqual(
+      classification,
+      "UNKNOWN",
+      "Classification should be UNKNOWN when P&L is untrusted",
+    );
   });
 
   test("Valid orderbook data → correct classification", () => {
     // Position with valid bid price
     const profitablePosition = {
-      entryPrice: 0.50,
+      entryPrice: 0.5,
       currentPrice: 0.55,
       pnlPct: 10,
       status: "ACTIVE" as const,
@@ -2689,23 +2701,29 @@ describe("P&L Classification", () => {
     };
 
     const losingPosition = {
-      entryPrice: 0.60,
-      currentPrice: 0.50,
+      entryPrice: 0.6,
+      currentPrice: 0.5,
       pnlPct: -16.67,
       status: "ACTIVE" as const,
-      currentBidPrice: 0.50,
+      currentBidPrice: 0.5,
     };
 
     // Both positions have valid bid prices
     const profitTrusted = profitablePosition.currentBidPrice !== undefined;
     const lossTrusted = losingPosition.currentBidPrice !== undefined;
 
-    assert.strictEqual(profitTrusted, true, "Profitable position should be trusted");
+    assert.strictEqual(
+      profitTrusted,
+      true,
+      "Profitable position should be trusted",
+    );
     assert.strictEqual(lossTrusted, true, "Losing position should be trusted");
 
     // Verify classifications
-    const profitClassification = profitTrusted && profitablePosition.pnlPct > 0 ? "PROFITABLE" : "UNKNOWN";
-    const lossClassification = lossTrusted && losingPosition.pnlPct < 0 ? "LOSING" : "UNKNOWN";
+    const profitClassification =
+      profitTrusted && profitablePosition.pnlPct > 0 ? "PROFITABLE" : "UNKNOWN";
+    const lossClassification =
+      lossTrusted && losingPosition.pnlPct < 0 ? "LOSING" : "UNKNOWN";
 
     assert.strictEqual(profitClassification, "PROFITABLE");
     assert.strictEqual(lossClassification, "LOSING");
@@ -2716,19 +2734,45 @@ describe("Position Summary Classification Invariant", () => {
   test("REGRESSION: ACTIVE positions must NEVER produce empty classification", () => {
     // This is a CRITICAL regression test
     // The system must NEVER report "ACTIVE: 0 profitable, 0 losing" when active positions exist
-    
+
     const mockPositions = [
-      { redeemable: false, pnlPct: 5, pnlTrusted: true, pnlClassification: "PROFITABLE" as const },
-      { redeemable: false, pnlPct: -10, pnlTrusted: true, pnlClassification: "LOSING" as const },
-      { redeemable: false, pnlPct: 0, pnlTrusted: true, pnlClassification: "NEUTRAL" as const },
-      { redeemable: false, pnlPct: -5, pnlTrusted: false, pnlClassification: "UNKNOWN" as const },
+      {
+        redeemable: false,
+        pnlPct: 5,
+        pnlTrusted: true,
+        pnlClassification: "PROFITABLE" as const,
+      },
+      {
+        redeemable: false,
+        pnlPct: -10,
+        pnlTrusted: true,
+        pnlClassification: "LOSING" as const,
+      },
+      {
+        redeemable: false,
+        pnlPct: 0,
+        pnlTrusted: true,
+        pnlClassification: "NEUTRAL" as const,
+      },
+      {
+        redeemable: false,
+        pnlPct: -5,
+        pnlTrusted: false,
+        pnlClassification: "UNKNOWN" as const,
+      },
     ];
 
-    const active = mockPositions.filter(p => !p.redeemable);
-    const activeProfitable = active.filter(p => p.pnlClassification === "PROFITABLE");
-    const activeLosing = active.filter(p => p.pnlClassification === "LOSING");
-    const activeNeutral = active.filter(p => p.pnlClassification === "NEUTRAL");
-    const activeUnknown = active.filter(p => p.pnlClassification === "UNKNOWN");
+    const active = mockPositions.filter((p) => !p.redeemable);
+    const activeProfitable = active.filter(
+      (p) => p.pnlClassification === "PROFITABLE",
+    );
+    const activeLosing = active.filter((p) => p.pnlClassification === "LOSING");
+    const activeNeutral = active.filter(
+      (p) => p.pnlClassification === "NEUTRAL",
+    );
+    const activeUnknown = active.filter(
+      (p) => p.pnlClassification === "UNKNOWN",
+    );
 
     // Verify counts
     assert.strictEqual(active.length, 4, "Should have 4 active positions");
@@ -2738,8 +2782,11 @@ describe("Position Summary Classification Invariant", () => {
     assert.strictEqual(activeUnknown.length, 1, "Should have 1 unknown");
 
     // CRITICAL INVARIANT: sum of classifications must equal total active
-    const classificationSum = activeProfitable.length + activeLosing.length + 
-                              activeNeutral.length + activeUnknown.length;
+    const classificationSum =
+      activeProfitable.length +
+      activeLosing.length +
+      activeNeutral.length +
+      activeUnknown.length;
     assert.strictEqual(
       classificationSum,
       active.length,
@@ -2747,10 +2794,11 @@ describe("Position Summary Classification Invariant", () => {
     );
 
     // CRITICAL: If active > 0, at least one classification bucket must be non-zero
-    const hasClassification = activeProfitable.length > 0 || 
-                              activeLosing.length > 0 || 
-                              activeNeutral.length > 0 || 
-                              activeUnknown.length > 0;
+    const hasClassification =
+      activeProfitable.length > 0 ||
+      activeLosing.length > 0 ||
+      activeNeutral.length > 0 ||
+      activeUnknown.length > 0;
     assert.ok(
       active.length === 0 || hasClassification,
       "REGRESSION: If active positions exist, at least one classification must be non-empty",
@@ -2759,29 +2807,52 @@ describe("Position Summary Classification Invariant", () => {
 
   test("REGRESSION: 'ACTIVE: 0 profitable, 0 losing' is IMPOSSIBLE when active > 0", () => {
     // This directly tests the invariant from the enterprise spec
-    
+
     // Simulating the old buggy behavior that produced "0 profitable, 0 losing"
     // when there were actually active positions with UNKNOWN classification
     const mockPositions = [
-      { redeemable: false, pnlPct: -5, pnlTrusted: false, pnlClassification: "UNKNOWN" as const },
-      { redeemable: false, pnlPct: 3, pnlTrusted: false, pnlClassification: "UNKNOWN" as const },
+      {
+        redeemable: false,
+        pnlPct: -5,
+        pnlTrusted: false,
+        pnlClassification: "UNKNOWN" as const,
+      },
+      {
+        redeemable: false,
+        pnlPct: 3,
+        pnlTrusted: false,
+        pnlClassification: "UNKNOWN" as const,
+      },
     ];
 
-    const active = mockPositions.filter(p => !p.redeemable);
-    const activeProfitable = active.filter(p => p.pnlClassification === "PROFITABLE");
-    const activeLosing = active.filter(p => p.pnlClassification === "LOSING");
-    const activeUnknown = active.filter(p => p.pnlClassification === "UNKNOWN");
+    const active = mockPositions.filter((p) => !p.redeemable);
+    const activeProfitable = active.filter(
+      (p) => p.pnlClassification === "PROFITABLE",
+    );
+    const activeLosing = active.filter((p) => p.pnlClassification === "LOSING");
+    const activeUnknown = active.filter(
+      (p) => p.pnlClassification === "UNKNOWN",
+    );
 
     // The OLD code would show "0 profitable, 0 losing" and hide the unknown
     // The NEW code shows "0 prof, 0 lose, 0 neutral, 2 unknown"
-    
+
     assert.strictEqual(active.length, 2, "Should have 2 active positions");
-    assert.strictEqual(activeProfitable.length, 0, "Should have 0 profitable (all untrusted)");
-    assert.strictEqual(activeLosing.length, 0, "Should have 0 losing (all untrusted)");
+    assert.strictEqual(
+      activeProfitable.length,
+      0,
+      "Should have 0 profitable (all untrusted)",
+    );
+    assert.strictEqual(
+      activeLosing.length,
+      0,
+      "Should have 0 losing (all untrusted)",
+    );
     assert.strictEqual(activeUnknown.length, 2, "Should have 2 unknown");
 
     // The CRITICAL invariant: if we have active positions, at least one bucket must be non-zero
-    const totalClassified = activeProfitable.length + activeLosing.length + activeUnknown.length;
+    const totalClassified =
+      activeProfitable.length + activeLosing.length + activeUnknown.length;
     assert.strictEqual(
       totalClassified,
       active.length,
@@ -2799,7 +2870,7 @@ describe("Position Summary Classification Invariant", () => {
 
 /**
  * REGRESSION TESTS FOR DATA-API P&L (JAN 2025)
- * 
+ *
  * These tests verify that P&L calculations match what Polymarket UI shows.
  * Based on the problem statement examples:
  * - entry 55¢, current 56¢ => +2.71% (approx)
@@ -2812,7 +2883,10 @@ describe("Data-API P&L Matching Polymarket UI", () => {
    * Helper: Calculate P&L percentage matching Polymarket UI formula.
    * pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100
    */
-  const calculatePnlPct = (entryPrice: number, currentPrice: number): number => {
+  const calculatePnlPct = (
+    entryPrice: number,
+    currentPrice: number,
+  ): number => {
     if (entryPrice <= 0) return 0;
     return ((currentPrice - entryPrice) / entryPrice) * 100;
   };
@@ -2821,7 +2895,11 @@ describe("Data-API P&L Matching Polymarket UI", () => {
    * Helper: Calculate P&L USD matching Polymarket UI formula.
    * pnlUsd = (currentPrice - entryPrice) * size
    */
-  const calculatePnlUsd = (entryPrice: number, currentPrice: number, size: number): number => {
+  const calculatePnlUsd = (
+    entryPrice: number,
+    currentPrice: number,
+    size: number,
+  ): number => {
     return (currentPrice - entryPrice) * size;
   };
 
@@ -2835,12 +2913,12 @@ describe("Data-API P&L Matching Polymarket UI", () => {
 
     // Expected: +2.71% (approximately)
     assert.ok(
-      Math.abs(pnlPct - 2.76) < 0.1, 
-      `P&L should be ~+2.76%, got ${pnlPct.toFixed(2)}%`
+      Math.abs(pnlPct - 2.76) < 0.1,
+      `P&L should be ~+2.76%, got ${pnlPct.toFixed(2)}%`,
     );
     assert.ok(
       pnlUsd > 0,
-      `P&L USD should be positive, got $${pnlUsd.toFixed(2)}`
+      `P&L USD should be positive, got $${pnlUsd.toFixed(2)}`,
     );
   });
 
@@ -2867,16 +2945,16 @@ describe("Data-API P&L Matching Polymarket UI", () => {
 
     // Expected: -1.16% (approximately)
     assert.ok(
-      Math.abs(pnlPct - (-1.16)) < 0.1, 
-      `P&L should be ~-1.16%, got ${pnlPct.toFixed(2)}%`
+      Math.abs(pnlPct - -1.16) < 0.1,
+      `P&L should be ~-1.16%, got ${pnlPct.toFixed(2)}%`,
     );
     assert.ok(
       pnlUsd < 0,
-      `P&L USD should be negative, got $${pnlUsd.toFixed(2)}`
+      `P&L USD should be negative, got $${pnlUsd.toFixed(2)}`,
     );
     assert.ok(
-      Math.abs(pnlUsd - (-1)) < 0.1,
-      `P&L USD should be ~-$1.00, got $${pnlUsd.toFixed(2)}`
+      Math.abs(pnlUsd - -1) < 0.1,
+      `P&L USD should be ~-$1.00, got $${pnlUsd.toFixed(2)}`,
     );
   });
 
@@ -2890,40 +2968,52 @@ describe("Data-API P&L Matching Polymarket UI", () => {
 
     // Expected: -58.93%
     assert.ok(
-      Math.abs(pnlPct - (-58.93)) < 0.5, 
-      `P&L should be ~-58.93%, got ${pnlPct.toFixed(2)}%`
+      Math.abs(pnlPct - -58.93) < 0.5,
+      `P&L should be ~-58.93%, got ${pnlPct.toFixed(2)}%`,
     );
     assert.ok(
       pnlUsd < -30,
-      `P&L USD should be significantly negative, got $${pnlUsd.toFixed(2)}`
+      `P&L USD should be significantly negative, got $${pnlUsd.toFixed(2)}`,
     );
   });
 
   test("P&L classification from Data-API values matches expected", () => {
     // Test Data-API P&L fields properly classify positions
-    
+
     // Profitable: +5.5%
     const profitable = { pnlPct: 5.5, pnlTrusted: true };
     assert.strictEqual(
-      profitable.pnlPct > 0 ? "PROFITABLE" : profitable.pnlPct < 0 ? "LOSING" : "NEUTRAL",
+      profitable.pnlPct > 0
+        ? "PROFITABLE"
+        : profitable.pnlPct < 0
+          ? "LOSING"
+          : "NEUTRAL",
       "PROFITABLE",
-      "Positive P&L should be PROFITABLE"
+      "Positive P&L should be PROFITABLE",
     );
 
     // Losing: -3.2%
     const losing = { pnlPct: -3.2, pnlTrusted: true };
     assert.strictEqual(
-      losing.pnlPct > 0 ? "PROFITABLE" : losing.pnlPct < 0 ? "LOSING" : "NEUTRAL",
+      losing.pnlPct > 0
+        ? "PROFITABLE"
+        : losing.pnlPct < 0
+          ? "LOSING"
+          : "NEUTRAL",
       "LOSING",
-      "Negative P&L should be LOSING"
+      "Negative P&L should be LOSING",
     );
 
     // Neutral: 0%
     const neutral = { pnlPct: 0, pnlTrusted: true };
     assert.strictEqual(
-      neutral.pnlPct > 0 ? "PROFITABLE" : neutral.pnlPct < 0 ? "LOSING" : "NEUTRAL",
+      neutral.pnlPct > 0
+        ? "PROFITABLE"
+        : neutral.pnlPct < 0
+          ? "LOSING"
+          : "NEUTRAL",
       "NEUTRAL",
-      "Zero P&L should be NEUTRAL"
+      "Zero P&L should be NEUTRAL",
     );
   });
 });
@@ -2934,11 +3024,11 @@ describe("Data-API P&L Matching Polymarket UI", () => {
 describe("PnL Source Tracking", () => {
   test("DATA_API source should be trusted", () => {
     const sources = ["DATA_API", "EXECUTABLE_BOOK", "FALLBACK"] as const;
-    
+
     // DATA_API is always trusted (matches UI)
     assert.ok(
       sources[0] === "DATA_API",
-      "DATA_API should be the preferred source"
+      "DATA_API should be the preferred source",
     );
   });
 
@@ -2949,11 +3039,15 @@ describe("PnL Source Tracking", () => {
       { pnlSource: "FALLBACK", hasCurPrice: true, expectedTrusted: true },
       { pnlSource: "FALLBACK", hasCurPrice: false, expectedTrusted: false },
       { pnlSource: "DATA_API", hasCurPrice: false, expectedTrusted: true },
-      { pnlSource: "EXECUTABLE_BOOK", hasCurPrice: false, expectedTrusted: true },
+      {
+        pnlSource: "EXECUTABLE_BOOK",
+        hasCurPrice: false,
+        expectedTrusted: true,
+      },
     ];
 
     for (const scenario of scenarios) {
-      const shouldBeTrusted = 
+      const shouldBeTrusted =
         scenario.pnlSource === "DATA_API" ||
         scenario.pnlSource === "EXECUTABLE_BOOK" ||
         (scenario.pnlSource === "FALLBACK" && scenario.hasCurPrice);
@@ -2961,7 +3055,7 @@ describe("PnL Source Tracking", () => {
       assert.strictEqual(
         shouldBeTrusted,
         scenario.expectedTrusted,
-        `Source=${scenario.pnlSource}, hasCurPrice=${scenario.hasCurPrice} should have trusted=${scenario.expectedTrusted}`
+        `Source=${scenario.pnlSource}, hasCurPrice=${scenario.hasCurPrice} should have trusted=${scenario.expectedTrusted}`,
       );
     }
   });
@@ -2980,13 +3074,7 @@ describe("Holding Address Resolution", () => {
     ];
 
     // Invalid addresses
-    const invalidAddresses = [
-      "unknown",
-      "",
-      "0x",
-      "0x123",
-      "not-an-address",
-    ];
+    const invalidAddresses = ["unknown", "", "0x", "0x123", "not-an-address"];
 
     for (const addr of validAddresses) {
       const isValid = /^0x[a-fA-F0-9]{40}$/.test(addr);
@@ -3013,21 +3101,21 @@ describe("Holding Address Resolution", () => {
     assert.strictEqual(
       resolveHolding(eoaAddress, proxyAddress),
       proxyAddress,
-      "Should use proxy when available"
+      "Should use proxy when available",
     );
 
     // With no proxy
     assert.strictEqual(
       resolveHolding(eoaAddress, null),
       eoaAddress,
-      "Should fallback to EOA when no proxy"
+      "Should fallback to EOA when no proxy",
     );
 
     // With invalid proxy
     assert.strictEqual(
       resolveHolding(eoaAddress, "invalid"),
       eoaAddress,
-      "Should fallback to EOA when proxy is invalid"
+      "Should fallback to EOA when proxy is invalid",
     );
   });
 });

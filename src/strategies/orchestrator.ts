@@ -233,9 +233,7 @@ export class Orchestrator {
       return;
     }
 
-    this.logger.info(
-      `[Orchestrator] 🚀 Starting... (bootId=${this.bootId})`,
-    );
+    this.logger.info(`[Orchestrator] 🚀 Starting... (bootId=${this.bootId})`);
 
     // Start position tracking
     await this.positionTracker.start();
@@ -387,7 +385,13 @@ export class Orchestrator {
           .join(",");
 
         // Log only if the set of slow strategies changed or TTL expired
-        if (this.logDeduper.shouldLog("Orchestrator:slow_strategies", HEARTBEAT_INTERVAL_MS, slowNamesFingerprint)) {
+        if (
+          this.logDeduper.shouldLog(
+            "Orchestrator:slow_strategies",
+            HEARTBEAT_INTERVAL_MS,
+            slowNamesFingerprint,
+          )
+        ) {
           this.logger.debug(
             `[Orchestrator] Slow strategies: ${slowStrategies.map((s) => `${s.name}=${s.durationMs}ms`).join(", ")}`,
           );
@@ -425,9 +429,7 @@ export class Orchestrator {
   stop(): void {
     if (!this.isRunning) return;
 
-    this.logger.info(
-      `[Orchestrator] 🛑 Stopping... (bootId=${this.bootId})`,
-    );
+    this.logger.info(`[Orchestrator] 🛑 Stopping... (bootId=${this.bootId})`);
 
     if (this.executionTimer) {
       clearInterval(this.executionTimer);

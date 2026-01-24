@@ -15,7 +15,10 @@ import {
   sanitizeErrorMessage,
 } from "../utils/sanitize-axios-error.util";
 import { parallelBatch } from "../utils/parallel-utils";
-import { MONITOR_HEARTBEAT_MS } from "../utils/log-deduper.util";
+import {
+  MONITOR_HEARTBEAT_MS,
+  MONITOR_DETAIL_HEARTBEAT_MS,
+} from "../utils/log-deduper.util";
 
 export type MempoolMonitorDeps = {
   client: ClobClient;
@@ -50,6 +53,11 @@ export class MempoolMonitorService {
   // === LOG DEDUPLICATION STATE ===
   private lastLoggedSummaryHash: string | null = null;
   private lastLoggedAt: number = 0;
+
+  // === CYCLE-AWARE DETAIL LOG DEDUPLICATION ===
+  private lastDetailCycleId: number = -1;
+  private lastDetailFingerprint: string | null = null;
+  private lastDetailLoggedAt: number = 0;
 
   constructor(deps: MempoolMonitorDeps) {
     this.deps = deps;
@@ -330,10 +338,37 @@ export class MempoolMonitorService {
       this.lastLoggedAt = now;
     }
 
-    // Always log detailed skip breakdown at DEBUG level for troubleshooting
-    logger.debug(
-      `[Monitor] Detail: trades=${stats.tradesSeen} small=${stats.skippedSmallTrades} low_price=${stats.skippedLowPriceTrades} unconfirmed=${stats.skippedUnconfirmedTrades} non_target=${stats.skippedNonTargetTrades} parse_err=${stats.skippedParseErrorTrades} outside_window=${stats.skippedOutsideRecentWindowTrades} unsupported=${stats.skippedUnsupportedActionTrades} missing=${stats.skippedMissingFieldsTrades} api_err=${stats.skippedApiErrorTrades} other=${stats.skippedOtherTrades}`,
-    );
+    // === CYCLE-AWARE DETAIL LOG (rate-limited) ===
+    // Detail log is opt-in and rate-limited: only log if fingerprint changed or heartbeat elapsed
+    // This prevents the detail line from being emitted on every cycle
+    const detailFingerprint = JSON.stringify({
+      tradesSeen: stats.tradesSeen,
+      small: stats.skippedSmallTrades,
+      lowPrice: stats.skippedLowPriceTrades,
+      unconfirmed: stats.skippedUnconfirmedTrades,
+      nonTarget: stats.skippedNonTargetTrades,
+      parseErr: stats.skippedParseErrorTrades,
+      outsideWindow: stats.skippedOutsideRecentWindowTrades,
+      unsupported: stats.skippedUnsupportedActionTrades,
+      missing: stats.skippedMissingFieldsTrades,
+      apiErr: stats.skippedApiErrorTrades,
+      other: stats.skippedOtherTrades,
+    });
+
+    const detailFingerprintChanged =
+      detailFingerprint !== this.lastDetailFingerprint;
+    const detailHeartbeatElapsed =
+      now - this.lastDetailLoggedAt >= MONITOR_DETAIL_HEARTBEAT_MS;
+    const shouldLogDetail = detailFingerprintChanged || detailHeartbeatElapsed;
+
+    if (shouldLogDetail) {
+      const detailIndicator = detailFingerprintChanged ? "Δ" : "♥";
+      logger.debug(
+        `[Monitor] Detail: trades=${stats.tradesSeen} small=${stats.skippedSmallTrades} low_price=${stats.skippedLowPriceTrades} unconfirmed=${stats.skippedUnconfirmedTrades} non_target=${stats.skippedNonTargetTrades} parse_err=${stats.skippedParseErrorTrades} outside_window=${stats.skippedOutsideRecentWindowTrades} unsupported=${stats.skippedUnsupportedActionTrades} missing=${stats.skippedMissingFieldsTrades} api_err=${stats.skippedApiErrorTrades} other=${stats.skippedOtherTrades} (${detailIndicator})`,
+      );
+      this.lastDetailFingerprint = detailFingerprint;
+      this.lastDetailLoggedAt = now;
+    }
   }
 
   /**

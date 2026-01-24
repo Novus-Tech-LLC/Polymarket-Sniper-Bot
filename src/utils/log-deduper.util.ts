@@ -32,11 +32,11 @@
 const parseSkipLogTtl = (): number => {
   const envValue = process.env.SKIP_LOG_TTL_MS;
   if (!envValue) return 120_000;
-  
+
   const parsed = parseInt(envValue, 10);
   if (isNaN(parsed) || parsed < 0) {
     console.warn(
-      `[LogDeduper] Invalid SKIP_LOG_TTL_MS value "${envValue}", using default 120000ms`
+      `[LogDeduper] Invalid SKIP_LOG_TTL_MS value "${envValue}", using default 120000ms`,
     );
     return 120_000;
   }
@@ -57,11 +57,11 @@ export const HEARTBEAT_INTERVAL_MS = 120_000;
 const parseMonitorHeartbeat = (): number => {
   const envValue = process.env.MONITOR_HEARTBEAT_MS;
   if (!envValue) return 60_000;
-  
+
   const parsed = parseInt(envValue, 10);
   if (isNaN(parsed) || parsed < 0) {
     console.warn(
-      `[LogDeduper] Invalid MONITOR_HEARTBEAT_MS value "${envValue}", using default 60000ms`
+      `[LogDeduper] Invalid MONITOR_HEARTBEAT_MS value "${envValue}", using default 60000ms`,
     );
     return 60_000;
   }
@@ -71,10 +71,83 @@ const parseMonitorHeartbeat = (): number => {
 export const MONITOR_HEARTBEAT_MS = parseMonitorHeartbeat();
 
 /**
+ * Default heartbeat interval for Monitor detail logs (1 minute)
+ * Configurable via environment variable MONITOR_DETAIL_HEARTBEAT_MS
+ * This controls how often the detailed breakdown is logged even if fingerprint hasn't changed
+ */
+const parseMonitorDetailHeartbeat = (): number => {
+  const envValue = process.env.MONITOR_DETAIL_HEARTBEAT_MS;
+  if (!envValue) return 60_000;
+
+  const parsed = parseInt(envValue, 10);
+  if (isNaN(parsed) || parsed < 0) {
+    console.warn(
+      `[LogDeduper] Invalid MONITOR_DETAIL_HEARTBEAT_MS value "${envValue}", using default 60000ms`,
+    );
+    return 60_000;
+  }
+  return parsed;
+};
+
+export const MONITOR_DETAIL_HEARTBEAT_MS = parseMonitorDetailHeartbeat();
+
+/**
+ * Default heartbeat interval for Monitor summary logs (1 minute)
+ * Configurable via environment variable MONITOR_SUMMARY_HEARTBEAT_MS
+ */
+const parseMonitorSummaryHeartbeat = (): number => {
+  const envValue = process.env.MONITOR_SUMMARY_HEARTBEAT_MS;
+  if (!envValue) return 60_000;
+
+  const parsed = parseInt(envValue, 10);
+  if (isNaN(parsed) || parsed < 0) {
+    console.warn(
+      `[LogDeduper] Invalid MONITOR_SUMMARY_HEARTBEAT_MS value "${envValue}", using default 60000ms`,
+    );
+    return 60_000;
+  }
+  return parsed;
+};
+
+export const MONITOR_SUMMARY_HEARTBEAT_MS = parseMonitorSummaryHeartbeat();
+
+/**
+ * Default heartbeat interval for PositionTracker logs (1 minute)
+ * Configurable via environment variable TRACKER_HEARTBEAT_MS
+ * Controls how often position processing logs are emitted even if counts haven't changed
+ */
+const parseTrackerHeartbeat = (): number => {
+  const envValue = process.env.TRACKER_HEARTBEAT_MS;
+  if (!envValue) return 60_000;
+
+  const parsed = parseInt(envValue, 10);
+  if (isNaN(parsed) || parsed < 0) {
+    console.warn(
+      `[LogDeduper] Invalid TRACKER_HEARTBEAT_MS value "${envValue}", using default 60000ms`,
+    );
+    return 60_000;
+  }
+  return parsed;
+};
+
+export const TRACKER_HEARTBEAT_MS = parseTrackerHeartbeat();
+
+/**
  * Standard truncation length for tokenIds in log messages
  * Provides enough characters to identify tokens while keeping logs readable
  */
 export const TOKEN_ID_DISPLAY_LENGTH = 16;
+
+/**
+ * Cycle context passed to all strategies/modules for cycle-aware logging.
+ * This ensures that each component logs at most ONCE per orchestrator cycle.
+ */
+export interface CycleContext {
+  /** Unique identifier for the current orchestrator cycle */
+  cycleId: number;
+  /** Timestamp when the cycle started */
+  startedAtMs: number;
+}
 
 /**
  * Entry stored for each tracked log key
@@ -86,6 +159,8 @@ interface LogEntry {
   lastFingerprint: string | undefined;
   /** Number of suppressed logs since last emission */
   suppressedCount: number;
+  /** Last cycleId for which this log was emitted (for cycle-aware deduplication) */
+  lastCycleId?: number;
 }
 
 /**
@@ -164,7 +239,11 @@ export class LogDeduper {
         lastFingerprint: fingerprint,
         suppressedCount: 0,
       });
-      return { shouldLog: true, reason: "fingerprint_changed", suppressedCount };
+      return {
+        shouldLog: true,
+        reason: "fingerprint_changed",
+        suppressedCount,
+      };
     }
 
     // TTL expired - log as heartbeat
@@ -181,7 +260,11 @@ export class LogDeduper {
 
     // Still within TTL and fingerprint unchanged - suppress
     entry.suppressedCount++;
-    return { shouldLog: false, reason: "suppressed", suppressedCount: entry.suppressedCount };
+    return {
+      shouldLog: false,
+      reason: "suppressed",
+      suppressedCount: entry.suppressedCount,
+    };
   }
 
   /**
@@ -220,6 +303,78 @@ export class LogDeduper {
   ): boolean {
     const key = `${component}:summary`;
     return this.shouldLog(key, ttlMs, fingerprint);
+  }
+
+  /**
+   * Cycle-aware logging check.
+   * Returns true at most ONCE per cycle, and only if:
+   * - It's a new cycle (different cycleId) AND either:
+   *   - Fingerprint changed, OR
+   *   - Heartbeat interval has elapsed
+   *
+   * If called multiple times within the same cycle, always returns false
+   * after the first true response.
+   *
+   * @param key Unique identifier for the log
+   * @param cycleId Current orchestrator cycle ID
+   * @param ttlMs Time-to-live for heartbeat (default: 60s)
+   * @param fingerprint Optional state fingerprint for change detection
+   * @returns Whether the log should be emitted
+   */
+  shouldLogForCycle(
+    key: string,
+    cycleId: number,
+    ttlMs: number = 60_000,
+    fingerprint?: string,
+  ): boolean {
+    const now = Date.now();
+    const entry = this.entries.get(key);
+
+    // First time seeing this key - always log
+    if (!entry) {
+      this.setEntry(key, {
+        lastLoggedAt: now,
+        lastFingerprint: fingerprint,
+        suppressedCount: 0,
+        lastCycleId: cycleId,
+      });
+      return true;
+    }
+
+    // CRITICAL: If called in the same cycle, always suppress
+    // This ensures at most ONE log per cycle
+    if (entry.lastCycleId === cycleId) {
+      entry.suppressedCount++;
+      return false;
+    }
+
+    // New cycle - check if we should log
+    const fingerprintChanged =
+      fingerprint !== undefined && fingerprint !== entry.lastFingerprint;
+    const heartbeatElapsed = now - entry.lastLoggedAt >= ttlMs;
+
+    // Log if fingerprint changed OR heartbeat elapsed
+    if (fingerprintChanged || heartbeatElapsed) {
+      this.setEntry(key, {
+        lastLoggedAt: now,
+        lastFingerprint: fingerprint ?? entry.lastFingerprint,
+        suppressedCount: 0,
+        lastCycleId: cycleId,
+      });
+      return true;
+    }
+
+    // Update cycleId but don't log
+    entry.lastCycleId = cycleId;
+    entry.suppressedCount++;
+    return false;
+  }
+
+  /**
+   * Get the last cycle ID for a given key (for testing)
+   */
+  getLastCycleId(key: string): number | undefined {
+    return this.entries.get(key)?.lastCycleId;
   }
 
   /**

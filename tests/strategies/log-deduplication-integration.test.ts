@@ -4,7 +4,6 @@ import {
   LogDeduper,
   SkipReasonAggregator,
   resetLogDeduper,
-  getLogDeduper,
   HEARTBEAT_INTERVAL_MS,
 } from "../../src/utils/log-deduper.util";
 
@@ -84,7 +83,9 @@ describe("Log Deduplication Integration", () => {
 
     let fingerprint = skipAggregator.getFingerprint();
     if (logDeduper.shouldLogSummary("Hedging", fingerprint)) {
-      mockLogger.debug(`[SmartHedging] Cycle 1: ${skipAggregator.getSummary()}`);
+      mockLogger.debug(
+        `[SmartHedging] Cycle 1: ${skipAggregator.getSummary()}`,
+      );
     }
 
     // Cycle 2: Same positions - should NOT log
@@ -95,7 +96,9 @@ describe("Log Deduplication Integration", () => {
 
     fingerprint = skipAggregator.getFingerprint();
     if (logDeduper.shouldLogSummary("Hedging", fingerprint)) {
-      mockLogger.debug(`[SmartHedging] Cycle 2: ${skipAggregator.getSummary()}`);
+      mockLogger.debug(
+        `[SmartHedging] Cycle 2: ${skipAggregator.getSummary()}`,
+      );
     }
 
     // Cycle 3: One more position redeemable - fingerprint changes, SHOULD log
@@ -107,7 +110,9 @@ describe("Log Deduplication Integration", () => {
 
     fingerprint = skipAggregator.getFingerprint();
     if (logDeduper.shouldLogSummary("Hedging", fingerprint)) {
-      mockLogger.debug(`[SmartHedging] Cycle 3: ${skipAggregator.getSummary()}`);
+      mockLogger.debug(
+        `[SmartHedging] Cycle 3: ${skipAggregator.getSummary()}`,
+      );
     }
 
     const hedgingLogs = logs.filter((l) => l.includes("[SmartHedging]"));
@@ -152,7 +157,9 @@ describe("Log Deduplication Integration", () => {
     // Simulate rapid refresh calls where each one is skipped
     for (let i = 0; i < 20; i++) {
       if (logDeduper.shouldLog("Tracker:skip_refresh_in_progress", 60_000)) {
-        mockLogger.debug("[PositionTracker] Refresh already in progress, skipping");
+        mockLogger.debug(
+          "[PositionTracker] Refresh already in progress, skipping",
+        );
       }
     }
 
@@ -171,7 +178,13 @@ describe("Log Deduplication Integration", () => {
     for (let tick = 1; tick <= 10; tick++) {
       const summaryFingerprint = `${trader}:5:3:2`; // 5 trades, 3 too old, 2 processed
 
-      if (logDeduper.shouldLog(`Monitor:summary:${trader}`, HEARTBEAT_INTERVAL_MS, summaryFingerprint)) {
+      if (
+        logDeduper.shouldLog(
+          `Monitor:summary:${trader}`,
+          HEARTBEAT_INTERVAL_MS,
+          summaryFingerprint,
+        )
+      ) {
         mockLogger.debug(
           `[Monitor] ${trader}: 5 trades (3 too old, 2 already processed)`,
         );
@@ -199,7 +212,13 @@ describe("Log Deduplication Integration", () => {
         .sort()
         .join(",");
 
-      if (logDeduper.shouldLog("Orchestrator:slow_strategies", HEARTBEAT_INTERVAL_MS, slowNamesFingerprint)) {
+      if (
+        logDeduper.shouldLog(
+          "Orchestrator:slow_strategies",
+          HEARTBEAT_INTERVAL_MS,
+          slowNamesFingerprint,
+        )
+      ) {
         mockLogger.debug(
           `[Orchestrator] Slow strategies: ${slowStrategies.map((s) => `${s.name}=${s.durationMs}ms`).join(", ")}`,
         );
@@ -290,11 +309,11 @@ describe("Log Deduplication Integration", () => {
   test("MempoolMonitor pattern: change-based logging prevents spam", () => {
     // Simulate the MempoolMonitor's new change-based logging behavior
     // This mirrors the implementation in mempool-monitor.service.ts
-    
+
     let lastLoggedSummaryHash: string | null = null;
     let lastLoggedAt = 0;
     const HEARTBEAT_MS = 60_000; // Matches MONITOR_HEARTBEAT_MS default
-    
+
     // Helper function that mirrors the Monitor's shouldLog logic
     function shouldLogMonitorSummary(
       checkedAddresses: number,
@@ -312,41 +331,46 @@ describe("Log Deduplication Integration", () => {
         failed: failedCount,
       };
       const summaryHash = JSON.stringify(summaryHashObj);
-      
+
       const heartbeatElapsed = currentTime - lastLoggedAt >= HEARTBEAT_MS;
       const hashChanged = summaryHash !== lastLoggedSummaryHash;
-      
+
       // ALWAYS log if there are failures or eligible trades
       const hasFailures = failedCount > 0;
       const hasEligibleTrades = eligibleTrades > 0;
-      
-      const shouldLog = hasFailures || hasEligibleTrades || hashChanged || heartbeatElapsed;
-      
+
+      const shouldLog =
+        hasFailures || hasEligibleTrades || hashChanged || heartbeatElapsed;
+
       if (shouldLog) {
         lastLoggedSummaryHash = summaryHash;
         lastLoggedAt = currentTime;
       }
-      
+
       return { shouldLog, indicator: hashChanged ? "Δ" : "♥" };
     }
-    
+
     const baseTime = Date.now();
-    
+
     // Cycle 1: First call - should log (first_time)
     let result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime);
     if (result.shouldLog) {
-      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1379 (${result.indicator})`);
+      mockLogger.info(
+        `[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1379 (${result.indicator})`,
+      );
     }
     assert.strictEqual(result.shouldLog, true, "First call should log");
-    
+
     // Cycles 2-10: Same data (no eligible, no failures), no time elapsed - should NOT log
     for (let i = 2; i <= 10; i++) {
       result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime + i * 1000); // 1 second intervals
       if (result.shouldLog) {
-        mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1379 (${result.indicator})`);
+        mockLogger.info(
+          `[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1379 (${result.indicator})`,
+        );
       }
     }
-    
+
     // Should only have 1 log so far (spam prevented!)
     let monitorLogs = logs.filter((l) => l.includes("[Monitor] ✓"));
     assert.strictEqual(
@@ -354,23 +378,35 @@ describe("Log Deduplication Integration", () => {
       1,
       `Expected 1 Monitor log after 10 identical cycles, got ${monitorLogs.length}`,
     );
-    
+
     // Cycle 11: Hash changed (different skipped count) - should log immediately
     // Note: We keep eligible=0 to test pure hash change behavior
     result = shouldLogMonitorSummary(17, 0, 0, 1380, 0, baseTime + 11000);
     if (result.shouldLog) {
-      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`);
+      mockLogger.info(
+        `[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`,
+      );
     }
-    assert.strictEqual(result.shouldLog, true, "Hash change should trigger log");
+    assert.strictEqual(
+      result.shouldLog,
+      true,
+      "Hash change should trigger log",
+    );
     assert.strictEqual(result.indicator, "Δ", "Should indicate change with Δ");
-    
+
     // Cycle 12: Same as cycle 11 - should NOT log (no eligible, no failures, no hash change)
     result = shouldLogMonitorSummary(17, 0, 0, 1380, 0, baseTime + 12000);
     if (result.shouldLog) {
-      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`);
+      mockLogger.info(
+        `[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`,
+      );
     }
-    assert.strictEqual(result.shouldLog, false, "Duplicate should be suppressed");
-    
+    assert.strictEqual(
+      result.shouldLog,
+      false,
+      "Duplicate should be suppressed",
+    );
+
     // Should have exactly 2 logs now
     monitorLogs = logs.filter((l) => l.includes("[Monitor] ✓"));
     assert.strictEqual(
@@ -378,15 +414,28 @@ describe("Log Deduplication Integration", () => {
       2,
       `Expected 2 Monitor logs after hash change, got ${monitorLogs.length}`,
     );
-    
+
     // Cycle 13: Heartbeat elapsed (60 seconds later) - should log
-    result = shouldLogMonitorSummary(17, 0, 0, 1380, 0, baseTime + 12000 + HEARTBEAT_MS);
+    result = shouldLogMonitorSummary(
+      17,
+      0,
+      0,
+      1380,
+      0,
+      baseTime + 12000 + HEARTBEAT_MS,
+    );
     if (result.shouldLog) {
-      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`);
+      mockLogger.info(
+        `[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`,
+      );
     }
     assert.strictEqual(result.shouldLog, true, "Heartbeat should trigger log");
-    assert.strictEqual(result.indicator, "♥", "Should indicate heartbeat with ♥");
-    
+    assert.strictEqual(
+      result.indicator,
+      "♥",
+      "Should indicate heartbeat with ♥",
+    );
+
     // Should have exactly 3 logs now
     monitorLogs = logs.filter((l) => l.includes("[Monitor] ✓"));
     assert.strictEqual(
@@ -401,7 +450,7 @@ describe("Log Deduplication Integration", () => {
     let lastLoggedSummaryHash: string | null = null;
     let lastLoggedAt = 0;
     const HEARTBEAT_MS = 60_000;
-    
+
     function shouldLogMonitorSummary(
       checkedAddresses: number,
       eligibleTrades: number,
@@ -418,38 +467,377 @@ describe("Log Deduplication Integration", () => {
         failed: failedCount,
       };
       const summaryHash = JSON.stringify(summaryHashObj);
-      
+
       const heartbeatElapsed = currentTime - lastLoggedAt >= HEARTBEAT_MS;
       const hashChanged = summaryHash !== lastLoggedSummaryHash;
       const hasFailures = failedCount > 0;
       const hasEligibleTrades = eligibleTrades > 0;
-      
-      const shouldLog = hasFailures || hasEligibleTrades || hashChanged || heartbeatElapsed;
-      
+
+      const shouldLog =
+        hasFailures || hasEligibleTrades || hashChanged || heartbeatElapsed;
+
       if (shouldLog) {
         lastLoggedSummaryHash = summaryHash;
         lastLoggedAt = currentTime;
       }
-      
+
       return shouldLog;
     }
-    
+
     const baseTime = Date.now();
-    
+
     // First log establishes baseline
     let result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime);
     assert.strictEqual(result, true, "First log should happen");
-    
+
     // Same stats immediately after - should NOT log
     result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime + 1000);
     assert.strictEqual(result, false, "Duplicate should be suppressed");
-    
+
     // BUT if there's a failure, it ALWAYS logs (safety requirement)
     result = shouldLogMonitorSummary(17, 0, 0, 1379, 1, baseTime + 2000);
     assert.strictEqual(result, true, "Failures must always log");
-    
+
     // And if there are eligible trades, it ALWAYS logs (important event)
     result = shouldLogMonitorSummary(17, 1, 1, 1378, 0, baseTime + 3000);
     assert.strictEqual(result, true, "Eligible trades must always log");
+  });
+});
+
+/**
+ * Tests for cycle-aware log deduplication.
+ * These tests verify that:
+ * 1. Calling with the same cycleId produces at most 1 log
+ * 2. Fingerprint changes within same cycle don't trigger multiple logs
+ * 3. New cycles can trigger logs if fingerprint changed or heartbeat elapsed
+ */
+describe("Cycle-Aware Log Deduplication", () => {
+  let logDeduper: LogDeduper;
+  const logs: string[] = [];
+
+  const mockLogger = {
+    info: (msg: string) => logs.push(`[INFO] ${msg}`),
+    debug: (msg: string) => logs.push(`[DEBUG] ${msg}`),
+    warn: (msg: string) => logs.push(`[WARN] ${msg}`),
+    error: (msg: string) => logs.push(`[ERROR] ${msg}`),
+  };
+
+  beforeEach(() => {
+    logs.length = 0;
+    logDeduper = new LogDeduper();
+  });
+
+  afterEach(() => {
+    resetLogDeduper();
+  });
+
+  test("shouldLogForCycle: first call logs, subsequent calls in same cycle are suppressed", () => {
+    // First call in cycle 1 - should log
+    let result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      "fingerprint1",
+    );
+    assert.strictEqual(result, true, "First call in cycle should log");
+
+    // Second call in same cycle - should be suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      "fingerprint1",
+    );
+    assert.strictEqual(
+      result,
+      false,
+      "Second call in same cycle should be suppressed",
+    );
+
+    // Third call in same cycle - should be suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      "fingerprint1",
+    );
+    assert.strictEqual(
+      result,
+      false,
+      "Third call in same cycle should be suppressed",
+    );
+
+    // Fourth call in same cycle with DIFFERENT fingerprint - should STILL be suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      "fingerprint2",
+    );
+    assert.strictEqual(
+      result,
+      false,
+      "Fingerprint change in same cycle should still be suppressed",
+    );
+  });
+
+  test("shouldLogForCycle: new cycle with unchanged fingerprint is suppressed until heartbeat", () => {
+    // Cycle 1 - first log
+    let result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      "fingerprint1",
+    );
+    assert.strictEqual(result, true, "First call logs");
+
+    // Cycle 2 - same fingerprint, no heartbeat elapsed - should be suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      2,
+      60_000,
+      "fingerprint1",
+    );
+    assert.strictEqual(
+      result,
+      false,
+      "Same fingerprint, no heartbeat - suppressed",
+    );
+
+    // Cycle 3 - same fingerprint, no heartbeat - suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      3,
+      60_000,
+      "fingerprint1",
+    );
+    assert.strictEqual(result, false, "Same fingerprint still suppressed");
+
+    // Verify last cycleId is tracked
+    assert.strictEqual(
+      logDeduper.getLastCycleId("Monitor:detail"),
+      3,
+      "Last cycle ID should be 3",
+    );
+  });
+
+  test("shouldLogForCycle: new cycle with changed fingerprint logs immediately", () => {
+    // Cycle 1 - first log
+    let result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      "fingerprint1",
+    );
+    assert.strictEqual(result, true, "First call logs");
+
+    // Cycle 2 - different fingerprint - should log immediately
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      2,
+      60_000,
+      "fingerprint2",
+    );
+    assert.strictEqual(result, true, "Fingerprint changed - should log");
+
+    // Cycle 3 - same as cycle 2 fingerprint - suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      3,
+      60_000,
+      "fingerprint2",
+    );
+    assert.strictEqual(
+      result,
+      false,
+      "Same fingerprint as last log - suppressed",
+    );
+
+    // Cycle 4 - another fingerprint change - should log
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      4,
+      60_000,
+      "fingerprint3",
+    );
+    assert.strictEqual(result, true, "Another fingerprint change - should log");
+  });
+
+  test("Monitor detail log simulation: calling twice in same cycle produces 1 log max", () => {
+    // Simulate Monitor's detail log behavior in a single orchestrator cycle
+    for (let callNum = 1; callNum <= 5; callNum++) {
+      const cycleId = 1; // Same cycle for all calls
+      const fingerprint = `trades=100,skipped=50`;
+
+      if (
+        logDeduper.shouldLogForCycle(
+          "Monitor:detail",
+          cycleId,
+          60_000,
+          fingerprint,
+        )
+      ) {
+        mockLogger.debug(
+          `[Monitor] Detail: trades=100 skipped=50 (call ${callNum})`,
+        );
+      }
+    }
+
+    const detailLogs = logs.filter((l) => l.includes("[Monitor] Detail"));
+    assert.strictEqual(
+      detailLogs.length,
+      1,
+      "Should only log once per cycle despite 5 calls",
+    );
+  });
+
+  test("PositionTracker refresh simulation: calling twice in same cycle produces 1 log max", () => {
+    // Simulate PositionTracker's processed log behavior
+    for (let callNum = 1; callNum <= 3; callNum++) {
+      const cycleId = 1; // Same cycle
+      const fingerprint = JSON.stringify({
+        success: 10,
+        resolved: 2,
+        active: 8,
+      });
+
+      if (
+        logDeduper.shouldLogForCycle(
+          "Tracker:processed",
+          cycleId,
+          60_000,
+          fingerprint,
+        )
+      ) {
+        mockLogger.debug(
+          `[PositionTracker] ✓ Processed 10 positions (call ${callNum})`,
+        );
+      }
+    }
+
+    const processedLogs = logs.filter((l) =>
+      l.includes("[PositionTracker] ✓ Processed"),
+    );
+    assert.strictEqual(
+      processedLogs.length,
+      1,
+      "Should only log once per cycle despite 3 calls",
+    );
+  });
+
+  test("Repeated cycles with unchanged fingerprint do not log details every time", () => {
+    const fingerprint = JSON.stringify({ trades: 100, skipped: 50 });
+
+    // Simulate 10 orchestrator cycles with same fingerprint
+    for (let cycleId = 1; cycleId <= 10; cycleId++) {
+      if (
+        logDeduper.shouldLogForCycle(
+          "Monitor:detail",
+          cycleId,
+          60_000,
+          fingerprint,
+        )
+      ) {
+        mockLogger.debug(`[Monitor] Detail: (cycle ${cycleId})`);
+      }
+    }
+
+    const detailLogs = logs.filter((l) => l.includes("[Monitor] Detail"));
+    // Should only log on first cycle since fingerprint never changed and heartbeat didn't elapse
+    assert.strictEqual(
+      detailLogs.length,
+      1,
+      "Should only log once across 10 cycles with same fingerprint",
+    );
+    assert.ok(
+      detailLogs[0].includes("cycle 1"),
+      "First log should be from cycle 1",
+    );
+  });
+
+  test("Heartbeat elapsed triggers log even with unchanged fingerprint", () => {
+    const fingerprint = "unchanged_fingerprint";
+    const shortHeartbeat = 100; // 100ms for testing
+
+    // Cycle 1 - first log
+    let result = logDeduper.shouldLogForCycle(
+      "Test:heartbeat",
+      1,
+      shortHeartbeat,
+      fingerprint,
+    );
+    assert.strictEqual(result, true, "First call logs");
+
+    // Cycle 2 immediately - suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Test:heartbeat",
+      2,
+      shortHeartbeat,
+      fingerprint,
+    );
+    assert.strictEqual(result, false, "Immediate call suppressed");
+
+    // Wait for heartbeat to elapse
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        // Cycle 3 after heartbeat - should log
+        result = logDeduper.shouldLogForCycle(
+          "Test:heartbeat",
+          3,
+          shortHeartbeat,
+          fingerprint,
+        );
+        assert.strictEqual(result, true, "Heartbeat elapsed - should log");
+        resolve();
+      }, 150);
+    });
+  });
+
+  test("Different keys are tracked independently for cycle-aware logging", () => {
+    const fingerprint = "same_fingerprint";
+
+    // Cycle 1 - log for Monitor
+    let result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      fingerprint,
+    );
+    assert.strictEqual(result, true, "Monitor logs on cycle 1");
+
+    // Cycle 1 - log for Tracker (separate key)
+    result = logDeduper.shouldLogForCycle(
+      "Tracker:processed",
+      1,
+      60_000,
+      fingerprint,
+    );
+    assert.strictEqual(result, true, "Tracker also logs on cycle 1");
+
+    // Cycle 1 - second call to Monitor - suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Monitor:detail",
+      1,
+      60_000,
+      fingerprint,
+    );
+    assert.strictEqual(
+      result,
+      false,
+      "Monitor second call in cycle 1 suppressed",
+    );
+
+    // Cycle 1 - second call to Tracker - suppressed
+    result = logDeduper.shouldLogForCycle(
+      "Tracker:processed",
+      1,
+      60_000,
+      fingerprint,
+    );
+    assert.strictEqual(
+      result,
+      false,
+      "Tracker second call in cycle 1 suppressed",
+    );
   });
 });
