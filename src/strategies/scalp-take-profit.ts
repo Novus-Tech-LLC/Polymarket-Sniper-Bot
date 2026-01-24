@@ -303,7 +303,11 @@ export class ScalpTakeProfitStrategy {
   // Rate-limit logging: track last summary log time and counts
   private lastSummaryLogAt = 0;
   private lastLoggedCounts = { profitable: 0, losing: 0, total: 0 };
+
+  // Constants
   private static readonly SUMMARY_LOG_INTERVAL_MS = 60_000; // Log summary at most once per minute
+  // Value used when no entry time is available - assumes position held long enough for all checks
+  private static readonly NO_ENTRY_TIME_HOLD_MINUTES = 999999;
 
   constructor(config: {
     client: ClobClient;
@@ -512,7 +516,9 @@ export class ScalpTakeProfitStrategy {
     // If no entry time is available, treat position as "old enough" (assume external purchase)
     // Use a very large holdMinutes value so all hold time checks pass
     // This is safer than blocking - if someone bought externally, they want to sell when profitable
-    const holdMinutes = entryTime ? (now - entryTime) / (60 * 1000) : 999999; // No entry time = assume held forever (old enough for any check)
+    const holdMinutes = entryTime
+      ? (now - entryTime) / (60 * 1000)
+      : ScalpTakeProfitStrategy.NO_ENTRY_TIME_HOLD_MINUTES;
 
     if (!entryTime) {
       this.logger.debug(

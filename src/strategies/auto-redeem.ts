@@ -105,6 +105,21 @@ export class AutoRedeemStrategy {
    * flagged as redeemable by the API. These should be candidates for fallback sell.
    */
   private static readonly HIGH_PRICE_THRESHOLD = 0.995;
+  /**
+   * Time after which to reset all failure tracking and try again.
+   * After this period, blocked markets get a fresh start.
+   * Default: 10 minutes - gives markets time to settle/resolve properly.
+   */
+  private static readonly FULL_RESET_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+  /**
+   * Time after which to retry fallback sell if it failed previously.
+   * This allows retrying sell when market conditions may have changed.
+   * Default: 5 minutes
+   */
+  private static readonly FALLBACK_SELL_RETRY_MS = 5 * 60 * 1000; // 5 minutes
+
+  // Track when fallback sell was last attempted (for retry logic)
+  private fallbackSellLastAttempt: Map<string, number> = new Map();
 
   constructor(strategyConfig: AutoRedeemStrategyConfig) {
     this.client = strategyConfig.client;
@@ -236,24 +251,54 @@ export class AutoRedeemStrategy {
       // Check if we should skip due to recent failures
       const attempts = this.redemptionAttempts.get(marketId);
       if (attempts) {
-        if (attempts.failures >= AutoRedeemStrategy.MAX_REDEMPTION_FAILURES) {
+        // Check if enough time has passed to reset all tracking and try fresh
+        const timeSinceLastAttempt = Date.now() - attempts.lastAttempt;
+        if (timeSinceLastAttempt >= AutoRedeemStrategy.FULL_RESET_COOLDOWN_MS) {
+          // Reset all tracking for this market - give it a fresh start
+          this.redemptionAttempts.delete(marketId);
+          this.fallbackSellAttempted.delete(marketId);
+          this.fallbackSellLastAttempt.delete(marketId);
+          this.logger.info(
+            `[AutoRedeem] 🔄 Reset tracking for market ${marketId.slice(0, 16)}... after ${Math.round(timeSinceLastAttempt / 60000)}min cooldown`,
+          );
+          // Fall through to attempt redemption
+        } else if (
+          attempts.failures >= AutoRedeemStrategy.MAX_REDEMPTION_FAILURES
+        ) {
           skippedMaxFailures++;
-          // Max redemption failures reached - try fallback sell if enabled
+          // Max redemption failures reached
           const enableFallbackSell = this.config.enableFallbackSell !== false; // Default: true
           const isWinning = marketPositions.some((pos) => pos.currentPrice > 0);
+
+          // CRITICAL: Fallback sell only works for positions that are NOT officially resolved
+          // Resolved markets have no orderbook, so selling is impossible - must redeem on-chain
+          const isTrulyResolved = marketPositions.every(
+            (pos) => pos.redeemable === true,
+          );
+
+          // Check if we should retry fallback sell (only for non-resolved high-price positions)
+          const lastFallbackAttempt =
+            this.fallbackSellLastAttempt.get(marketId) || 0;
+          const timeSinceFallback = Date.now() - lastFallbackAttempt;
+          const canRetryFallback =
+            !this.fallbackSellAttempted.has(marketId) ||
+            timeSinceFallback >= AutoRedeemStrategy.FALLBACK_SELL_RETRY_MS;
 
           if (
             enableFallbackSell &&
             isWinning &&
-            !this.fallbackSellAttempted.has(marketId)
+            canRetryFallback &&
+            !isTrulyResolved
           ) {
+            const isRetry = this.fallbackSellAttempted.has(marketId);
             // Attempt fallback sell at 99.9¢ instead of waiting for redemption
             this.logger.info(
-              `[AutoRedeem] 💸 Redemption failed ${attempts.failures}x - attempting fallback SELL at ${(AutoRedeemStrategy.FALLBACK_SELL_PRICE * 100).toFixed(1)}¢ for market ${marketId}`,
+              `[AutoRedeem] 💸 ${isRetry ? "RETRY: " : ""}Redemption failed ${attempts.failures}x - attempting fallback SELL at ${(AutoRedeemStrategy.FALLBACK_SELL_PRICE * 100).toFixed(1)}¢ for market ${marketId}`,
             );
 
             const sellSuccess = await this.attemptFallbackSell(marketPositions);
             this.fallbackSellAttempted.add(marketId);
+            this.fallbackSellLastAttempt.set(marketId, Date.now());
 
             if (sellSuccess) {
               this.redeemedMarkets.add(marketId); // Mark as handled
@@ -263,24 +308,41 @@ export class AutoRedeemStrategy {
               );
             } else {
               this.logger.warn(
-                `[AutoRedeem] Fallback sell failed for market ${marketId} - will retry redemption later`,
+                `[AutoRedeem] Fallback sell failed for market ${marketId} - will retry in ${Math.round(AutoRedeemStrategy.FALLBACK_SELL_RETRY_MS / 60000)}min`,
               );
             }
+          } else if (isTrulyResolved) {
+            // Truly resolved market - fallback sell won't work (no orderbook)
+            // Log why and suggest the issue might be with redemption parameters
+            this.logger.info(
+              `[AutoRedeem] ⚠️ Market ${marketId.slice(0, 16)}... is RESOLVED but redemption failed ${attempts.failures}x. ` +
+                `Fallback sell not possible (no orderbook). Will retry redemption after full reset cooldown.`,
+            );
           } else {
+            const nextRetryIn = Math.max(
+              0,
+              Math.ceil(
+                (AutoRedeemStrategy.FALLBACK_SELL_RETRY_MS -
+                  timeSinceFallback) /
+                  60000,
+              ),
+            );
             this.logger.debug(
-              `[AutoRedeem] Skipping market ${marketId} - max failures reached${!isWinning ? " (losing position)" : ""}${this.fallbackSellAttempted.has(marketId) ? " (fallback sell already attempted)" : ""}`,
+              `[AutoRedeem] Skipping market ${marketId.slice(0, 16)}... - max failures reached${!isWinning ? " (losing position)" : ""}${this.fallbackSellAttempted.has(marketId) ? ` (retry in ${nextRetryIn}min)` : ""}`,
             );
           }
           continue;
         }
-        const timeSinceLastAttempt = Date.now() - attempts.lastAttempt;
+        // Check cooldown for normal retry (not at max failures yet)
+        const cooldownTimeSinceAttempt = Date.now() - attempts.lastAttempt;
         if (
-          timeSinceLastAttempt < AutoRedeemStrategy.REDEMPTION_RETRY_COOLDOWN_MS
+          cooldownTimeSinceAttempt <
+          AutoRedeemStrategy.REDEMPTION_RETRY_COOLDOWN_MS
         ) {
           skippedCooldown++;
           const remainingCooldown = Math.ceil(
             (AutoRedeemStrategy.REDEMPTION_RETRY_COOLDOWN_MS -
-              timeSinceLastAttempt) /
+              cooldownTimeSinceAttempt) /
               1000,
           );
           this.logger.debug(
@@ -630,6 +692,7 @@ export class AutoRedeemStrategy {
     }
     for (const key of fallbackSellKeysToDelete) {
       this.fallbackSellAttempted.delete(key);
+      this.fallbackSellLastAttempt.delete(key);
       cleanedFallbackSell++;
     }
 
@@ -651,6 +714,18 @@ export class AutoRedeemStrategy {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
       this.logger.warn("[AutoRedeem] No wallet available for fallback sell");
+      return false;
+    }
+
+    // Check if on-chain mode is enabled - fallback sell won't work in on-chain mode
+    // because the on-chain executor doesn't support order execution yet
+    const tradeMode = (process.env.TRADE_MODE ?? "clob").toLowerCase();
+    if (tradeMode === "onchain") {
+      this.logger.warn(
+        `[AutoRedeem] ⚠️ TRADE_MODE=onchain - fallback sell NOT SUPPORTED. ` +
+          `On-chain trading requires maker order integration (not implemented). ` +
+          `Use TRADE_MODE=clob for selling, or rely on on-chain redemption only.`,
+      );
       return false;
     }
 
@@ -845,5 +920,7 @@ export class AutoRedeemStrategy {
   reset(): void {
     this.redeemedMarkets.clear();
     this.redemptionAttempts.clear();
+    this.fallbackSellAttempted.clear();
+    this.fallbackSellLastAttempt.clear();
   }
 }
