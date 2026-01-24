@@ -168,8 +168,6 @@ function requiresEffectiveSigner(signatureType: number): boolean {
 
 - `src/clob/credential-derivation-v2.ts` - Core fix
 - `scripts/auth-probe-minimal.ts` - Formatting only
-- `src/rust-bridge/adapter.ts` - Formatting only
-- `src/rust-bridge/client.ts` - Formatting only
 - `src/utils/auth-logger.util.ts` - Formatting only
 - `tests/arbitrage/preflight-trading-address.test.ts` - Formatting only
 
