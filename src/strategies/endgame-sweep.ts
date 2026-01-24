@@ -1,5 +1,5 @@
 /**
- * Endgame Sweep Strategy - SIMPLIFIED
+ * Endgame Sweep Strategy
  *
  * Buy high-confidence positions near resolution (85-99¢) that are likely to pay $1.
  *
@@ -19,9 +19,9 @@ import { postOrder } from "../utils/post-order.util";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 
 /**
- * Simple Endgame Sweep Configuration
+ * Endgame Sweep Configuration
  */
-export interface SimpleEndgameSweepConfig {
+export interface EndgameSweepConfig {
   /** Enable the strategy */
   enabled: boolean;
 
@@ -35,7 +35,7 @@ export interface SimpleEndgameSweepConfig {
   maxPositionUsd: number;
 }
 
-export const DEFAULT_SIMPLE_ENDGAME_CONFIG: SimpleEndgameSweepConfig = {
+export const DEFAULT_ENDGAME_CONFIG: EndgameSweepConfig = {
   enabled: true,
   minPrice: 0.85,
   maxPrice: 0.99,
@@ -43,12 +43,12 @@ export const DEFAULT_SIMPLE_ENDGAME_CONFIG: SimpleEndgameSweepConfig = {
 };
 
 /**
- * Simple Endgame Sweep Strategy
+ * Endgame Sweep Strategy
  */
-export class SimpleEndgameSweepStrategy {
+export class EndgameSweepStrategy {
   private client: ClobClient;
   private logger: ConsoleLogger;
-  private config: SimpleEndgameSweepConfig;
+  private config: EndgameSweepConfig;
   private positionTracker?: PositionTracker;
 
   // === SINGLE-FLIGHT GUARD ===
@@ -64,7 +64,7 @@ export class SimpleEndgameSweepStrategy {
   constructor(config: {
     client: ClobClient;
     logger: ConsoleLogger;
-    config: SimpleEndgameSweepConfig;
+    config: EndgameSweepConfig;
     positionTracker?: PositionTracker;
   }) {
     this.client = config.client;
@@ -73,7 +73,7 @@ export class SimpleEndgameSweepStrategy {
     this.positionTracker = config.positionTracker;
 
     this.logger.info(
-      `[SimpleEndgame] Initialized: price range ${(this.config.minPrice * 100).toFixed(0)}-${(this.config.maxPrice * 100).toFixed(0)}¢, maxPosition=$${this.config.maxPositionUsd}`,
+      `[EndgameSweep] Initialized: price range ${(this.config.minPrice * 100).toFixed(0)}-${(this.config.maxPrice * 100).toFixed(0)}¢, maxPosition=$${this.config.maxPositionUsd}`,
     );
   }
 
@@ -89,7 +89,7 @@ export class SimpleEndgameSweepStrategy {
 
     // Single-flight guard: prevent concurrent execution
     if (this.inFlight) {
-      this.logger.debug("[SimpleEndgame] Skipped - already in flight");
+      this.logger.debug("[EndgameSweep] Skipped - already in flight");
       return 0;
     }
 
@@ -133,7 +133,7 @@ export class SimpleEndgameSweepStrategy {
       const existingExposure = this.getMarketExposure(market.id);
       if (existingExposure >= this.config.maxPositionUsd) {
         this.logger.debug(
-          `[SimpleEndgame] Skip ${market.id}: at max ($${existingExposure.toFixed(2)} >= $${this.config.maxPositionUsd})`,
+          `[EndgameSweep] Skip ${market.id}: at max ($${existingExposure.toFixed(2)} >= $${this.config.maxPositionUsd})`,
         );
         continue;
       }
@@ -154,7 +154,7 @@ export class SimpleEndgameSweepStrategy {
 
     if (purchasedCount > 0) {
       this.logger.info(
-        `[SimpleEndgame] ✅ Bought ${purchasedCount} position(s)`,
+        `[EndgameSweep] ✅ Bought ${purchasedCount} position(s)`,
       );
     }
 
@@ -218,7 +218,7 @@ export class SimpleEndgameSweepStrategy {
       }
     } catch (err) {
       this.logger.error(
-        `[SimpleEndgame] Scan failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[EndgameSweep] Scan failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
 
@@ -252,14 +252,14 @@ export class SimpleEndgameSweepStrategy {
   ): Promise<boolean> {
     if (!isLiveTradingEnabled()) {
       this.logger.debug(
-        `[SimpleEndgame] Would buy at ${(market.price * 100).toFixed(1)}¢ - LIVE TRADING DISABLED`,
+        `[EndgameSweep] Would buy at ${(market.price * 100).toFixed(1)}¢ - LIVE TRADING DISABLED`,
       );
       return false;
     }
 
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
-      this.logger.error(`[SimpleEndgame] No wallet`);
+      this.logger.error(`[EndgameSweep] No wallet`);
       return false;
     }
 
@@ -271,7 +271,7 @@ export class SimpleEndgameSweepStrategy {
       const expectedProfit = ((1 - market.price) / market.price) * 100;
 
       this.logger.info(
-        `[SimpleEndgame] 🛒 Buying at ${(market.price * 100).toFixed(1)}¢, $${sizeUsd.toFixed(2)} (expected: +${expectedProfit.toFixed(1)}%)`,
+        `[EndgameSweep] 🛒 Buying at ${(market.price * 100).toFixed(1)}¢, $${sizeUsd.toFixed(2)} (expected: +${expectedProfit.toFixed(1)}%)`,
       );
 
       const result = await postOrder({
@@ -287,17 +287,17 @@ export class SimpleEndgameSweepStrategy {
       });
 
       if (result.status === "submitted") {
-        this.logger.info(`[SimpleEndgame] ✅ Bought successfully`);
+        this.logger.info(`[EndgameSweep] ✅ Bought successfully`);
         return true;
       }
 
       this.logger.warn(
-        `[SimpleEndgame] ⚠️ Order not filled: ${result.reason ?? "unknown"}`,
+        `[EndgameSweep] ⚠️ Order not filled: ${result.reason ?? "unknown"}`,
       );
       return false;
     } catch (err) {
       this.logger.error(
-        `[SimpleEndgame] ❌ Buy failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[EndgameSweep] ❌ Buy failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return false;
     } finally {

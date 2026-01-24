@@ -23,9 +23,9 @@ import type { PositionTracker } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
 
 /**
- * Simple Quick Flip Configuration
+ * Quick Flip Configuration
  */
-export interface SimpleQuickFlipConfig {
+export interface QuickFlipConfig {
   /** Enable the strategy */
   enabled: boolean;
 
@@ -51,7 +51,7 @@ export interface SimpleQuickFlipConfig {
 const MIN_PROFIT_BUFFER_PCT = 1.0; // 1% buffer to cover spread + fees
 const EFFECTIVE_MIN_PROFIT_PCT = MIN_PROFIT_BUFFER_PCT; // ~1% minimum profit required
 
-export const DEFAULT_SIMPLE_QUICKFLIP_CONFIG: SimpleQuickFlipConfig = {
+export const DEFAULT_QUICKFLIP_CONFIG: QuickFlipConfig = {
   enabled: true,
   targetPct: 5, // 5% target - reasonable profit after spread/fees
   minHoldSeconds: 60, // Hold 60 seconds before selling
@@ -59,22 +59,22 @@ export const DEFAULT_SIMPLE_QUICKFLIP_CONFIG: SimpleQuickFlipConfig = {
 };
 
 /**
- * Simple Quick Flip Strategy
+ * Quick Flip Strategy
  *
  * PROFIT ONLY - Never sells below entry price.
  * Takes the quickest reasonable profit above trading fees.
  * For loss handling, see Smart Hedging strategy.
  */
-export class SimpleQuickFlipStrategy {
+export class QuickFlipStrategy {
   private client: ClobClient;
   private logger: ConsoleLogger;
-  private config: SimpleQuickFlipConfig;
+  private config: QuickFlipConfig;
   private positionTracker: PositionTracker;
 
   constructor(config: {
     client: ClobClient;
     logger: ConsoleLogger;
-    config: SimpleQuickFlipConfig;
+    config: QuickFlipConfig;
     positionTracker: PositionTracker;
   }) {
     this.client = config.client;
@@ -83,7 +83,7 @@ export class SimpleQuickFlipStrategy {
     this.positionTracker = config.positionTracker;
 
     this.logger.info(
-      `[SimpleQuickFlip] Initialized: target=+${this.config.targetPct}%, minHold=${this.config.minHoldSeconds}s`,
+      `[QuickFlip] Initialized: target=+${this.config.targetPct}%, minHold=${this.config.minHoldSeconds}s`,
     );
   }
 
@@ -108,7 +108,7 @@ export class SimpleQuickFlipStrategy {
 
     if (anyProfit.length > 0 || positions.length > 0) {
       this.logger.debug(
-        `[SimpleQuickFlip] 📊 Positions: ${positions.length} total, ${anyProfit.length} any profit, ${atTarget.length} at target (>=${this.config.targetPct}%), ${redeemable.length} redeemable`,
+        `[QuickFlip] 📊 Positions: ${positions.length} total, ${anyProfit.length} any profit, ${atTarget.length} at target (>=${this.config.targetPct}%), ${redeemable.length} redeemable`,
       );
     }
 
@@ -119,13 +119,13 @@ export class SimpleQuickFlipStrategy {
         anyProfit[0],
       );
       this.logger.debug(
-        `[SimpleQuickFlip] ℹ️ ${anyProfit.length} profitable position(s) below target. Best: +${bestProfit.pnlPct.toFixed(1)}% (need >=${this.config.targetPct}%)`,
+        `[QuickFlip] ℹ️ ${anyProfit.length} profitable position(s) below target. Best: +${bestProfit.pnlPct.toFixed(1)}% (need >=${this.config.targetPct}%)`,
       );
     }
 
     if (atTarget.length > 0) {
       this.logger.info(
-        `[SimpleQuickFlip] 💰 Found ${atTarget.length} position(s) at target profit: ${atTarget.map((p) => `${p.tokenId.slice(0, 8)}...+${p.pnlPct.toFixed(1)}%`).join(", ")}`,
+        `[QuickFlip] 💰 Found ${atTarget.length} position(s) at target profit: ${atTarget.map((p) => `${p.tokenId.slice(0, 8)}...+${p.pnlPct.toFixed(1)}%`).join(", ")}`,
       );
     }
 
@@ -144,7 +144,7 @@ export class SimpleQuickFlipStrategy {
       // Skip if profit too small in absolute terms
       if (position.pnlUsd < this.config.minProfitUsd) {
         this.logger.debug(
-          `[SimpleQuickFlip] Skip ${position.tokenId.slice(0, 8)}...: profit $${position.pnlUsd.toFixed(2)} < min $${this.config.minProfitUsd}`,
+          `[QuickFlip] Skip ${position.tokenId.slice(0, 8)}...: profit $${position.pnlUsd.toFixed(2)} < min $${this.config.minProfitUsd}`,
         );
         continue;
       }
@@ -163,14 +163,14 @@ export class SimpleQuickFlipStrategy {
         // If position meets target profit AND minimum USD profit, allow it
         // (We already checked pnlPct >= targetPct and pnlUsd >= minProfitUsd above)
         this.logger.info(
-          `[SimpleQuickFlip] ℹ️ No entry time for profitable position (+${position.pnlPct.toFixed(1)}% / $${position.pnlUsd.toFixed(2)}), proceeding with sale`,
+          `[QuickFlip] ℹ️ No entry time for profitable position (+${position.pnlPct.toFixed(1)}% / $${position.pnlUsd.toFixed(2)}), proceeding with sale`,
         );
         // Fall through to sell - we already know it's profitable
       } else {
         const holdSeconds = (Date.now() - entryTime) / 1000;
         if (holdSeconds < this.config.minHoldSeconds) {
           this.logger.debug(
-            `[SimpleQuickFlip] Hold ${holdSeconds.toFixed(0)}s < ${this.config.minHoldSeconds}s - waiting`,
+            `[QuickFlip] Hold ${holdSeconds.toFixed(0)}s < ${this.config.minHoldSeconds}s - waiting`,
           );
           continue;
         }
@@ -185,11 +185,11 @@ export class SimpleQuickFlipStrategy {
         // This helps diagnose why profitable positions aren't being sold
         if (position.pnlPct >= 20) {
           this.logger.info(
-            `[SimpleQuickFlip] ⚠️ HIGH PROFIT BLOCKED: ${position.tokenId.slice(0, 8)}... shows +${position.pnlPct.toFixed(1)}% mid-price but bid=${(actualProfit.bidPrice * 100).toFixed(1)}¢ (${actualProfit.bidPnlPct.toFixed(1)}%) - check orderbook`,
+            `[QuickFlip] ⚠️ HIGH PROFIT BLOCKED: ${position.tokenId.slice(0, 8)}... shows +${position.pnlPct.toFixed(1)}% mid-price but bid=${(actualProfit.bidPrice * 100).toFixed(1)}¢ (${actualProfit.bidPnlPct.toFixed(1)}%) - check orderbook`,
           );
         } else {
           this.logger.debug(
-            `[SimpleQuickFlip] ⚠️ Mid-price shows +${position.pnlPct.toFixed(1)}% but bid price shows ${actualProfit.bidPnlPct.toFixed(1)}% - skipping to avoid loss`,
+            `[QuickFlip] ⚠️ Mid-price shows +${position.pnlPct.toFixed(1)}% but bid price shows ${actualProfit.bidPnlPct.toFixed(1)}% - skipping to avoid loss`,
           );
         }
         continue;
@@ -197,7 +197,7 @@ export class SimpleQuickFlipStrategy {
 
       // Sell!
       this.logger.info(
-        `[SimpleQuickFlip] 📈 Selling at +${actualProfit.bidPnlPct.toFixed(1)}% (+$${actualProfit.bidPnlUsd.toFixed(2)}) [mid-price was +${position.pnlPct.toFixed(1)}%]`,
+        `[QuickFlip] 📈 Selling at +${actualProfit.bidPnlPct.toFixed(1)}% (+$${actualProfit.bidPnlUsd.toFixed(2)}) [mid-price was +${position.pnlPct.toFixed(1)}%]`,
       );
 
       const sold = await this.sellPosition(position);
@@ -207,7 +207,7 @@ export class SimpleQuickFlipStrategy {
     }
 
     if (soldCount > 0) {
-      this.logger.info(`[SimpleQuickFlip] ✅ Sold ${soldCount} position(s)`);
+      this.logger.info(`[QuickFlip] ✅ Sold ${soldCount} position(s)`);
     }
 
     return soldCount;
@@ -260,7 +260,7 @@ export class SimpleQuickFlipStrategy {
       // This is the hard floor - no matter what, we don't sell for a loss
       if (bidPrice <= position.entryPrice) {
         this.logger.debug(
-          `[SimpleQuickFlip] 🚫 Bid ${(bidPrice * 100).toFixed(1)}¢ <= entry ${(position.entryPrice * 100).toFixed(1)}¢ - NEVER sell for a loss`,
+          `[QuickFlip] 🚫 Bid ${(bidPrice * 100).toFixed(1)}¢ <= entry ${(position.entryPrice * 100).toFixed(1)}¢ - NEVER sell for a loss`,
         );
         return { profitable: false, bidPnlPct, bidPnlUsd, bidPrice };
       }
@@ -269,7 +269,7 @@ export class SimpleQuickFlipStrategy {
       // This ensures we actually make money after all costs
       if (bidPnlPct < EFFECTIVE_MIN_PROFIT_PCT) {
         this.logger.debug(
-          `[SimpleQuickFlip] Profit ${bidPnlPct.toFixed(2)}% below fee threshold ${EFFECTIVE_MIN_PROFIT_PCT.toFixed(2)}% - waiting for better price`,
+          `[QuickFlip] Profit ${bidPnlPct.toFixed(2)}% below fee threshold ${EFFECTIVE_MIN_PROFIT_PCT.toFixed(2)}% - waiting for better price`,
         );
         return { profitable: false, bidPnlPct, bidPnlUsd, bidPrice };
       }
@@ -284,14 +284,14 @@ export class SimpleQuickFlipStrategy {
 
       if (!profitable) {
         this.logger.debug(
-          `[SimpleQuickFlip] Profit ${bidPnlPct.toFixed(1)}% / $${bidPnlUsd.toFixed(2)} below targets (${this.config.targetPct}% / $${this.config.minProfitUsd}) - waiting`,
+          `[QuickFlip] Profit ${bidPnlPct.toFixed(1)}% / $${bidPnlUsd.toFixed(2)} below targets (${this.config.targetPct}% / $${this.config.minProfitUsd}) - waiting`,
         );
       }
 
       return { profitable, bidPnlPct, bidPnlUsd, bidPrice };
     } catch (err) {
       this.logger.warn(
-        `[SimpleQuickFlip] Could not verify bid price: ${err instanceof Error ? err.message : String(err)}`,
+        `[QuickFlip] Could not verify bid price: ${err instanceof Error ? err.message : String(err)}`,
       );
       // If we can't verify, don't sell (safety first)
       return { profitable: false, bidPnlPct: 0, bidPnlUsd: 0, bidPrice: 0 };
@@ -310,7 +310,7 @@ export class SimpleQuickFlipStrategy {
   }): Promise<boolean> {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
-      this.logger.error(`[SimpleQuickFlip] No wallet`);
+      this.logger.error(`[QuickFlip] No wallet`);
       return false;
     }
 
@@ -330,17 +330,17 @@ export class SimpleQuickFlipStrategy {
       });
 
       if (result.status === "submitted") {
-        this.logger.info(`[SimpleQuickFlip] ✅ Sold successfully`);
+        this.logger.info(`[QuickFlip] ✅ Sold successfully`);
         return true;
       }
 
       this.logger.warn(
-        `[SimpleQuickFlip] ⚠️ Sell not filled: ${result.reason ?? "unknown"}`,
+        `[QuickFlip] ⚠️ Sell not filled: ${result.reason ?? "unknown"}`,
       );
       return false;
     } catch (err) {
       this.logger.error(
-        `[SimpleQuickFlip] ❌ Sell failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[QuickFlip] ❌ Sell failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return false;
     }

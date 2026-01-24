@@ -1,5 +1,5 @@
 /**
- * Simple Strategy Orchestrator
+ * Strategy Orchestrator
  *
  * Runs all strategies SEQUENTIALLY in priority order.
  * No parallel execution = no race conditions = no order stacking.
@@ -24,21 +24,21 @@ import type { ClobClient } from "@polymarket/clob-client";
 import type { ConsoleLogger } from "../utils/logger.util";
 import { PositionTracker } from "./position-tracker";
 import {
-  SimpleSmartHedgingStrategy,
-  type SimpleSmartHedgingConfig,
-  DEFAULT_SIMPLE_HEDGING_CONFIG,
-} from "./smart-hedging-simple";
+  SmartHedgingStrategy,
+  type SmartHedgingConfig,
+  DEFAULT_HEDGING_CONFIG,
+} from "./smart-hedging";
 import {
-  SimpleEndgameSweepStrategy,
-  type SimpleEndgameSweepConfig,
-  DEFAULT_SIMPLE_ENDGAME_CONFIG,
-} from "./endgame-sweep-simple";
+  EndgameSweepStrategy,
+  type EndgameSweepConfig,
+  DEFAULT_ENDGAME_CONFIG,
+} from "./endgame-sweep";
 // Quick Flip module removed - functionality covered by ScalpTakeProfit
 // import {
-//   SimpleQuickFlipStrategy,
-//   type SimpleQuickFlipConfig,
-//   DEFAULT_SIMPLE_QUICKFLIP_CONFIG,
-// } from "./quick-flip-simple";
+//   QuickFlipStrategy,
+//   type QuickFlipConfig,
+//   DEFAULT_QUICKFLIP_CONFIG,
+// } from "./quick-flip";
 import {
   ScalpTakeProfitStrategy,
   type ScalpTakeProfitConfig,
@@ -57,20 +57,20 @@ const POSITION_REFRESH_MS = 5000; // 5 seconds
 const EXECUTION_INTERVAL_MS = 2000; // 2 seconds
 const TICK_SKIPPED_LOG_INTERVAL_MS = 60_000; // Log "tick skipped" at most once per minute
 
-export interface SimpleOrchestratorConfig {
+export interface OrchestratorConfig {
   client: ClobClient;
   logger: ConsoleLogger;
   maxPositionUsd: number; // From MAX_POSITION_USD env
   riskPreset?: "conservative" | "balanced" | "aggressive";
-  hedgingConfig?: Partial<SimpleSmartHedgingConfig>;
-  endgameConfig?: Partial<SimpleEndgameSweepConfig>;
+  hedgingConfig?: Partial<SmartHedgingConfig>;
+  endgameConfig?: Partial<EndgameSweepConfig>;
   // quickFlipConfig removed - module deprecated
   scalpConfig?: Partial<ScalpTakeProfitConfig>;
   autoRedeemConfig?: Partial<AutoRedeemConfig>;
   stopLossConfig?: Partial<UniversalStopLossConfig>;
 }
 
-export class SimpleOrchestrator {
+export class Orchestrator {
   private client: ClobClient;
   private logger: ConsoleLogger;
   private positionTracker: PositionTracker;
@@ -79,10 +79,10 @@ export class SimpleOrchestrator {
 
   // All strategies
   private autoRedeemStrategy: AutoRedeemStrategy;
-  private hedgingStrategy: SimpleSmartHedgingStrategy;
+  private hedgingStrategy: SmartHedgingStrategy;
   private stopLossStrategy: UniversalStopLossStrategy;
   private scalpStrategy: ScalpTakeProfitStrategy;
-  private endgameStrategy: SimpleEndgameSweepStrategy;
+  private endgameStrategy: EndgameSweepStrategy;
   // quickFlipStrategy removed - module deprecated
 
   private executionTimer?: NodeJS.Timeout;
@@ -102,14 +102,14 @@ export class SimpleOrchestrator {
   private ticksSkippedDueToInflight = 0;
   private lastTickSkippedLogAt = 0;
 
-  constructor(config: SimpleOrchestratorConfig) {
+  constructor(config: OrchestratorConfig) {
     this.client = config.client;
     this.logger = config.logger;
 
     // Generate unique boot ID to detect multiple orchestrator instances
     this.bootId = randomUUID().slice(0, 8);
     this.logger.info(
-      `[SimpleOrchestrator] Boot ID: ${this.bootId} - only ONE instance should exist`,
+      `[Orchestrator] Boot ID: ${this.bootId} - only ONE instance should exist`,
     );
 
     // Initialize core components
@@ -151,11 +151,11 @@ export class SimpleOrchestrator {
 
     // 2. Smart Hedging - Hedge losing positions
     const hedgingConfig = {
-      ...DEFAULT_SIMPLE_HEDGING_CONFIG,
+      ...DEFAULT_HEDGING_CONFIG,
       maxHedgeUsd: config.maxPositionUsd,
       ...config.hedgingConfig,
     };
-    this.hedgingStrategy = new SimpleSmartHedgingStrategy({
+    this.hedgingStrategy = new SmartHedgingStrategy({
       client: config.client,
       logger: config.logger,
       positionTracker: this.positionTracker,
@@ -182,12 +182,12 @@ export class SimpleOrchestrator {
     });
 
     // 4. Endgame Sweep - Buy high-confidence positions
-    this.endgameStrategy = new SimpleEndgameSweepStrategy({
+    this.endgameStrategy = new EndgameSweepStrategy({
       client: config.client,
       logger: config.logger,
       positionTracker: this.positionTracker,
       config: {
-        ...DEFAULT_SIMPLE_ENDGAME_CONFIG,
+        ...DEFAULT_ENDGAME_CONFIG,
         maxPositionUsd: config.maxPositionUsd,
         ...config.endgameConfig,
       },
@@ -210,7 +210,7 @@ export class SimpleOrchestrator {
     // Quick Flip module removed - ScalpTakeProfit handles profit-taking
 
     this.logger.info(
-      `[SimpleOrchestrator] Initialized with maxPosition=$${config.maxPositionUsd}`,
+      `[Orchestrator] Initialized with maxPosition=$${config.maxPositionUsd}`,
     );
   }
 
@@ -221,13 +221,13 @@ export class SimpleOrchestrator {
   async start(): Promise<void> {
     if (this.isRunning) {
       this.logger.warn(
-        `[SimpleOrchestrator] Already running (bootId=${this.bootId}), ignoring duplicate start()`,
+        `[Orchestrator] Already running (bootId=${this.bootId}), ignoring duplicate start()`,
       );
       return;
     }
 
     this.logger.info(
-      `[SimpleOrchestrator] 🚀 Starting... (bootId=${this.bootId})`,
+      `[Orchestrator] 🚀 Starting... (bootId=${this.bootId})`,
     );
 
     // Start position tracking
@@ -241,7 +241,7 @@ export class SimpleOrchestrator {
     );
 
     this.logger.info(
-      `[SimpleOrchestrator] ✅ Started with ${EXECUTION_INTERVAL_MS}ms interval (bootId=${this.bootId})`,
+      `[Orchestrator] ✅ Started with ${EXECUTION_INTERVAL_MS}ms interval (bootId=${this.bootId})`,
     );
   }
 
@@ -260,7 +260,7 @@ export class SimpleOrchestrator {
       const now = Date.now();
       if (now - this.lastTickSkippedLogAt >= TICK_SKIPPED_LOG_INTERVAL_MS) {
         this.logger.debug(
-          `[SimpleOrchestrator] Tick skipped - cycle in flight (skipped=${this.ticksSkippedDueToInflight} total)`,
+          `[Orchestrator] Tick skipped - cycle in flight (skipped=${this.ticksSkippedDueToInflight} total)`,
         );
         this.lastTickSkippedLogAt = now;
       }
@@ -270,7 +270,7 @@ export class SimpleOrchestrator {
     // Start a new cycle (fire-and-forget, but guarded)
     this.executeStrategies().catch((err) => {
       this.logger.error(
-        `[SimpleOrchestrator] Cycle failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[Orchestrator] Cycle failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     });
   }
@@ -290,7 +290,7 @@ export class SimpleOrchestrator {
     // Double-check single-flight (belt-and-suspenders with onTick guard)
     if (this.cycleInFlight) {
       this.logger.warn(
-        `[SimpleOrchestrator] executeStrategies called while cycle in flight - skipping`,
+        `[Orchestrator] executeStrategies called while cycle in flight - skipping`,
       );
       return;
     }
@@ -303,7 +303,7 @@ export class SimpleOrchestrator {
     const cycleStartTime = Date.now();
 
     this.logger.debug(
-      `[SimpleOrchestrator] cycle=${currentCycleId} start (ticksFired=${this.ticksFired}, skipped=${this.ticksSkippedDueToInflight})`,
+      `[Orchestrator] cycle=${currentCycleId} start (ticksFired=${this.ticksFired}, skipped=${this.ticksSkippedDueToInflight})`,
     );
 
     const strategyTimings: Array<{ name: string; durationMs: number }> = [];
@@ -359,7 +359,7 @@ export class SimpleOrchestrator {
       // Quick Flip removed - functionality covered by ScalpTakeProfit
     } catch (err) {
       this.logger.error(
-        `[SimpleOrchestrator] Error in cycle=${currentCycleId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[Orchestrator] Error in cycle=${currentCycleId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       // Release cycle lock
@@ -367,14 +367,14 @@ export class SimpleOrchestrator {
 
       const cycleDuration = Date.now() - cycleStartTime;
       this.logger.debug(
-        `[SimpleOrchestrator] cycle=${currentCycleId} end duration=${cycleDuration}ms (skippedTicks=${this.ticksSkippedDueToInflight})`,
+        `[Orchestrator] cycle=${currentCycleId} end duration=${cycleDuration}ms (skippedTicks=${this.ticksSkippedDueToInflight})`,
       );
 
       // Log slow strategies (> 500ms) for diagnostics
       const slowStrategies = strategyTimings.filter((s) => s.durationMs > 500);
       if (slowStrategies.length > 0) {
         this.logger.debug(
-          `[SimpleOrchestrator] Slow strategies: ${slowStrategies.map((s) => `${s.name}=${s.durationMs}ms`).join(", ")}`,
+          `[Orchestrator] Slow strategies: ${slowStrategies.map((s) => `${s.name}=${s.durationMs}ms`).join(", ")}`,
         );
       }
     }
@@ -392,11 +392,11 @@ export class SimpleOrchestrator {
     try {
       const count = await execute();
       if (count > 0) {
-        this.logger.info(`[SimpleOrchestrator] ${name}: ${count} action(s)`);
+        this.logger.info(`[Orchestrator] ${name}: ${count} action(s)`);
       }
     } catch (err) {
       this.logger.error(
-        `[SimpleOrchestrator] ${name} failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[Orchestrator] ${name} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       timings.push({ name, durationMs: Date.now() - start });
@@ -410,7 +410,7 @@ export class SimpleOrchestrator {
     if (!this.isRunning) return;
 
     this.logger.info(
-      `[SimpleOrchestrator] 🛑 Stopping... (bootId=${this.bootId})`,
+      `[Orchestrator] 🛑 Stopping... (bootId=${this.bootId})`,
     );
 
     if (this.executionTimer) {
@@ -422,7 +422,7 @@ export class SimpleOrchestrator {
     this.isRunning = false;
 
     this.logger.info(
-      `[SimpleOrchestrator] ✅ Stopped. Stats: ticksFired=${this.ticksFired}, cyclesRun=${this.cyclesRun}, skipped=${this.ticksSkippedDueToInflight}`,
+      `[Orchestrator] ✅ Stopped. Stats: ticksFired=${this.ticksFired}, cyclesRun=${this.cyclesRun}, skipped=${this.ticksSkippedDueToInflight}`,
     );
   }
 
@@ -464,15 +464,15 @@ export class SimpleOrchestrator {
 }
 
 /**
- * Create a simple orchestrator from env config
+ * Create an orchestrator from env config
  */
-export function createSimpleOrchestrator(
+export function createOrchestrator(
   client: ClobClient,
   logger: ConsoleLogger,
   maxPositionUsd: number,
   riskPreset: "conservative" | "balanced" | "aggressive" = "balanced",
-): SimpleOrchestrator {
-  return new SimpleOrchestrator({
+): Orchestrator {
+  return new Orchestrator({
     client,
     logger,
     maxPositionUsd,

@@ -18,9 +18,9 @@ import { formatClobCredsChecklist } from "../utils/clob-credentials.util";
 import { ensureTradingReady } from "../polymarket/preflight";
 import { getContextAwareWarnings } from "../utils/auth-diagnostic.util";
 import {
-  SimpleOrchestrator,
-  createSimpleOrchestrator,
-} from "../strategies/orchestrator-simple";
+  Orchestrator,
+  createOrchestrator,
+} from "../strategies/orchestrator";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 
 async function main(): Promise<void> {
@@ -78,11 +78,11 @@ async function main(): Promise<void> {
   });
 
   // Start unified strategy orchestrator if STRATEGY_PRESET is configured
-  // Uses SIMPLIFIED strategies for reliable, easy-to-debug trading
-  let orchestrator: SimpleOrchestrator | undefined;
+  // Uses UNIFIED strategies for reliable, easy-to-debug trading
+  let orchestrator: Orchestrator | undefined;
   if (strategyConfig && strategyConfig.enabled && !tradingReady.detectOnly) {
     logger.info(
-      `🎯 Starting SIMPLIFIED strategy orchestrator (preset: ${strategyConfig.presetName})`,
+      `🎯 Starting UNIFIED strategy orchestrator (preset: ${strategyConfig.presetName})`,
     );
     logger.info(
       `📊 Config: MAX_POSITION_USD=$${strategyConfig.endgameMaxPositionUsd}, ` +
@@ -90,8 +90,8 @@ async function main(): Promise<void> {
         `ABSOLUTE_MAX=$${strategyConfig.smartHedgingAbsoluteMaxUsd}`,
     );
 
-    // Create simplified orchestrator with user's config
-    orchestrator = new SimpleOrchestrator({
+    // Create orchestrator with user's config
+    orchestrator = new Orchestrator({
       client,
       logger,
       maxPositionUsd: strategyConfig.endgameMaxPositionUsd,

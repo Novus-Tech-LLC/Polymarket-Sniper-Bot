@@ -1,9 +1,9 @@
 import assert from "node:assert";
 import { test, describe } from "node:test";
 import {
-  DEFAULT_SIMPLE_HEDGING_CONFIG,
-  type SimpleSmartHedgingConfig,
-} from "../../src/strategies/smart-hedging-simple";
+  DEFAULT_HEDGING_CONFIG,
+  type SmartHedgingConfig,
+} from "../../src/strategies/smart-hedging";
 
 /**
  * Unit tests for Smart Hedging Strategy - Near-Close Behavior
@@ -14,9 +14,9 @@ import {
 
 describe("Smart Hedging Near-Close Logic", () => {
   // Helper function to simulate the near-close decision logic
-  // This mirrors the logic in SimpleSmartHedgingStrategy.execute()
+  // This mirrors the logic in SmartHedgingStrategy.execute()
   function shouldHedgePosition(
-    config: SimpleSmartHedgingConfig,
+    config: SmartHedgingConfig,
     position: {
       entryPrice: number;
       currentPrice: number;
@@ -77,7 +77,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 2 * 60 * 1000; // 2 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.6,
           currentPrice: 0.45,
@@ -103,7 +103,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 1 * 60 * 1000; // 1 minute from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.7,
           currentPrice: 0.4,
@@ -125,7 +125,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 0.5 * 60 * 1000; // 30 seconds from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.8,
           currentPrice: 0.5,
@@ -147,7 +147,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 2 * 60 * 1000; // 2 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.8,
           currentPrice: 0.35,
@@ -175,7 +175,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 10 * 60 * 1000; // 10 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.32, // Entry at 32¢
           currentPrice: 0.24, // Current at 24¢ (8¢ drop, 25% loss)
@@ -197,7 +197,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 10 * 60 * 1000; // 10 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.6, // Entry at 60¢
           currentPrice: 0.47, // Current at 47¢ (13¢ drop)
@@ -219,7 +219,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 10 * 60 * 1000; // 10 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.3, // Entry at 30¢
           currentPrice: 0.2, // Current at 20¢ (10¢ drop, but 33% loss)
@@ -241,7 +241,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 10 * 60 * 1000; // 10 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.5, // Entry at 50¢
           currentPrice: 0.35, // Current at 35¢ (15¢ drop, 30% loss)
@@ -263,7 +263,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 15 * 60 * 1000; // Exactly 15 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.4,
           currentPrice: 0.3, // 10¢ drop, 25% loss
@@ -285,7 +285,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 5 * 60 * 1000; // 5 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.35,
           currentPrice: 0.27, // 8¢ drop, 22.8% loss
@@ -309,7 +309,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 30 * 60 * 1000; // 30 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.5,
           currentPrice: 0.38, // 24% loss
@@ -330,7 +330,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const now = Date.now();
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.5,
           currentPrice: 0.38,
@@ -352,7 +352,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 60 * 60 * 1000; // 1 hour from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.6,
           currentPrice: 0.46, // 23.3% loss
@@ -374,7 +374,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 30 * 60 * 1000; // 30 minutes from now
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.5,
           currentPrice: 0.42, // 16% loss
@@ -398,7 +398,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now - 5 * 60 * 1000; // 5 minutes ago
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.5,
           currentPrice: 0.35,
@@ -421,7 +421,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 3 * 60 * 1000;
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.5,
           currentPrice: 0.35,
@@ -445,7 +445,7 @@ describe("Smart Hedging Near-Close Logic", () => {
       const marketEndTime = now + 15 * 60 * 1000 + 1000; // 15 min + 1 second
 
       const result = shouldHedgePosition(
-        DEFAULT_SIMPLE_HEDGING_CONFIG,
+        DEFAULT_HEDGING_CONFIG,
         {
           entryPrice: 0.5,
           currentPrice: 0.38, // 24% loss
@@ -465,8 +465,8 @@ describe("Smart Hedging Near-Close Logic", () => {
 
   describe("Custom Configuration", () => {
     test("should respect custom nearCloseWindowMinutes", () => {
-      const customConfig: SimpleSmartHedgingConfig = {
-        ...DEFAULT_SIMPLE_HEDGING_CONFIG,
+      const customConfig: SmartHedgingConfig = {
+        ...DEFAULT_HEDGING_CONFIG,
         nearCloseWindowMinutes: 10, // Shorter window
       };
 
@@ -493,8 +493,8 @@ describe("Smart Hedging Near-Close Logic", () => {
     });
 
     test("should respect custom noHedgeWindowMinutes", () => {
-      const customConfig: SimpleSmartHedgingConfig = {
-        ...DEFAULT_SIMPLE_HEDGING_CONFIG,
+      const customConfig: SmartHedgingConfig = {
+        ...DEFAULT_HEDGING_CONFIG,
         noHedgeWindowMinutes: 5, // Longer no-hedge window
       };
 
@@ -520,8 +520,8 @@ describe("Smart Hedging Near-Close Logic", () => {
     });
 
     test("should respect custom nearClosePriceDropCents", () => {
-      const customConfig: SimpleSmartHedgingConfig = {
-        ...DEFAULT_SIMPLE_HEDGING_CONFIG,
+      const customConfig: SmartHedgingConfig = {
+        ...DEFAULT_HEDGING_CONFIG,
         nearClosePriceDropCents: 8, // Lower threshold
       };
 
@@ -547,8 +547,8 @@ describe("Smart Hedging Near-Close Logic", () => {
     });
 
     test("should respect custom nearCloseLossPct", () => {
-      const customConfig: SimpleSmartHedgingConfig = {
-        ...DEFAULT_SIMPLE_HEDGING_CONFIG,
+      const customConfig: SmartHedgingConfig = {
+        ...DEFAULT_HEDGING_CONFIG,
         nearCloseLossPct: 25, // Lower threshold
       };
 
@@ -578,22 +578,22 @@ describe("Smart Hedging Near-Close Logic", () => {
 describe("Default Configuration Values", () => {
   test("default config has correct near-close values", () => {
     assert.strictEqual(
-      DEFAULT_SIMPLE_HEDGING_CONFIG.nearCloseWindowMinutes,
+      DEFAULT_HEDGING_CONFIG.nearCloseWindowMinutes,
       15,
       "nearCloseWindowMinutes should default to 15",
     );
     assert.strictEqual(
-      DEFAULT_SIMPLE_HEDGING_CONFIG.nearClosePriceDropCents,
+      DEFAULT_HEDGING_CONFIG.nearClosePriceDropCents,
       12,
       "nearClosePriceDropCents should default to 12",
     );
     assert.strictEqual(
-      DEFAULT_SIMPLE_HEDGING_CONFIG.nearCloseLossPct,
+      DEFAULT_HEDGING_CONFIG.nearCloseLossPct,
       30,
       "nearCloseLossPct should default to 30",
     );
     assert.strictEqual(
-      DEFAULT_SIMPLE_HEDGING_CONFIG.noHedgeWindowMinutes,
+      DEFAULT_HEDGING_CONFIG.noHedgeWindowMinutes,
       3,
       "noHedgeWindowMinutes should default to 3",
     );
@@ -601,7 +601,7 @@ describe("Default Configuration Values", () => {
 
   test("default trigger loss is 20%", () => {
     assert.strictEqual(
-      DEFAULT_SIMPLE_HEDGING_CONFIG.triggerLossPct,
+      DEFAULT_HEDGING_CONFIG.triggerLossPct,
       20,
       "triggerLossPct should default to 20%",
     );
@@ -609,7 +609,7 @@ describe("Default Configuration Values", () => {
 
   test("default force liquidation is 50%", () => {
     assert.strictEqual(
-      DEFAULT_SIMPLE_HEDGING_CONFIG.forceLiquidationPct,
+      DEFAULT_HEDGING_CONFIG.forceLiquidationPct,
       50,
       "forceLiquidationPct should default to 50%",
     );
@@ -631,7 +631,7 @@ describe("Smart Hedging Liquidation Candidate Filtering", () => {
   }
 
   /**
-   * Helper function to simulate the getLiquidationCandidates logic in SimpleSmartHedgingStrategy.
+   * Helper function to simulate the getLiquidationCandidates logic in SmartHedgingStrategy.
    * Filters positions to find candidates suitable for liquidation, excluding already hedged
    * positions and positions in cooldown.
    *

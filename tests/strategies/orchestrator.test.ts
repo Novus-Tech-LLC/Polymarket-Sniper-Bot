@@ -3,7 +3,7 @@ import { test, describe } from "node:test";
 import { randomUUID } from "crypto";
 
 /**
- * Unit tests for SimpleOrchestrator single-flight cycle protection
+ * Unit tests for Orchestrator single-flight cycle protection
  *
  * These tests verify that:
  * 1. Only one orchestrator cycle runs at a time
@@ -91,7 +91,7 @@ function createMockPositionTracker(refreshDelayMs = 0) {
   };
 }
 
-describe("SimpleOrchestrator Single-Flight Cycle Lock", () => {
+describe("Orchestrator Single-Flight Cycle Lock", () => {
   test("Only one cycle runs at a time when executeStrategies called concurrently", async () => {
     // This tests the core single-flight guarantee:
     // If executeStrategies() is called while a cycle is in progress, the second call should be skipped

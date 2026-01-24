@@ -1,5 +1,5 @@
 /**
- * Smart Hedging Strategy - SIMPLIFIED
+ * Smart Hedging Strategy
  *
  * Instead of selling at a loss, buy the opposing outcome to guarantee profit.
  *
@@ -18,9 +18,9 @@ import type { PositionTracker, Position } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
 
 /**
- * Simple Smart Hedging Configuration
+ * Smart Hedging Configuration
  */
-export interface SimpleSmartHedgingConfig {
+export interface SmartHedgingConfig {
   /** Enable smart hedging */
   enabled: boolean;
 
@@ -82,7 +82,7 @@ export interface SimpleSmartHedgingConfig {
   noHedgeWindowMinutes: number;
 }
 
-export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
+export const DEFAULT_HEDGING_CONFIG: SmartHedgingConfig = {
   enabled: true,
   triggerLossPct: 20,
   maxHedgeUsd: 10,
@@ -139,13 +139,13 @@ const MARKET_RESOLVED_THRESHOLD = 0.95;
 const HEDGE_TOO_EXPENSIVE_THRESHOLD = 0.9;
 
 /**
- * Simple Smart Hedging Strategy
+ * Smart Hedging Strategy
  */
-export class SimpleSmartHedgingStrategy {
+export class SmartHedgingStrategy {
   private client: ClobClient;
   private logger: ConsoleLogger;
   private positionTracker: PositionTracker;
-  private config: SimpleSmartHedgingConfig;
+  private config: SmartHedgingConfig;
 
   // === SINGLE-FLIGHT GUARD ===
   // Prevents concurrent execution if called multiple times
@@ -162,7 +162,7 @@ export class SimpleSmartHedgingStrategy {
     client: ClobClient;
     logger: ConsoleLogger;
     positionTracker: PositionTracker;
-    config: SimpleSmartHedgingConfig;
+    config: SmartHedgingConfig;
   }) {
     this.client = config.client;
     this.logger = config.logger;
@@ -170,7 +170,7 @@ export class SimpleSmartHedgingStrategy {
     this.config = config.config;
 
     this.logger.info(
-      `[SimpleHedging] Initialized: trigger=-${this.config.triggerLossPct}%, ` +
+      `[SmartHedging] Initialized: trigger=-${this.config.triggerLossPct}%, ` +
         `maxHedge=$${this.config.maxHedgeUsd}, absoluteMax=$${this.config.absoluteMaxUsd}`,
     );
   }
@@ -187,7 +187,7 @@ export class SimpleSmartHedgingStrategy {
 
     // Single-flight guard: prevent concurrent execution
     if (this.inFlight) {
-      this.logger.debug("[SimpleHedging] Skipped - already in flight");
+      this.logger.debug("[SmartHedging] Skipped - already in flight");
       return 0;
     }
 
@@ -223,7 +223,7 @@ export class SimpleSmartHedgingStrategy {
       if (cooldownUntil && now < cooldownUntil) {
         const remainingSec = Math.ceil((cooldownUntil - now) / 1000);
         this.logger.debug(
-          `[SimpleHedging] ⏳ Skipping position in liquidation cooldown: ${key} (${remainingSec}s remaining)`,
+          `[SmartHedging] ⏳ Skipping position in liquidation cooldown: ${key} (${remainingSec}s remaining)`,
         );
         continue;
       }
@@ -237,7 +237,7 @@ export class SimpleSmartHedgingStrategy {
         // Only log for positions with meaningful loss (>5%) to reduce noise
         if (position.pnlPct < -5) {
           this.logger.debug(
-            `[SimpleHedging] 📋 Skip hedge (loss trigger): ${position.side} position pnlPct=${position.pnlPct.toFixed(1)}% > trigger=-${this.config.triggerLossPct}%`,
+            `[SmartHedging] 📋 Skip hedge (loss trigger): ${position.side} position pnlPct=${position.pnlPct.toFixed(1)}% > trigger=-${this.config.triggerLossPct}%`,
           );
         }
         continue;
@@ -246,7 +246,7 @@ export class SimpleSmartHedgingStrategy {
       // Skip if entry price too high (not risky tier)
       if (position.entryPrice >= this.config.maxEntryPrice) {
         this.logger.debug(
-          `[SimpleHedging] 📋 Skip hedge (entry price gate): ${position.side} entryPrice=${(position.entryPrice * 100).toFixed(0)}¢ >= maxEntryPrice=${(this.config.maxEntryPrice * 100).toFixed(0)}¢`,
+          `[SmartHedging] 📋 Skip hedge (entry price gate): ${position.side} entryPrice=${(position.entryPrice * 100).toFixed(0)}¢ >= maxEntryPrice=${(this.config.maxEntryPrice * 100).toFixed(0)}¢`,
         );
         continue;
       }
@@ -255,7 +255,7 @@ export class SimpleSmartHedgingStrategy {
       const side = position.side?.toUpperCase();
       if (!side || side.trim() === "") {
         this.logger.debug(
-          `[SimpleHedging] 📋 Skip hedge (no side): position tokenId=${position.tokenId.slice(0, 16)}... has no side defined`,
+          `[SmartHedging] 📋 Skip hedge (no side): position tokenId=${position.tokenId.slice(0, 16)}... has no side defined`,
         );
         continue;
       }
@@ -263,7 +263,7 @@ export class SimpleSmartHedgingStrategy {
       // Skip resolved positions
       if (position.redeemable) {
         this.logger.debug(
-          `[SimpleHedging] 📋 Skip hedge (redeemable): ${position.side} position already redeemable`,
+          `[SmartHedging] 📋 Skip hedge (redeemable): ${position.side} position already redeemable`,
         );
         continue;
       }
@@ -277,7 +277,7 @@ export class SimpleSmartHedgingStrategy {
       if (!entryTime) {
         // If we don't have an entry time, be conservative and skip this position
         this.logger.debug(
-          `[SimpleHedging] ⏳ Skipping position without entryTime for min-hold check (marketId=${position.marketId}, tokenId=${position.tokenId})`,
+          `[SmartHedging] ⏳ Skipping position without entryTime for min-hold check (marketId=${position.marketId}, tokenId=${position.tokenId})`,
         );
         continue;
       }
@@ -285,7 +285,7 @@ export class SimpleSmartHedgingStrategy {
       const holdSeconds = (now - entryTime) / 1000;
       if (holdSeconds < this.config.minHoldSeconds) {
         this.logger.debug(
-          `[SimpleHedging] ⏳ Position losing ${Math.abs(position.pnlPct).toFixed(1)}% but held only ${holdSeconds.toFixed(0)}s (need ${this.config.minHoldSeconds}s) - waiting`,
+          `[SmartHedging] ⏳ Position losing ${Math.abs(position.pnlPct).toFixed(1)}% but held only ${holdSeconds.toFixed(0)}s (need ${this.config.minHoldSeconds}s) - waiting`,
         );
         continue;
       }
@@ -302,7 +302,7 @@ export class SimpleSmartHedgingStrategy {
         if (minutesToClose <= this.config.noHedgeWindowMinutes) {
           if (lossPct >= this.config.forceLiquidationPct) {
             this.logger.warn(
-              `[SimpleHedging] 🚨 No-hedge window (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% >= ${this.config.forceLiquidationPct}% - LIQUIDATING`,
+              `[SmartHedging] 🚨 No-hedge window (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% >= ${this.config.forceLiquidationPct}% - LIQUIDATING`,
             );
             const sold = await this.sellPosition(position);
             if (sold) {
@@ -315,12 +315,12 @@ export class SimpleSmartHedgingStrategy {
                 now + FAILED_LIQUIDATION_COOLDOWN_MS,
               );
               this.logger.warn(
-                `[SimpleHedging] ⏳ Liquidation failed in no-hedge window - position on cooldown for 5 minutes: ${key}`,
+                `[SmartHedging] ⏳ Liquidation failed in no-hedge window - position on cooldown for 5 minutes: ${key}`,
               );
             }
           } else {
             this.logger.debug(
-              `[SimpleHedging] ⏳ No-hedge window (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% - skipping (too late to hedge)`,
+              `[SmartHedging] ⏳ No-hedge window (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% - skipping (too late to hedge)`,
             );
           }
           continue;
@@ -337,13 +337,13 @@ export class SimpleSmartHedgingStrategy {
 
           if (!meetsDropThreshold && !meetsLossThreshold) {
             this.logger.debug(
-              `[SimpleHedging] ⏳ Near-close (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% / drop ${priceDropCents.toFixed(1)}¢ - skipping (thresholds: ${this.config.nearCloseLossPct}% or ${this.config.nearClosePriceDropCents}¢)`,
+              `[SmartHedging] ⏳ Near-close (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% / drop ${priceDropCents.toFixed(1)}¢ - skipping (thresholds: ${this.config.nearCloseLossPct}% or ${this.config.nearClosePriceDropCents}¢)`,
             );
             continue;
           }
 
           this.logger.info(
-            `[SimpleHedging] 📍 Near-close hedge triggered: ${minutesToClose.toFixed(1)}min to close, ` +
+            `[SmartHedging] 📍 Near-close hedge triggered: ${minutesToClose.toFixed(1)}min to close, ` +
               `loss=${lossPct.toFixed(1)}%${meetsLossThreshold ? " ✓" : ""}, ` +
               `drop=${priceDropCents.toFixed(1)}¢${meetsDropThreshold ? " ✓" : ""}`,
           );
@@ -356,7 +356,7 @@ export class SimpleSmartHedgingStrategy {
 
       // Try to hedge
       this.logger.info(
-        `[SimpleHedging] 🎯 Position losing ${lossPct.toFixed(1)}%${isCatastrophicLoss ? " (catastrophic)" : ""} - attempting hedge FIRST`,
+        `[SmartHedging] 🎯 Position losing ${lossPct.toFixed(1)}%${isCatastrophicLoss ? " (catastrophic)" : ""} - attempting hedge FIRST`,
       );
 
       const hedgeResult = await this.executeHedge(position);
@@ -370,7 +370,7 @@ export class SimpleSmartHedgingStrategy {
       // The position should be redeemed, not sold at a loss
       if (hedgeResult.reason === "MARKET_RESOLVED") {
         this.logger.info(
-          `[SimpleHedging] 📋 Position marked as resolved - skipping liquidation, awaiting redemption: ${key}`,
+          `[SmartHedging] 📋 Position marked as resolved - skipping liquidation, awaiting redemption: ${key}`,
         );
         // Add to hedged positions to prevent future attempts (will be redeemed instead)
         this.hedgedPositions.add(key);
@@ -383,7 +383,7 @@ export class SimpleSmartHedgingStrategy {
       // Only sell the losing position as a last resort.
       if (hedgeResult.reason === "INSUFFICIENT_BALANCE_OR_ALLOWANCE") {
         this.logger.info(
-          `[SimpleHedging] 💰 Hedge failed (insufficient funds) - attempting to free funds by selling profitable positions`,
+          `[SmartHedging] 💰 Hedge failed (insufficient funds) - attempting to free funds by selling profitable positions`,
         );
 
         // Get profitable positions sorted by lowest profit first (sell smallest winners first)
@@ -404,7 +404,7 @@ export class SimpleSmartHedgingStrategy {
           // Sell the lowest-profit profitable position first
           const profitToSell = sellableProfits[0];
           this.logger.info(
-            `[SimpleHedging] 🔄 Selling profitable position to free funds: ${profitToSell.side} +${profitToSell.pnlPct.toFixed(1)}% ($${(profitToSell.size * profitToSell.currentPrice).toFixed(2)})`,
+            `[SmartHedging] 🔄 Selling profitable position to free funds: ${profitToSell.side} +${profitToSell.pnlPct.toFixed(1)}% ($${(profitToSell.size * profitToSell.currentPrice).toFixed(2)})`,
           );
 
           const soldProfit = await this.sellPosition(profitToSell);
@@ -417,19 +417,19 @@ export class SimpleSmartHedgingStrategy {
             );
           } else {
             this.logger.warn(
-              `[SimpleHedging] ⚠️ Failed to sell profitable position for fund release`,
+              `[SmartHedging] ⚠️ Failed to sell profitable position for fund release`,
             );
           }
         } else {
           this.logger.debug(
-            `[SimpleHedging] 📋 No profitable positions available to sell for fund release`,
+            `[SmartHedging] 📋 No profitable positions available to sell for fund release`,
           );
         }
 
         // Retry hedge once if we freed some funds
         if (freedFunds) {
           this.logger.info(
-            `[SimpleHedging] 🔄 Retrying hedge after freeing funds...`,
+            `[SmartHedging] 🔄 Retrying hedge after freeing funds...`,
           );
 
           const retryResult = await this.executeHedge(position);
@@ -440,7 +440,7 @@ export class SimpleSmartHedgingStrategy {
           }
 
           this.logger.warn(
-            `[SimpleHedging] ⚠️ Hedge retry failed (${retryResult.reason}) - will sell losing position as last resort`,
+            `[SmartHedging] ⚠️ Hedge retry failed (${retryResult.reason}) - will sell losing position as last resort`,
           );
         }
 
@@ -454,7 +454,7 @@ export class SimpleSmartHedgingStrategy {
         hedgeResult.reason === "NO_LIQUIDITY"
       ) {
         this.logger.info(
-          `[SimpleHedging] 📋 Hedge skip reason: ${hedgeResult.reason}`,
+          `[SmartHedging] 📋 Hedge skip reason: ${hedgeResult.reason}`,
         );
       }
 
@@ -462,14 +462,14 @@ export class SimpleSmartHedgingStrategy {
       // For smaller losses, wait and try again later (market conditions may improve)
       if (!isCatastrophicLoss) {
         this.logger.info(
-          `[SimpleHedging] 📋 Hedge failed (${hedgeResult.reason}) but loss ${lossPct.toFixed(1)}% < ${this.config.forceLiquidationPct}% threshold - waiting for better conditions`,
+          `[SmartHedging] 📋 Hedge failed (${hedgeResult.reason}) but loss ${lossPct.toFixed(1)}% < ${this.config.forceLiquidationPct}% threshold - waiting for better conditions`,
         );
         continue;
       }
 
       // Catastrophic loss AND hedge failed - liquidate to stop bleeding
       this.logger.warn(
-        `[SimpleHedging] 🚨 Hedge failed (${hedgeResult.reason}) AND loss ${lossPct.toFixed(1)}% >= ${this.config.forceLiquidationPct}% - LIQUIDATING as last resort`,
+        `[SmartHedging] 🚨 Hedge failed (${hedgeResult.reason}) AND loss ${lossPct.toFixed(1)}% >= ${this.config.forceLiquidationPct}% - LIQUIDATING as last resort`,
       );
       const sold = await this.sellPosition(position);
       if (sold) {
@@ -482,7 +482,7 @@ export class SimpleSmartHedgingStrategy {
           now + FAILED_LIQUIDATION_COOLDOWN_MS,
         );
         this.logger.warn(
-          `[SimpleHedging] ⏳ Hedge and liquidation both failed - position on cooldown for 5 minutes: ${key}`,
+          `[SmartHedging] ⏳ Hedge and liquidation both failed - position on cooldown for 5 minutes: ${key}`,
         );
       }
     }
@@ -512,7 +512,7 @@ export class SimpleSmartHedgingStrategy {
 
     if (!oppositeInfo) {
       this.logger.warn(
-        `[SimpleHedging] Could not find opposite token for ${currentSide}`,
+        `[SmartHedging] Could not find opposite token for ${currentSide}`,
       );
       return { success: false, reason: "NO_OPPOSITE_TOKEN" };
     }
@@ -524,12 +524,12 @@ export class SimpleSmartHedgingStrategy {
     try {
       const orderbook = await this.client.getOrderBook(oppositeTokenId);
       if (!orderbook.asks || orderbook.asks.length === 0) {
-        this.logger.warn(`[SimpleHedging] No liquidity for ${oppositeSide}`);
+        this.logger.warn(`[SmartHedging] No liquidity for ${oppositeSide}`);
         return { success: false, reason: "NO_LIQUIDITY" };
       }
       oppositePrice = parseFloat(orderbook.asks[0].price);
     } catch {
-      this.logger.warn(`[SimpleHedging] Failed to get opposite price`);
+      this.logger.warn(`[SmartHedging] Failed to get opposite price`);
       return { success: false, reason: "ORDERBOOK_ERROR" };
     }
 
@@ -537,14 +537,14 @@ export class SimpleSmartHedgingStrategy {
     // EXCEPTION: If opposite is >= 95¢, market is essentially resolved - don't try to sell
     if (oppositePrice >= MARKET_RESOLVED_THRESHOLD) {
       this.logger.info(
-        `[SimpleHedging] ${oppositeSide} at ${(oppositePrice * 100).toFixed(0)}¢ - market essentially resolved, skipping (await redemption)`,
+        `[SmartHedging] ${oppositeSide} at ${(oppositePrice * 100).toFixed(0)}¢ - market essentially resolved, skipping (await redemption)`,
       );
       // Return special indicator that this is a resolved market, not a hedge failure
       return { success: false, reason: "MARKET_RESOLVED" };
     }
     if (oppositePrice >= HEDGE_TOO_EXPENSIVE_THRESHOLD) {
       this.logger.warn(
-        `[SimpleHedging] ${oppositeSide} at ${(oppositePrice * 100).toFixed(0)}¢ - too expensive to hedge`,
+        `[SmartHedging] ${oppositeSide} at ${(oppositePrice * 100).toFixed(0)}¢ - too expensive to hedge`,
       );
       return { success: false, reason: "TOO_EXPENSIVE" };
     }
@@ -568,7 +568,7 @@ export class SimpleSmartHedgingStrategy {
     // Check minimum
     if (hedgeUsd < this.config.minHedgeUsd) {
       this.logger.debug(
-        `[SimpleHedging] Hedge $${hedgeUsd.toFixed(2)} below min $${this.config.minHedgeUsd}`,
+        `[SmartHedging] Hedge $${hedgeUsd.toFixed(2)} below min $${this.config.minHedgeUsd}`,
       );
       return { success: false, reason: "BELOW_MIN_HEDGE" };
     }
@@ -580,7 +580,7 @@ export class SimpleSmartHedgingStrategy {
     const ifHedgeWins = hedgeShares * 1.0 - totalInvested;
 
     this.logger.info(
-      `[SimpleHedging] 🔄 HEDGING: Buy ${hedgeShares.toFixed(2)} ${oppositeSide} @ ${(oppositePrice * 100).toFixed(1)}¢ = $${hedgeUsd.toFixed(2)}` +
+      `[SmartHedging] 🔄 HEDGING: Buy ${hedgeShares.toFixed(2)} ${oppositeSide} @ ${(oppositePrice * 100).toFixed(1)}¢ = $${hedgeUsd.toFixed(2)}` +
         `\n  If ${currentSide} wins: ${ifOriginalWins >= 0 ? "+" : ""}$${ifOriginalWins.toFixed(2)}` +
         `\n  If ${oppositeSide} wins: ${ifHedgeWins >= 0 ? "+" : ""}$${ifHedgeWins.toFixed(2)}`,
     );
@@ -588,7 +588,7 @@ export class SimpleSmartHedgingStrategy {
     // Execute the hedge order
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
-      this.logger.error(`[SimpleHedging] No wallet - cannot hedge`);
+      this.logger.error(`[SmartHedging] No wallet - cannot hedge`);
       return { success: false, reason: "NO_WALLET" };
     }
 
@@ -611,17 +611,17 @@ export class SimpleSmartHedgingStrategy {
       });
 
       if (result.status === "submitted") {
-        this.logger.info(`[SimpleHedging] ✅ Hedge executed successfully`);
+        this.logger.info(`[SmartHedging] ✅ Hedge executed successfully`);
         return { success: true };
       }
 
       this.logger.warn(
-        `[SimpleHedging] ⚠️ Hedge order not filled: ${result.reason ?? "unknown"}`,
+        `[SmartHedging] ⚠️ Hedge order not filled: ${result.reason ?? "unknown"}`,
       );
       return { success: false, reason: result.reason ?? "ORDER_NOT_FILLED" };
     } catch (err) {
       this.logger.error(
-        `[SimpleHedging] ❌ Hedge failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[SmartHedging] ❌ Hedge failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return { success: false, reason: "HEDGE_ERROR" };
     }
@@ -656,7 +656,7 @@ export class SimpleSmartHedgingStrategy {
   private async sellPosition(position: Position): Promise<boolean> {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
-      this.logger.error(`[SimpleHedging] No wallet - cannot sell`);
+      this.logger.error(`[SmartHedging] No wallet - cannot sell`);
       return false;
     }
 
@@ -664,7 +664,7 @@ export class SimpleSmartHedgingStrategy {
     // but check again as a safety measure
     if (!position.side || position.side.trim() === "") {
       this.logger.warn(
-        `[SimpleHedging] Position has no side defined - cannot sell (tokenId=${position.tokenId})`,
+        `[SmartHedging] Position has no side defined - cannot sell (tokenId=${position.tokenId})`,
       );
       return false;
     }
@@ -672,7 +672,7 @@ export class SimpleSmartHedgingStrategy {
     const currentValue = position.size * position.currentPrice;
 
     this.logger.info(
-      `[SimpleHedging] 💸 SELLING ${position.side} to salvage $${currentValue.toFixed(2)}`,
+      `[SmartHedging] 💸 SELLING ${position.side} to salvage $${currentValue.toFixed(2)}`,
     );
 
     try {
@@ -693,17 +693,17 @@ export class SimpleSmartHedgingStrategy {
       });
 
       if (result.status === "submitted") {
-        this.logger.info(`[SimpleHedging] ✅ Position sold`);
+        this.logger.info(`[SmartHedging] ✅ Position sold`);
         return true;
       }
 
       this.logger.warn(
-        `[SimpleHedging] ⚠️ Sell not filled: ${result.reason ?? "unknown"}`,
+        `[SmartHedging] ⚠️ Sell not filled: ${result.reason ?? "unknown"}`,
       );
       return false;
     } catch (err) {
       this.logger.error(
-        `[SimpleHedging] ❌ Sell failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[SmartHedging] ❌ Sell failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return false;
     }
@@ -741,7 +741,7 @@ export class SimpleSmartHedgingStrategy {
       // If missing, log a warning but continue - the tokenId is what matters for execution.
       if (!oppositeToken.outcome) {
         this.logger.warn(
-          `[SimpleHedging] Opposite token has no outcome defined (marketId=${marketId}, tokenId=${oppositeToken.token_id})`,
+          `[SmartHedging] Opposite token has no outcome defined (marketId=${marketId}, tokenId=${oppositeToken.token_id})`,
         );
       }
 
@@ -792,11 +792,11 @@ export class SimpleSmartHedgingStrategy {
       }
 
       this.logger.debug(
-        `[SimpleHedging] Cleaned up ${expiredCount} expired + ${toRemove} oldest cooldown entries (max: ${MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES})`,
+        `[SmartHedging] Cleaned up ${expiredCount} expired + ${toRemove} oldest cooldown entries (max: ${MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES})`,
       );
     } else if (expiredCount > 0) {
       this.logger.debug(
-        `[SimpleHedging] Cleaned up ${expiredCount} expired cooldown entries`,
+        `[SmartHedging] Cleaned up ${expiredCount} expired cooldown entries`,
       );
     }
   }
