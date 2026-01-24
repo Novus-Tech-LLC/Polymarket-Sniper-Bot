@@ -24,6 +24,12 @@ import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker, Position } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
+import {
+  LogDeduper,
+  SkipReasonAggregator,
+  SKIP_LOG_TTL_MS,
+  HEARTBEAT_INTERVAL_MS,
+} from "../utils/log-deduper.util";
 
 /**
  * Scalp Take-Profit Configuration
@@ -315,6 +321,12 @@ export class ScalpTakeProfitStrategy {
     avgHoldMinutes: 0,
   };
 
+  // === LOG DEDUPLICATION ===
+  // Shared LogDeduper for rate-limiting and deduplicating logs
+  private logDeduper = new LogDeduper();
+  // Cycle counter for summary logging
+  private cycleCount = 0;
+
   // Rate-limit logging: track last summary log time and counts
   private lastSummaryLogAt = 0;
   private lastLoggedCounts = { profitable: 0, losing: 0, total: 0 };
@@ -484,17 +496,24 @@ export class ScalpTakeProfitStrategy {
     }
 
     // Iterate over ENRICHED positions to use trade history-derived timeHeldSec
+    // === LOG DEDUPLICATION: Use aggregated skip summaries instead of per-position logs ===
+    const skipAggregator = new SkipReasonAggregator();
+    this.cycleCount++;
+
     for (const position of enrichedPositions) {
       const positionKey = `${position.marketId}-${position.tokenId}`;
+      const tokenIdShort = position.tokenId.slice(0, 16);
 
       // Skip if already exited
       if (this.exitedPositions.has(positionKey)) {
+        skipAggregator.add(tokenIdShort, "already_exited");
         continue;
       }
 
       // STRATEGY GATE: Skip resolved positions - route to AutoRedeem only
       // Resolved markets cannot be sold on the CLOB; they must be redeemed on-chain
       if (position.redeemable) {
+        skipAggregator.add(tokenIdShort, "redeemable");
         continue;
       }
 
@@ -502,26 +521,14 @@ export class ScalpTakeProfitStrategy {
       // These positions have no orderbook data - P&L calculation uses fallback pricing
       // which may be inaccurate. Better to skip than make bad decisions.
       if (position.status === "NO_BOOK") {
-        // Rate-limited logging for NO_BOOK positions
-        if (this.shouldLogSkip(positionKey, position.pnlPct)) {
-          this.logger.debug(
-            `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: NO_BOOK - no orderbook available, cannot reliably assess P&L`,
-          );
-          this.recordSkipLog(positionKey, position.pnlPct);
-        }
+        skipAggregator.add(tokenIdShort, "no_book");
         continue;
       }
 
       // STRATEGY GATE: Verify we have bid price for accurate P&L
       // If currentBidPrice is undefined, P&L may be based on fallback/stale data
       if (position.currentBidPrice === undefined) {
-        if (this.shouldLogSkip(positionKey, position.pnlPct)) {
-          this.logger.debug(
-            `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: NO_BID - missing bid price, P&L unreliable ` +
-              `(entry=${(position.entryPrice * 100).toFixed(1)}¢, current=${(position.currentPrice * 100).toFixed(1)}¢)`,
-          );
-          this.recordSkipLog(positionKey, position.pnlPct);
-        }
+        skipAggregator.add(tokenIdShort, "no_bid");
         continue;
       }
 
@@ -535,6 +542,7 @@ export class ScalpTakeProfitStrategy {
       // Low-price positions have time-limit logic that can exit at small losses
       // Regular losing positions should be handled by Smart Hedging or Universal Stop-Loss
       if (position.pnlPct < 0 && !isLowPricePosition) {
+        skipAggregator.add(tokenIdShort, "losing");
         continue;
       }
 
@@ -542,13 +550,16 @@ export class ScalpTakeProfitStrategy {
       const exitDecision = await this.evaluateScalpExit(position, now);
 
       if (!exitDecision.shouldExit) {
+        // Categorize skip reason for aggregation
         if (exitDecision.reason) {
-          // Use hysteresis to reduce log spam
-          if (this.shouldLogSkip(positionKey, position.pnlPct)) {
-            this.logger.debug(
-              `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: ${exitDecision.reason}`,
-            );
-            this.recordSkipLog(positionKey, position.pnlPct);
+          if (exitDecision.reason.includes("Hold")) {
+            skipAggregator.add(tokenIdShort, "hold_time");
+          } else if (exitDecision.reason.includes("Profit")) {
+            skipAggregator.add(tokenIdShort, "below_min_profit");
+          } else if (exitDecision.reason.includes("Resolution exclusion")) {
+            skipAggregator.add(tokenIdShort, "resolution_exclusion");
+          } else {
+            skipAggregator.add(tokenIdShort, "other");
           }
         }
         continue;
@@ -570,6 +581,16 @@ export class ScalpTakeProfitStrategy {
 
         // Invalidate orderbook cache for this token to ensure fresh data on next refresh
         this.positionTracker.invalidateOrderbookCache(position.tokenId);
+      }
+    }
+
+    // === LOG DEDUPLICATION: Emit aggregated skip summary (rate-limited) ===
+    if (skipAggregator.hasSkips()) {
+      const fingerprint = skipAggregator.getFingerprint();
+      if (this.logDeduper.shouldLogSummary("Scalp", fingerprint)) {
+        this.logger.debug(
+          `[ScalpTakeProfit] Skipped ${skipAggregator.getTotalCount()} positions: ${skipAggregator.getSummary()} (cycle=${this.cycleCount})`,
+        );
       }
     }
 

@@ -23,6 +23,7 @@ import { randomUUID } from "crypto";
 import type { ClobClient } from "@polymarket/clob-client";
 import type { ConsoleLogger } from "../utils/logger.util";
 import { PositionTracker } from "./position-tracker";
+import { LogDeduper, HEARTBEAT_INTERVAL_MS } from "../utils/log-deduper.util";
 import {
   SmartHedgingStrategy,
   type SmartHedgingConfig,
@@ -101,6 +102,12 @@ export class Orchestrator {
   private cyclesRun = 0;
   private ticksSkippedDueToInflight = 0;
   private lastTickSkippedLogAt = 0;
+
+  // === LOG DEDUPLICATION ===
+  // Prevents repetitive logging of slow strategies
+  private logDeduper = new LogDeduper();
+  // Track last logged slow strategies for change detection
+  private lastSlowStrategiesFingerprint = "";
 
   constructor(config: OrchestratorConfig) {
     this.client = config.client;
@@ -370,12 +377,21 @@ export class Orchestrator {
         `[Orchestrator] cycle=${currentCycleId} end duration=${cycleDuration}ms (skippedTicks=${this.ticksSkippedDueToInflight})`,
       );
 
-      // Log slow strategies (> 500ms) for diagnostics
+      // Log slow strategies (> 500ms) for diagnostics - rate-limited with change detection
       const slowStrategies = strategyTimings.filter((s) => s.durationMs > 500);
       if (slowStrategies.length > 0) {
-        this.logger.debug(
-          `[Orchestrator] Slow strategies: ${slowStrategies.map((s) => `${s.name}=${s.durationMs}ms`).join(", ")}`,
-        );
+        // Create fingerprint from slow strategy names (not durations, to avoid constant change)
+        const slowNamesFingerprint = slowStrategies
+          .map((s) => s.name)
+          .sort()
+          .join(",");
+
+        // Log only if the set of slow strategies changed or TTL expired
+        if (this.logDeduper.shouldLog("Orchestrator:slow_strategies", HEARTBEAT_INTERVAL_MS, slowNamesFingerprint)) {
+          this.logger.debug(
+            `[Orchestrator] Slow strategies: ${slowStrategies.map((s) => `${s.name}=${s.durationMs}ms`).join(", ")}`,
+          );
+        }
       }
     }
   }

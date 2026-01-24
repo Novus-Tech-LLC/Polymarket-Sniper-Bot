@@ -4,6 +4,7 @@ import type { Logger } from "../utils/logger.util";
 import type { TradeSignal } from "../domain/trade.types";
 import { httpGet } from "../utils/fetch-data.util";
 import { sanitizeAxiosError } from "../utils/sanitize-axios-error.util";
+import { LogDeduper, HEARTBEAT_INTERVAL_MS } from "../utils/log-deduper.util";
 import axios from "axios";
 
 export type TradeMonitorDeps = {
@@ -32,6 +33,9 @@ export class TradeMonitorService {
   private timer?: NodeJS.Timeout;
   private readonly processedHashes: Set<string> = new Set();
   private readonly lastFetchTime: Map<string, number> = new Map();
+
+  // === LOG DEDUPLICATION ===
+  private logDeduper = new LogDeduper();
 
   constructor(deps: TradeMonitorDeps) {
     this.deps = deps;
@@ -76,14 +80,19 @@ export class TradeMonitorService {
       const now = Math.floor(Date.now() / 1000);
       const cutoffTime = now - env.aggregationWindowSeconds;
 
-      this.deps.logger.info(
-        `[Monitor] Fetched ${activities.length} activities for ${trader}`,
-      );
+      // Rate-limit "fetched activities" log - only log on count change or heartbeat
+      const fetchedFingerprint = `${trader}:${activities.length}`;
+      if (this.logDeduper.shouldLog(`Monitor:fetched:${trader}`, HEARTBEAT_INTERVAL_MS, fetchedFingerprint)) {
+        this.deps.logger.debug(
+          `[Monitor] Fetched ${activities.length} activities for ${trader}`,
+        );
+      }
 
       let tradeCount = 0;
       let skippedOld = 0;
       let skippedProcessed = 0;
       let skippedBeforeLastTime = 0;
+      let newTradesFound = 0;
 
       for (const activity of activities) {
         if (activity.type !== "TRADE") continue;
@@ -121,6 +130,7 @@ export class TradeMonitorService {
           timestamp: activityTime * 1000,
         };
 
+        // Always log new trade detection - this is a real event, not spam
         this.deps.logger.info(
           `[Monitor] 🎯 New trade detected: ${signal.side} ${signal.sizeUsd.toFixed(2)} USD on market ${signal.marketId}`,
         );
@@ -131,23 +141,37 @@ export class TradeMonitorService {
           Math.max(this.lastFetchTime.get(trader) || 0, activityTime),
         );
 
+        newTradesFound++;
         await this.deps.onDetectedTrade(signal);
       }
 
-      if (tradeCount > 0) {
+      // Rate-limit summary log - only log when there are new trades or meaningful changes
+      // Log immediately if there are eligible trades to process
+      if (newTradesFound > 0) {
         this.deps.logger.info(
-          `[Monitor] ${trader}: ${tradeCount} trades found, ${skippedOld} too old, ${skippedProcessed} already processed, ${skippedBeforeLastTime} before last time`,
+          `[Monitor] ${trader}: ${newTradesFound} new trades processed (${tradeCount} total, ${skippedOld} too old, ${skippedProcessed} already processed)`,
         );
+      } else if (tradeCount > 0) {
+        // Log summary only on heartbeat if no new trades but there are trades in the window
+        const summaryFingerprint = `${trader}:${tradeCount}:${skippedOld}:${skippedProcessed}`;
+        if (this.logDeduper.shouldLog(`Monitor:summary:${trader}`, HEARTBEAT_INTERVAL_MS, summaryFingerprint)) {
+          this.deps.logger.debug(
+            `[Monitor] ${trader}: ${tradeCount} trades (${skippedOld} too old, ${skippedProcessed} already processed, ${skippedBeforeLastTime} before last time)`,
+          );
+        }
       }
     } catch (err) {
       // Handle 404 gracefully - user might have no activities yet or endpoint doesn't exist
       if (axios.isAxiosError(err) && err.response?.status === 404) {
-        this.deps.logger.warn(
-          `[Monitor] ⚠️ No activities found for ${trader} (404)`,
-        );
+        // Rate-limit 404 warnings
+        if (this.logDeduper.shouldLog(`Monitor:404:${trader}`, HEARTBEAT_INTERVAL_MS)) {
+          this.deps.logger.warn(
+            `[Monitor] ⚠️ No activities found for ${trader} (404)`,
+          );
+        }
         return;
       }
-      // Log other errors
+      // Log other errors - don't rate-limit errors
       this.deps.logger.error(
         `❌ Failed to fetch activities for ${trader}`,
         sanitizeAxiosError(err),
