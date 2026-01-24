@@ -130,6 +130,17 @@ export const ERC20_ABI = [
 ] as const;
 
 /**
+ * Polymarket Proxy Wallet ABI
+ *
+ * Proxy contract for executing transactions on behalf of the user.
+ * Used when the user has a Polymarket proxy wallet (vs direct wallet or Safe).
+ * The proxy() function forwards calls to destination contracts.
+ */
+export const PROXY_WALLET_ABI = [
+  "function proxy(address dest, bytes calldata data) external returns (bytes memory)",
+] as const;
+
+/**
  * Order side enum values
  */
 export enum OrderSide {
