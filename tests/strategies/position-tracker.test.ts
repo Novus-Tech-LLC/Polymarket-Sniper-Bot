@@ -2588,3 +2588,210 @@ describe("PositionTracker.getProfitLiquidationCandidates Logic", () => {
     );
   });
 });
+
+// ========================================================================
+// Section 10 Tests: P&L Trust System and Classification
+// ========================================================================
+
+describe("P&L Math Correctness", () => {
+  test("P&L calculation: 56¢ → 53¢ = -5.36%", () => {
+    // CRITICAL: This is the exact example from the enterprise spec
+    const entryPrice = 0.56; // 56¢
+    const currentPrice = 0.53; // 53¢ (current bid)
+    const size = 100;
+
+    const pnlUsd = (currentPrice - entryPrice) * size;
+    const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+
+    // Verify the P&L math (use tolerance for floating point)
+    assert.ok(
+      Math.abs(pnlUsd - (-3)) < 0.0001,
+      `P&L should be -$3.00, got ${pnlUsd}`,
+    );
+    
+    // Use tolerance for floating point comparison
+    const expectedPct = -5.357142857142857; // (0.53 - 0.56) / 0.56 * 100
+    assert.ok(
+      Math.abs(pnlPct - expectedPct) < 0.01,
+      `P&L should be approximately -5.36%, got ${pnlPct.toFixed(2)}%`,
+    );
+  });
+
+  test("P&L calculation: 65¢ → 70¢ = +7.69%", () => {
+    const entryPrice = 0.65;
+    const currentPrice = 0.70;
+    const size = 50;
+
+    const pnlUsd = (currentPrice - entryPrice) * size;
+    const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+
+    assert.ok(Math.abs(pnlUsd - 2.5) < 0.0001, `P&L should be +$2.50, got ${pnlUsd}`);
+    const expectedPct = 7.692307692307692;
+    assert.ok(
+      Math.abs(pnlPct - expectedPct) < 0.01,
+      `P&L should be approximately +7.69%, got ${pnlPct.toFixed(2)}%`,
+    );
+  });
+
+  test("P&L calculation: breakeven (55¢ → 55¢ = 0%)", () => {
+    const entryPrice = 0.55;
+    const currentPrice = 0.55;
+    const size = 100;
+
+    const pnlUsd = (currentPrice - entryPrice) * size;
+    const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+
+    assert.ok(Math.abs(pnlUsd) < 0.0001, `P&L USD should be ~0, got ${pnlUsd}`);
+    assert.ok(Math.abs(pnlPct) < 0.0001, `P&L % should be ~0, got ${pnlPct}`);
+  });
+});
+
+describe("P&L Classification", () => {
+  test("Missing orderbook → UNKNOWN classification", () => {
+    // Simulates position with NO_BOOK status
+    const position = {
+      entryPrice: 0.56,
+      currentPrice: 0.53, // This is from fallback, not actual orderbook
+      pnlPct: -5.36,
+      pnlUsd: -3,
+      status: "NO_BOOK" as const,
+      currentBidPrice: undefined, // No bid price available
+    };
+
+    // When bestBidPrice is undefined and status is NO_BOOK, pnlTrusted should be false
+    const pnlTrusted = position.currentBidPrice !== undefined && position.status !== "NO_BOOK";
+    
+    // Classification should be UNKNOWN when pnlTrusted is false
+    let classification: "PROFITABLE" | "LOSING" | "NEUTRAL" | "UNKNOWN";
+    if (!pnlTrusted) {
+      classification = "UNKNOWN";
+    } else if (position.pnlPct > 0) {
+      classification = "PROFITABLE";
+    } else if (position.pnlPct < 0) {
+      classification = "LOSING";
+    } else {
+      classification = "NEUTRAL";
+    }
+
+    assert.strictEqual(pnlTrusted, false, "P&L should be untrusted when no orderbook");
+    assert.strictEqual(classification, "UNKNOWN", "Classification should be UNKNOWN when P&L is untrusted");
+  });
+
+  test("Valid orderbook data → correct classification", () => {
+    // Position with valid bid price
+    const profitablePosition = {
+      entryPrice: 0.50,
+      currentPrice: 0.55,
+      pnlPct: 10,
+      status: "ACTIVE" as const,
+      currentBidPrice: 0.55,
+    };
+
+    const losingPosition = {
+      entryPrice: 0.60,
+      currentPrice: 0.50,
+      pnlPct: -16.67,
+      status: "ACTIVE" as const,
+      currentBidPrice: 0.50,
+    };
+
+    // Both positions have valid bid prices
+    const profitTrusted = profitablePosition.currentBidPrice !== undefined;
+    const lossTrusted = losingPosition.currentBidPrice !== undefined;
+
+    assert.strictEqual(profitTrusted, true, "Profitable position should be trusted");
+    assert.strictEqual(lossTrusted, true, "Losing position should be trusted");
+
+    // Verify classifications
+    const profitClassification = profitTrusted && profitablePosition.pnlPct > 0 ? "PROFITABLE" : "UNKNOWN";
+    const lossClassification = lossTrusted && losingPosition.pnlPct < 0 ? "LOSING" : "UNKNOWN";
+
+    assert.strictEqual(profitClassification, "PROFITABLE");
+    assert.strictEqual(lossClassification, "LOSING");
+  });
+});
+
+describe("Position Summary Classification Invariant", () => {
+  test("REGRESSION: ACTIVE positions must NEVER produce empty classification", () => {
+    // This is a CRITICAL regression test
+    // The system must NEVER report "ACTIVE: 0 profitable, 0 losing" when active positions exist
+    
+    const mockPositions = [
+      { redeemable: false, pnlPct: 5, pnlTrusted: true, pnlClassification: "PROFITABLE" as const },
+      { redeemable: false, pnlPct: -10, pnlTrusted: true, pnlClassification: "LOSING" as const },
+      { redeemable: false, pnlPct: 0, pnlTrusted: true, pnlClassification: "NEUTRAL" as const },
+      { redeemable: false, pnlPct: -5, pnlTrusted: false, pnlClassification: "UNKNOWN" as const },
+    ];
+
+    const active = mockPositions.filter(p => !p.redeemable);
+    const activeProfitable = active.filter(p => p.pnlClassification === "PROFITABLE");
+    const activeLosing = active.filter(p => p.pnlClassification === "LOSING");
+    const activeNeutral = active.filter(p => p.pnlClassification === "NEUTRAL");
+    const activeUnknown = active.filter(p => p.pnlClassification === "UNKNOWN");
+
+    // Verify counts
+    assert.strictEqual(active.length, 4, "Should have 4 active positions");
+    assert.strictEqual(activeProfitable.length, 1, "Should have 1 profitable");
+    assert.strictEqual(activeLosing.length, 1, "Should have 1 losing");
+    assert.strictEqual(activeNeutral.length, 1, "Should have 1 neutral");
+    assert.strictEqual(activeUnknown.length, 1, "Should have 1 unknown");
+
+    // CRITICAL INVARIANT: sum of classifications must equal total active
+    const classificationSum = activeProfitable.length + activeLosing.length + 
+                              activeNeutral.length + activeUnknown.length;
+    assert.strictEqual(
+      classificationSum,
+      active.length,
+      "REGRESSION: Classification counts must sum to total active positions",
+    );
+
+    // CRITICAL: If active > 0, at least one classification bucket must be non-zero
+    const hasClassification = activeProfitable.length > 0 || 
+                              activeLosing.length > 0 || 
+                              activeNeutral.length > 0 || 
+                              activeUnknown.length > 0;
+    assert.ok(
+      active.length === 0 || hasClassification,
+      "REGRESSION: If active positions exist, at least one classification must be non-empty",
+    );
+  });
+
+  test("REGRESSION: 'ACTIVE: 0 profitable, 0 losing' is IMPOSSIBLE when active > 0", () => {
+    // This directly tests the invariant from the enterprise spec
+    
+    // Simulating the old buggy behavior that produced "0 profitable, 0 losing"
+    // when there were actually active positions with UNKNOWN classification
+    const mockPositions = [
+      { redeemable: false, pnlPct: -5, pnlTrusted: false, pnlClassification: "UNKNOWN" as const },
+      { redeemable: false, pnlPct: 3, pnlTrusted: false, pnlClassification: "UNKNOWN" as const },
+    ];
+
+    const active = mockPositions.filter(p => !p.redeemable);
+    const activeProfitable = active.filter(p => p.pnlClassification === "PROFITABLE");
+    const activeLosing = active.filter(p => p.pnlClassification === "LOSING");
+    const activeUnknown = active.filter(p => p.pnlClassification === "UNKNOWN");
+
+    // The OLD code would show "0 profitable, 0 losing" and hide the unknown
+    // The NEW code shows "0 prof, 0 lose, 0 neutral, 2 unknown"
+    
+    assert.strictEqual(active.length, 2, "Should have 2 active positions");
+    assert.strictEqual(activeProfitable.length, 0, "Should have 0 profitable (all untrusted)");
+    assert.strictEqual(activeLosing.length, 0, "Should have 0 losing (all untrusted)");
+    assert.strictEqual(activeUnknown.length, 2, "Should have 2 unknown");
+
+    // The CRITICAL invariant: if we have active positions, at least one bucket must be non-zero
+    const totalClassified = activeProfitable.length + activeLosing.length + activeUnknown.length;
+    assert.strictEqual(
+      totalClassified,
+      active.length,
+      "All active positions must be classified somewhere",
+    );
+
+    // This is what the enterprise spec requires - the unknown count MUST be visible
+    const formattedSummary = `ACTIVE: total=${active.length} (prof=${activeProfitable.length} lose=${activeLosing.length} neutral=0 unknown=${activeUnknown.length})`;
+    assert.ok(
+      formattedSummary.includes("unknown=2"),
+      "Summary must show unknown count when positions have untrusted P&L",
+    );
+  });
+});

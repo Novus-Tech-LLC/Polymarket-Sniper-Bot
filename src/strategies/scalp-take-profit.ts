@@ -498,6 +498,19 @@ export class ScalpTakeProfitStrategy {
         continue;
       }
 
+      // === CRITICAL: P&L TRUST CHECK ===
+      // NEVER scalp positions with untrusted P&L. We might be selling winners!
+      // This encompasses NO_BOOK, NO_BID, and any other reason for untrusted data.
+      if (!position.pnlTrusted) {
+        if (this.shouldLogSkip(positionKey, position.pnlPct)) {
+          this.logger.debug(
+            `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: UNTRUSTED_PNL - ${position.pnlUntrustedReason ?? "unknown reason"}`,
+          );
+          this.recordSkipLog(positionKey, position.pnlPct);
+        }
+        continue;
+      }
+
       // STRATEGY GATE: Skip positions with NO_BOOK status
       // These positions have no orderbook data - P&L calculation uses fallback pricing
       // which may be inaccurate. Better to skip than make bad decisions.

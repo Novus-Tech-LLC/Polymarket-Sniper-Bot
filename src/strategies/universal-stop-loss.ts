@@ -162,6 +162,19 @@ export class UniversalStopLossStrategy {
     // Skip resolved/redeemable positions (they can't be sold, only redeemed)
     let activePositions = allPositions.filter((pos) => !pos.redeemable);
 
+    // === CRITICAL: P&L TRUST FILTER ===
+    // NEVER trigger stop-loss on positions with untrusted P&L.
+    // We might be selling winners that only APPEAR to be losing due to bad data.
+    activePositions = activePositions.filter((pos) => {
+      if (!pos.pnlTrusted) {
+        this.logger.debug(
+          `[UniversalStopLoss] 📋 Skip (UNTRUSTED_PNL): ${pos.tokenId.slice(0, 16)}... has untrusted P&L (${pos.pnlUntrustedReason ?? "unknown reason"})`,
+        );
+        return false;
+      }
+      return true;
+    });
+
     // Skip positions that Smart Hedging will handle
     // When skipForSmartHedging is true, defer to Smart Hedging for ALL positions
     if (this.config.skipForSmartHedging) {

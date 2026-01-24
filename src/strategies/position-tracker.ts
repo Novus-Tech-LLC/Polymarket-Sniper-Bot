@@ -15,6 +15,18 @@ export type PositionStatus =
   | "NO_BOOK";
 
 /**
+ * P&L Classification for strategy decision-making.
+ * 
+ * CRITICAL: Strategies MUST NOT act on positions with UNKNOWN classification.
+ * The classification is ONLY valid when pnlTrusted === true.
+ */
+export type PnLClassification = 
+  | "PROFITABLE"   // pnlTrusted && pnlPct > 0
+  | "LOSING"       // pnlTrusted && pnlPct < 0
+  | "NEUTRAL"      // pnlTrusted && pnlPct === 0
+  | "UNKNOWN";     // pnlTrusted === false (missing cost basis or mark price)
+
+/**
  * Cached outcome data for a tokenId
  * Used to prevent redundant Gamma API calls and log spam
  */
@@ -83,6 +95,40 @@ export interface Position {
    * Used for debugging stale data issues
    */
   cacheAgeMs?: number;
+
+  // === P&L TRUST SYSTEM ===
+  // Strategies MUST check pnlTrusted before making any P&L-based decisions.
+  // Acting on untrusted P&L can cause financial loss (selling winners, keeping losers).
+
+  /**
+   * Whether the P&L calculation can be trusted for decision-making.
+   * 
+   * P&L is UNTRUSTED (false) when:
+   * - Cost basis cannot be determined from trade history
+   * - No orderbook bids available (mark price unknown)
+   * - Price data is stale or contradictory
+   * 
+   * CRITICAL: SmartHedging, ScalpTakeProfit, and StopLoss MUST skip
+   * positions where pnlTrusted === false.
+   */
+  pnlTrusted: boolean;
+
+  /**
+   * The classification of this position for strategy routing.
+   * ONLY VALID when pnlTrusted === true.
+   * 
+   * - PROFITABLE: pnlPct > 0 (candidate for ScalpTakeProfit)
+   * - LOSING: pnlPct < 0 (candidate for SmartHedging, StopLoss)
+   * - NEUTRAL: pnlPct === 0 (breakeven)
+   * - UNKNOWN: pnlTrusted === false (DO NOT ACT)
+   */
+  pnlClassification: PnLClassification;
+
+  /**
+   * Reason why P&L is untrusted (only set when pnlTrusted === false).
+   * Used for diagnostics and rate-limited logging.
+   */
+  pnlUntrustedReason?: string;
 
   // === ENTRY METADATA (from EntryMetaResolver) ===
   // These fields are derived from trade history API, NOT from container uptime.
@@ -261,7 +307,7 @@ export class PositionTracker {
 
   // Rate-limit P&L summary logging to avoid log spam (refreshes every 5s)
   private lastPnlSummaryLogAt = 0;
-  private lastLoggedPnlCounts = { profitable: 0, losing: 0, redeemable: 0 };
+  private lastLoggedPnlCounts = { profitable: 0, losing: 0, neutral: 0, unknown: 0, redeemable: 0 };
   private static readonly PNL_SUMMARY_LOG_INTERVAL_MS = 60_000; // Log at most once per minute
 
   // EntryMetaResolver for stateless entry metadata from trade history
@@ -610,6 +656,45 @@ export class PositionTracker {
   }
 
   /**
+   * Get active positions with TRUSTED P&L.
+   * 
+   * CRITICAL: Strategies should use this to ensure they only act on positions
+   * where the P&L calculation can be verified.
+   */
+  getActiveTrustedPositions(): Position[] {
+    return this.getActivePositions().filter((pos) => pos.pnlTrusted);
+  }
+
+  /**
+   * Get active profitable positions with TRUSTED P&L.
+   * Use this for scalping - only takes profit when we're sure it's actually profit.
+   */
+  getActiveTrustedProfitablePositions(): Position[] {
+    return this.getActivePositions().filter(
+      (pos) => pos.pnlTrusted && pos.pnlClassification === "PROFITABLE"
+    );
+  }
+
+  /**
+   * Get active losing positions with TRUSTED P&L.
+   * Use this for hedging/stop-loss - only hedge when we're sure it's actually losing.
+   */
+  getActiveTrustedLosingPositions(): Position[] {
+    return this.getActivePositions().filter(
+      (pos) => pos.pnlTrusted && pos.pnlClassification === "LOSING"
+    );
+  }
+
+  /**
+   * Get active positions with UNKNOWN (untrusted) P&L.
+   * These positions should NOT be acted upon by strategies.
+   * Use for diagnostics and rate-limited logging.
+   */
+  getActiveUnknownPositions(): Position[] {
+    return this.getActivePositions().filter((pos) => !pos.pnlTrusted);
+  }
+
+  /**
    * Get positions that are candidates for liquidation when funds are insufficient.
    * Used by Smart Hedging to determine what positions to sell to free up funds
    * for hedging other positions.
@@ -752,6 +837,12 @@ export class PositionTracker {
   /**
    * Get a summary of position counts for logging
    * Provides consistent breakdown across all strategies
+   * 
+   * FORMAT (required by enterprise spec):
+   * ACTIVE: total=N (prof=X lose=Y neutral=Z unknown=W) | REDEEMABLE: M
+   * 
+   * CRITICAL: If ACTIVE > 0, we MUST have prof + lose + neutral + unknown = total
+   * Otherwise there's a BUG in P&L classification.
    */
   getPositionSummary(): {
     total: number;
@@ -760,13 +851,17 @@ export class PositionTracker {
     activeProfitable: number;
     activeLosing: number;
     activeBreakeven: number;
+    activeUnknown: number;
   } {
     const positions = this.getPositions();
     const active = positions.filter((p) => !p.redeemable);
     const redeemable = positions.filter((p) => p.redeemable);
-    const activeProfitable = active.filter((p) => p.pnlPct > 0);
-    const activeLosing = active.filter((p) => p.pnlPct < 0);
-    const activeBreakeven = active.filter((p) => p.pnlPct === 0);
+    
+    // Use pnlClassification for proper categorization
+    const activeProfitable = active.filter((p) => p.pnlClassification === "PROFITABLE");
+    const activeLosing = active.filter((p) => p.pnlClassification === "LOSING");
+    const activeBreakeven = active.filter((p) => p.pnlClassification === "NEUTRAL");
+    const activeUnknown = active.filter((p) => p.pnlClassification === "UNKNOWN");
 
     return {
       total: positions.length,
@@ -775,7 +870,18 @@ export class PositionTracker {
       activeProfitable: activeProfitable.length,
       activeLosing: activeLosing.length,
       activeBreakeven: activeBreakeven.length,
+      activeUnknown: activeUnknown.length,
     };
+  }
+
+  /**
+   * Format position summary for logging
+   * Uses the new enterprise-required format:
+   * ACTIVE: total=N (prof=X lose=Y neutral=Z unknown=W) | REDEEMABLE: M
+   */
+  formatPositionSummary(): string {
+    const summary = this.getPositionSummary();
+    return `ACTIVE: total=${summary.active} (prof=${summary.activeProfitable} lose=${summary.activeLosing} neutral=${summary.activeBreakeven} unknown=${summary.activeUnknown}) | REDEEMABLE: ${summary.redeemable}`;
   }
 
   /**
@@ -1316,6 +1422,40 @@ export class PositionTracker {
               const pnlUsd = (currentPrice - entryPrice) * size;
               const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
 
+              // === P&L TRUST DETERMINATION ===
+              // P&L is TRUSTED when we have:
+              // 1. Valid orderbook with actual bid price (not fallback)
+              // 2. Known entry price (from API)
+              // For redeemable positions, P&L is always trusted (settlement price is certain)
+              let pnlTrusted = true;
+              let pnlUntrustedReason: string | undefined;
+
+              if (finalRedeemable) {
+                // Redeemable positions have certain settlement prices
+                pnlTrusted = true;
+              } else if (positionStatus === "NO_BOOK") {
+                // No orderbook available - mark price is from fallback/estimate
+                pnlTrusted = false;
+                pnlUntrustedReason = "NO_ORDERBOOK_BIDS";
+              } else if (bestBidPrice === undefined || bestBidPrice <= 0) {
+                // No valid bid price available
+                pnlTrusted = false;
+                pnlUntrustedReason = "NO_VALID_BID_PRICE";
+              }
+
+              // === P&L CLASSIFICATION ===
+              // CRITICAL: Classification is UNKNOWN when pnlTrusted is false
+              let pnlClassification: PnLClassification;
+              if (!pnlTrusted) {
+                pnlClassification = "UNKNOWN";
+              } else if (pnlPct > 0) {
+                pnlClassification = "PROFITABLE";
+              } else if (pnlPct < 0) {
+                pnlClassification = "LOSING";
+              } else {
+                pnlClassification = "NEUTRAL";
+              }
+
               // Debug log for positions that should be profitable but show 0% or less
               // This helps diagnose when pricing is wrong
               if (currentPrice > entryPrice && pnlPct <= 0) {
@@ -1352,6 +1492,9 @@ export class PositionTracker {
                 currentPrice,
                 pnlPct,
                 pnlUsd,
+                pnlTrusted,
+                pnlClassification,
+                pnlUntrustedReason,
                 redeemable: finalRedeemable,
                 marketEndTime,
                 currentBidPrice: bestBidPrice,
@@ -1412,14 +1555,20 @@ export class PositionTracker {
         const redeemablePositions = sortedByPnl.filter((p) => p.redeemable);
         // Active positions = non-redeemable (can be traded/scalped)
         const activePositions = sortedByPnl.filter((p) => !p.redeemable);
-        const activeProfitable = activePositions.filter((p) => p.pnlPct > 0);
-        const activeLosing = activePositions.filter((p) => p.pnlPct < 0);
+        
+        // Use pnlClassification for proper categorization
+        const activeProfitable = activePositions.filter((p) => p.pnlClassification === "PROFITABLE");
+        const activeLosing = activePositions.filter((p) => p.pnlClassification === "LOSING");
+        const activeNeutral = activePositions.filter((p) => p.pnlClassification === "NEUTRAL");
+        const activeUnknown = activePositions.filter((p) => p.pnlClassification === "UNKNOWN");
 
         // Rate-limit: log at most once per minute or when counts change
         const now = Date.now();
         const countsChanged =
           this.lastLoggedPnlCounts.profitable !== activeProfitable.length ||
           this.lastLoggedPnlCounts.losing !== activeLosing.length ||
+          this.lastLoggedPnlCounts.neutral !== activeNeutral.length ||
+          this.lastLoggedPnlCounts.unknown !== activeUnknown.length ||
           this.lastLoggedPnlCounts.redeemable !== redeemablePositions.length;
         const shouldLogPnlSummary =
           countsChanged ||
@@ -1431,13 +1580,15 @@ export class PositionTracker {
           this.lastLoggedPnlCounts = {
             profitable: activeProfitable.length,
             losing: activeLosing.length,
+            neutral: activeNeutral.length,
+            unknown: activeUnknown.length,
             redeemable: redeemablePositions.length,
           };
 
-          // Log summary showing ACTIVE positions breakdown (what scalping/selling strategies care about)
-          // This should now match what ScalpTakeProfit reports
+          // Log summary using new enterprise format:
+          // ACTIVE: total=N (prof=X lose=Y neutral=Z unknown=W) | REDEEMABLE: M
           this.logger.info(
-            `[PositionTracker] 📊 P&L Summary: ACTIVE: ${activeProfitable.length} profitable, ${activeLosing.length} losing | REDEEMABLE: ${redeemablePositions.length}`,
+            `[PositionTracker] 📊 P&L Summary: ACTIVE: total=${activePositions.length} (prof=${activeProfitable.length} lose=${activeLosing.length} neutral=${activeNeutral.length} unknown=${activeUnknown.length}) | REDEEMABLE: ${redeemablePositions.length}`,
           );
 
           // Log active profitable positions at DEBUG level (scalping candidates)
@@ -1451,6 +1602,20 @@ export class PositionTracker {
               .join(", ");
             this.logger.debug(
               `[PositionTracker] 💰 Active Profitable (${activeProfitable.length}): ${profitSummary}${activeProfitable.length > 10 ? "..." : ""}`,
+            );
+          }
+          
+          // Log unknown positions at DEBUG level for diagnostics
+          if (activeUnknown.length > 0) {
+            const unknownSummary = activeUnknown
+              .slice(0, 5)
+              .map(
+                (p) =>
+                  `${p.tokenId.slice(0, 8)}...(${p.pnlUntrustedReason ?? "UNKNOWN"})`,
+              )
+              .join(", ");
+            this.logger.debug(
+              `[PositionTracker] ⚠️ Unknown P&L (${activeUnknown.length}): ${unknownSummary}${activeUnknown.length > 5 ? "..." : ""}`,
             );
           }
 

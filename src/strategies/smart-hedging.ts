@@ -232,6 +232,16 @@ export class SmartHedgingStrategy {
         this.failedLiquidationCooldowns.delete(key);
       }
 
+      // === CRITICAL: P&L TRUST CHECK ===
+      // NEVER hedge or liquidate positions with untrusted P&L.
+      // Acting on invalid data can cause selling winners and keeping losers.
+      if (!position.pnlTrusted) {
+        this.logger.debug(
+          `[SmartHedging] 📋 Skip hedge (UNTRUSTED_PNL): ${position.side} position has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"})`,
+        );
+        continue;
+      }
+
       // Skip if not losing enough
       if (position.pnlPct > -this.config.triggerLossPct) {
         // Only log for positions with meaningful loss (>5%) to reduce noise
