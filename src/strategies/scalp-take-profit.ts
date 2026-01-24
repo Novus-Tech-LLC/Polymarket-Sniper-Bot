@@ -1006,6 +1006,14 @@ export class ScalpTakeProfitStrategy {
         continue;
       }
 
+      // === EXECUTION STATUS CHECK (Jan 2025 - Handle NOT_TRADABLE_ON_CLOB) ===
+      // If position has executionStatus set to NOT_TRADABLE_ON_CLOB, skip execution.
+      // This handles orderbook 404, empty book, and other CLOB unavailability scenarios.
+      if (position.executionStatus === "NOT_TRADABLE_ON_CLOB" || position.executionStatus === "EXECUTION_BLOCKED") {
+        skipAggregator.add(tokenIdShort, "not_tradable");
+        continue;
+      }
+
       // STRATEGY GATE: Verify we have bid price for accurate P&L
       // If currentBidPrice is undefined, P&L may be based on fallback/stale data
       if (position.currentBidPrice === undefined) {

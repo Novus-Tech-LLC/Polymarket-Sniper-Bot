@@ -29,6 +29,29 @@ export type PositionStatus =
   | "NO_BOOK";
 
 /**
+ * Book status indicating orderbook availability for execution.
+ * Used to track why a position cannot be traded on CLOB.
+ *
+ * IMPORTANT: This is metadata only - a position can be ACTIVE even with
+ * NO_BOOK_404 or EMPTY_BOOK. Orderbook status does NOT determine position state.
+ */
+export type BookStatus =
+  | "AVAILABLE" // Orderbook exists with valid bids/asks
+  | "EMPTY_BOOK" // Orderbook exists but no bids/asks
+  | "NO_BOOK_404" // CLOB returned 404 for this tokenId
+  | "BOOK_ANOMALY" // Orderbook has anomalies (crossed book, extreme spread)
+  | "NOT_FETCHED"; // Orderbook not fetched (e.g., redeemable positions)
+
+/**
+ * Execution status indicating tradability on CLOB.
+ * Derived from BookStatus - used by strategies to quickly filter.
+ */
+export type ExecutionStatus =
+  | "TRADABLE" // Can execute on CLOB
+  | "NOT_TRADABLE_ON_CLOB" // Cannot execute on CLOB (404, empty, anomaly)
+  | "EXECUTION_BLOCKED"; // Temporarily blocked (cooldown, circuit breaker)
+
+/**
  * STRICT POSITION STATE MACHINE (Jan 2025 Refactor)
  *
  * NON-NEGOTIABLE STATE DEFINITIONS:
@@ -452,6 +475,38 @@ export interface Position {
    * This prevents false positives from broken/stale orderbook data.
    */
   nearResolutionCandidate?: boolean;
+
+  // === ORDERBOOK STATUS FIELDS (Jan 2025 Fix - Decouple from snapshot) ===
+  // These fields track orderbook availability WITHOUT affecting position classification.
+  // Positions remain ACTIVE even if orderbook returns 404 or is empty.
+
+  /**
+   * Orderbook status for this position.
+   * Used to track why orderbook data may be unavailable.
+   *
+   * IMPORTANT: This does NOT affect position state (ACTIVE/REDEEMABLE).
+   * A position can be ACTIVE with NO_BOOK_404 - it just can't be executed on CLOB.
+   */
+  bookStatus?: BookStatus;
+
+  /**
+   * Execution status derived from bookStatus.
+   * Strategies should check this to determine if position can be traded on CLOB.
+   *
+   * - TRADABLE: Orderbook available with valid bids
+   * - NOT_TRADABLE_ON_CLOB: No orderbook or no bids - cannot execute
+   * - EXECUTION_BLOCKED: Temporarily blocked (cooldown, circuit breaker)
+   */
+  executionStatus?: ExecutionStatus;
+
+  /**
+   * Whether the executable price (bestBid) can be trusted for execution decisions.
+   * False when bookStatus is NO_BOOK_404, EMPTY_BOOK, or BOOK_ANOMALY.
+   *
+   * CRITICAL: Strategies MUST NOT attempt execution when this is false.
+   * P&L calculations can still use Data-API prices (pnlTrusted may still be true).
+   */
+  execPriceTrusted?: boolean;
 }
 
 // Price display constants
@@ -1631,6 +1686,7 @@ export class PositionTracker {
     // 1. Bootstrap mode (after auto-recovery)
     // 2. Recovery mode (relaxed validation)
     // 3. Minimal acceptance rule: small raw counts with no real reasons
+    // 4. ORDERBOOK_FAILURE: If the reason is orderbook 404/empty (NOT_TRADABLE_ON_CLOB scenario)
     if (rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0) {
       // Check for minimal acceptance rule:
       // If rawTotal==rawActiveCandidates (no redeemable) and both are small,
@@ -1640,6 +1696,25 @@ export class PositionTracker {
         rawTotal === rawActiveCandidates && 
         rawTotal <= PositionTracker.MINIMAL_ACCEPTANCE_MAX_RAW_COUNT &&
         (reasonsStr.includes("FILTERED_NO_REASON") || reasonsStr.includes("ALL_ACTIVE"));
+
+      // NEW: Check if the collapse is due to orderbook failures (404, empty book, etc.)
+      // If ALL filtered positions are due to enrichment/orderbook failures, this is NOT a bug
+      // but rather a temporary network/API issue. Accept the snapshot with UNKNOWN pnl positions.
+      // Check the actual classification reasons Map for more reliable detection.
+      const classificationReasons = newSnap.classificationReasons;
+      const hasOrderbookFailureReasons = classificationReasons && (
+        classificationReasons.has("ENRICH_FAILED") ||
+        classificationReasons.has("NO_BOOK") ||
+        classificationReasons.has("BOOK_404") ||
+        classificationReasons.has("PRICING_FETCH_FAILED")
+      );
+      // Fallback to string matching for backward compatibility (if Map not available)
+      const isOrderbookFailureCase = hasOrderbookFailureReasons || (
+        reasonsStr.includes("ENRICH_FAILED=") ||
+        reasonsStr.includes("NO_BOOK=") ||
+        reasonsStr.includes("BOOK_404=") ||
+        reasonsStr.includes("PRICING_FETCH_FAILED=")
+      );
 
       if (this.allowBootstrapAfterAutoRecovery) {
         // Bootstrap mode: log and accept the snapshot despite ACTIVE_COLLAPSE_BUG
@@ -1664,6 +1739,17 @@ export class PositionTracker {
           `[PositionTracker] ⚠️ MINIMAL_ACCEPTANCE: Accepting snapshot despite zero active ` +
             `(small raw counts, no clear skip reasons). rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} ` +
             `finalActive=${finalActiveCount} reasons=[${reasonsStr}] - positions may have UNKNOWN pnl`,
+        );
+        // Continue to other validations (don't return early)
+      } else if (isOrderbookFailureCase) {
+        // ORDERBOOK_FAILURE: Positions filtered due to orderbook 404/empty/enrichment issues
+        // This is NOT a bug - treat orderbook failures as non-fatal metadata
+        // Accept the snapshot with positions marked as NOT_TRADABLE_ON_CLOB
+        this.logger.warn(
+          `[PositionTracker] 📚 ORDERBOOK_FAILURE: Accepting snapshot despite zero active ` +
+            `(orderbook/enrichment failures - NOT_TRADABLE_ON_CLOB scenario). ` +
+            `rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} ` +
+            `finalActive=${finalActiveCount} reasons=[${reasonsStr}] - positions have executionStatus=NOT_TRADABLE_ON_CLOB`,
         );
         // Continue to other validations (don't return early)
       } else {
@@ -2715,6 +2801,17 @@ export class PositionTracker {
               let positionStatus: PositionStatus = "ACTIVE";
               let cacheAgeMs: number | undefined;
 
+              // === NEW: Book status tracking (Jan 2025 - Decouple from snapshot) ===
+              // Track orderbook availability separately from position state.
+              // SAFE DEFAULTS: Initialize to "not tradable" state.
+              // - bookStatus = NOT_FETCHED: We haven't attempted to fetch the orderbook yet
+              // - executionStatus = NOT_TRADABLE_ON_CLOB: Default to non-tradable until proven otherwise
+              // - execPriceTrusted = false: Don't trust the executable price until we have valid orderbook data
+              // These will be updated to AVAILABLE/TRADABLE/true if orderbook fetch succeeds.
+              let bookStatus: BookStatus = "NOT_FETCHED";
+              let executionStatus: ExecutionStatus = "NOT_TRADABLE_ON_CLOB";
+              let execPriceTrusted = false;
+
               // P&L source tracking: where did the P&L values come from?
               let pnlSource: PnLSource = "FALLBACK";
               // Track if pricing fetch completely failed (for pnlUntrustedReason)
@@ -2895,10 +2992,18 @@ export class PositionTracker {
                     bestAskPrice = cached.bestAsk;
                     cacheAgeMs = now - cached.fetchedAt;
                     currentPrice = bestBidPrice; // Use BEST BID as mark price
+                    // === BookStatus: AVAILABLE (from cache) ===
+                    bookStatus = "AVAILABLE";
+                    executionStatus = "TRADABLE";
+                    execPriceTrusted = true;
                   } else if (this.missingOrderbooks.has(tokenId)) {
                     // Skip orderbook fetch if we know it's missing (cached)
                     positionStatus = "NO_BOOK";
                     currentPrice = await this.fetchPriceFallback(tokenId);
+                    // === BookStatus: NO_BOOK_404 (cached from previous 404) ===
+                    bookStatus = "NO_BOOK_404";
+                    executionStatus = "NOT_TRADABLE_ON_CLOB";
+                    execPriceTrusted = false;
                   } else {
                     try {
                       const orderbook = await this.client.getOrderBook(tokenId);
@@ -2914,6 +3019,10 @@ export class PositionTracker {
                           `[PositionTracker] Empty orderbook for tokenId: ${tokenId}, using fallback price API`,
                         );
                         currentPrice = await this.fetchPriceFallback(tokenId);
+                        // === BookStatus: EMPTY_BOOK ===
+                        bookStatus = "EMPTY_BOOK";
+                        executionStatus = "NOT_TRADABLE_ON_CLOB";
+                        execPriceTrusted = false;
                       } else if (priceExtraction.hasAnomaly) {
                         // Orderbook has anomaly (crossed book, extreme spread) - use fallback
                         positionStatus = "NO_BOOK";
@@ -2923,6 +3032,10 @@ export class PositionTracker {
                             `bidCount=${priceExtraction.bidCount} askCount=${priceExtraction.askCount} - using fallback`,
                         );
                         currentPrice = await this.fetchPriceFallback(tokenId);
+                        // === BookStatus: BOOK_ANOMALY ===
+                        bookStatus = "BOOK_ANOMALY";
+                        executionStatus = "NOT_TRADABLE_ON_CLOB";
+                        execPriceTrusted = false;
                       } else {
                         bestBidPrice = priceExtraction.bestBid;
                         bestAskPrice = priceExtraction.bestAsk;
@@ -2931,6 +3044,10 @@ export class PositionTracker {
                         // This is what we can actually sell at, not the mid-price
                         currentPrice = bestBidPrice;
                         cacheAgeMs = 0; // Fresh fetch
+                        // === BookStatus: AVAILABLE ===
+                        bookStatus = "AVAILABLE";
+                        executionStatus = "TRADABLE";
+                        execPriceTrusted = true;
 
                         // Cache the orderbook data with proper eviction
                         // Remove entries until we're under the limit before adding new one
@@ -3003,6 +3120,10 @@ export class PositionTracker {
                           `[PositionTracker] Orderbook not found for tokenId: ${tokenId}, using fallback price API`,
                         );
                         currentPrice = await this.fetchPriceFallback(tokenId);
+                        // === BookStatus: NO_BOOK_404 ===
+                        bookStatus = "NO_BOOK_404";
+                        executionStatus = "NOT_TRADABLE_ON_CLOB";
+                        execPriceTrusted = false;
                       } else {
                         // Other error - rethrow
                         throw orderbookErr;
@@ -3022,6 +3143,10 @@ export class PositionTracker {
                   currentPrice = entryPrice;
                   positionStatus = "NO_BOOK";
                   pricingFetchFailed = true;
+                  // === BookStatus: NO_BOOK_404 (pricing fetch failed) ===
+                  bookStatus = "NO_BOOK_404";
+                  executionStatus = "NOT_TRADABLE_ON_CLOB";
+                  execPriceTrusted = false;
                 }
                 // Increment activeCount only after successful pricing
                 activeCount++;
@@ -3342,6 +3467,11 @@ export class PositionTracker {
                 marketClosed,
                 // Near-resolution candidate flag (Jan 2025 fix)
                 nearResolutionCandidate,
+                // === NEW: Book status fields (Jan 2025 - Decouple from snapshot) ===
+                // These fields track orderbook availability WITHOUT affecting position classification
+                bookStatus,
+                executionStatus,
+                execPriceTrusted,
               };
             } catch (err) {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;

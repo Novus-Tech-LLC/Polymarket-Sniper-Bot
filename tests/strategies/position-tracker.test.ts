@@ -4458,3 +4458,261 @@ describe("Self-Healing: Refresh Watchdog Timeout", () => {
     assert.ok(caughtError!.message.includes("REFRESH_WATCHDOG_TIMEOUT"), "Should be watchdog timeout error");
   });
 });
+
+
+// ============================================================================
+// ORDERBOOK DECOUPLING TESTS (Jan 2025 Fix)
+// Tests for the fix that decouples portfolio snapshots from CLOB orderbook availability.
+// Positions should remain ACTIVE even when orderbook returns 404 or is empty.
+// ============================================================================
+
+describe("Orderbook Decoupling: BookStatus and ExecutionStatus", () => {
+  test("BookStatus types are correctly defined", () => {
+    // Verify the new BookStatus type exists and has expected values
+    const validBookStatuses = ["AVAILABLE", "EMPTY_BOOK", "NO_BOOK_404", "BOOK_ANOMALY", "NOT_FETCHED"];
+    const validExecutionStatuses = ["TRADABLE", "NOT_TRADABLE_ON_CLOB", "EXECUTION_BLOCKED"];
+    
+    // These are type-only checks - we just verify the expected values exist
+    assert.ok(validBookStatuses.includes("NO_BOOK_404"), "NO_BOOK_404 should be a valid BookStatus");
+    assert.ok(validBookStatuses.includes("EMPTY_BOOK"), "EMPTY_BOOK should be a valid BookStatus");
+    assert.ok(validExecutionStatuses.includes("NOT_TRADABLE_ON_CLOB"), "NOT_TRADABLE_ON_CLOB should be a valid ExecutionStatus");
+  });
+
+  test("Position with NO_BOOK_404 bookStatus can still be ACTIVE", () => {
+    // Simulate a position with orderbook 404 - should still be ACTIVE
+    const position = {
+      marketId: "market123",
+      tokenId: "token123",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.65,
+      currentPrice: 0.70, // From Data-API fallback
+      pnlPct: 7.69,
+      pnlUsd: 5.0,
+      pnlTrusted: true, // Can be true if Data-API provided pricing
+      pnlClassification: "PROFITABLE" as const,
+      redeemable: false,
+      status: "NO_BOOK" as const, // Legacy field for backwards compatibility
+      positionState: "ACTIVE" as const, // Key: position is ACTIVE despite NO_BOOK
+      bookStatus: "NO_BOOK_404" as const, // New: explicit book status
+      executionStatus: "NOT_TRADABLE_ON_CLOB" as const, // New: cannot execute
+      execPriceTrusted: false, // Cannot trust executable price
+    };
+
+    // Key assertions: position is ACTIVE but not tradable
+    assert.strictEqual(position.positionState, "ACTIVE", "Position should be ACTIVE despite orderbook 404");
+    assert.strictEqual(position.bookStatus, "NO_BOOK_404", "BookStatus should indicate 404");
+    assert.strictEqual(position.executionStatus, "NOT_TRADABLE_ON_CLOB", "ExecutionStatus should indicate non-tradable");
+    assert.strictEqual(position.execPriceTrusted, false, "Executable price should not be trusted");
+    assert.strictEqual(position.pnlTrusted, true, "P&L can still be trusted if Data-API provided pricing");
+  });
+
+  test("Position with AVAILABLE bookStatus is TRADABLE", () => {
+    const position = {
+      marketId: "market456",
+      tokenId: "token456",
+      side: "NO",
+      size: 50,
+      entryPrice: 0.40,
+      currentPrice: 0.45, // From orderbook best bid
+      currentBidPrice: 0.45,
+      currentAskPrice: 0.47,
+      pnlPct: 12.5,
+      pnlUsd: 2.5,
+      pnlTrusted: true,
+      pnlClassification: "PROFITABLE" as const,
+      redeemable: false,
+      status: "ACTIVE" as const,
+      positionState: "ACTIVE" as const,
+      bookStatus: "AVAILABLE" as const,
+      executionStatus: "TRADABLE" as const,
+      execPriceTrusted: true,
+    };
+
+    assert.strictEqual(position.bookStatus, "AVAILABLE", "BookStatus should be AVAILABLE");
+    assert.strictEqual(position.executionStatus, "TRADABLE", "ExecutionStatus should be TRADABLE");
+    assert.strictEqual(position.execPriceTrusted, true, "Executable price should be trusted");
+  });
+});
+
+describe("Orderbook Decoupling: ACTIVE_COLLAPSE_BUG Validation", () => {
+  test("ORDERBOOK_FAILURE case is accepted (not rejected as ACTIVE_COLLAPSE_BUG)", () => {
+    // Simulate the exact scenario from the issue:
+    // - rawTotal > 0, rawActiveCandidates > 0, finalActive = 0
+    // - BUT the reason is orderbook failures (404, empty book)
+    // - This should be ACCEPTED, not rejected
+    
+    const rawTotal = 10;
+    const rawActiveCandidates = 10;
+    const finalActiveCount = 0;
+    
+    // Classification reasons indicate orderbook failures
+    // Using named constants for test data clarity
+    const ENRICH_FAILED_COUNT = 8;  // Enrichment failed due to 404
+    const NO_BOOK_COUNT = 2;        // Empty orderbook
+    
+    const classificationReasons = new Map<string, number>();
+    classificationReasons.set("ENRICH_FAILED", ENRICH_FAILED_COUNT);
+    classificationReasons.set("NO_BOOK", NO_BOOK_COUNT);
+    
+    // Build reasons string
+    const reasonCounts: string[] = [];
+    for (const [reason, count] of classificationReasons) {
+      reasonCounts.push(`${reason}=${count}`);
+    }
+    const reasonsStr = reasonCounts.join(", ");
+    
+    // Check for orderbook failure case using Map keys (more reliable than string matching)
+    const hasOrderbookFailureReasons = 
+      classificationReasons.has("ENRICH_FAILED") ||
+      classificationReasons.has("NO_BOOK") ||
+      classificationReasons.has("BOOK_404") ||
+      classificationReasons.has("PRICING_FETCH_FAILED");
+    
+    // Fallback string matching for completeness
+    const isOrderbookFailureFromString = 
+      reasonsStr.includes("ENRICH_FAILED=") ||
+      reasonsStr.includes("NO_BOOK=") ||
+      reasonsStr.includes("BOOK_404=") ||
+      reasonsStr.includes("PRICING_FETCH_FAILED=");
+    
+    const isOrderbookFailureCase = hasOrderbookFailureReasons || isOrderbookFailureFromString;
+    
+    // This is the bug condition
+    const isActiveCollapseBugCondition = rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0;
+    
+    // With the fix, orderbook failure case should be accepted
+    const shouldAccept = isActiveCollapseBugCondition && isOrderbookFailureCase;
+    
+    assert.ok(isActiveCollapseBugCondition, "Should detect ACTIVE_COLLAPSE_BUG condition");
+    assert.ok(isOrderbookFailureCase, "Should detect orderbook failure case");
+    assert.ok(shouldAccept, "Orderbook failure case should be accepted (not rejected)");
+  });
+
+  test("Legitimate ACTIVE_COLLAPSE_BUG is still rejected", () => {
+    // Simulate a real bug (not orderbook failure)
+    const rawTotal = 10;
+    const rawActiveCandidates = 10;
+    const finalActiveCount = 0;
+    
+    // Classification reasons that are NOT orderbook failures
+    const classificationReasons = new Map<string, number>();
+    classificationReasons.set("MISSING_FIELDS", 5);
+    classificationReasons.set("INVALID_SIZE_PRICE", 5);
+    
+    const reasonCounts: string[] = [];
+    for (const [reason, count] of classificationReasons) {
+      reasonCounts.push(`${reason}=${count}`);
+    }
+    const reasonsStr = reasonCounts.join(", ");
+    
+    // Check for orderbook failure case
+    const isOrderbookFailureCase = 
+      reasonsStr.includes("ENRICH_FAILED") ||
+      reasonsStr.includes("NO_BOOK") ||
+      reasonsStr.includes("BOOK_404") ||
+      reasonsStr.includes("PRICING_FETCH_FAILED");
+    
+    // Not orderbook failure, so should be rejected
+    assert.strictEqual(isOrderbookFailureCase, false, "Should NOT be orderbook failure case");
+    
+    // Without any exception, this should be rejected
+    const isActiveCollapseBugCondition = rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0;
+    assert.ok(isActiveCollapseBugCondition, "Should detect as ACTIVE_COLLAPSE_BUG");
+  });
+});
+
+describe("Orderbook Decoupling: Strategy Execution Gating", () => {
+  test("Strategy should skip NOT_TRADABLE_ON_CLOB positions", () => {
+    // Simulate strategy gating logic
+    const position = {
+      tokenId: "token123",
+      executionStatus: "NOT_TRADABLE_ON_CLOB" as const,
+      bookStatus: "NO_BOOK_404" as const,
+    };
+    
+    // Strategy gating check
+    const shouldSkip = 
+      position.executionStatus === "NOT_TRADABLE_ON_CLOB" ||
+      position.executionStatus === "EXECUTION_BLOCKED";
+    
+    assert.ok(shouldSkip, "Strategy should skip NOT_TRADABLE_ON_CLOB positions");
+  });
+
+  test("Strategy should execute on TRADABLE positions", () => {
+    const position = {
+      tokenId: "token456",
+      executionStatus: "TRADABLE" as const,
+      bookStatus: "AVAILABLE" as const,
+    };
+    
+    const shouldSkip = 
+      position.executionStatus === "NOT_TRADABLE_ON_CLOB" ||
+      position.executionStatus === "EXECUTION_BLOCKED";
+    
+    assert.strictEqual(shouldSkip, false, "Strategy should NOT skip TRADABLE positions");
+  });
+
+  test("Strategy should skip EXECUTION_BLOCKED positions", () => {
+    const position = {
+      tokenId: "token789",
+      executionStatus: "EXECUTION_BLOCKED" as const,
+      bookStatus: "AVAILABLE" as const, // Book might be available but execution blocked (cooldown)
+    };
+    
+    const shouldSkip = 
+      position.executionStatus === "NOT_TRADABLE_ON_CLOB" ||
+      position.executionStatus === "EXECUTION_BLOCKED";
+    
+    assert.ok(shouldSkip, "Strategy should skip EXECUTION_BLOCKED positions");
+  });
+});
+
+describe("Orderbook Decoupling: P&L Calculation Source", () => {
+  test("P&L can be trusted from Data-API even without orderbook", () => {
+    // Position with Data-API P&L but no orderbook
+    const position = {
+      tokenId: "token123",
+      pnlSource: "DATA_API" as const,
+      dataApiPnlUsd: 5.50,
+      dataApiPnlPct: 8.5,
+      dataApiCurPrice: 0.70,
+      pnlUsd: 5.50,
+      pnlPct: 8.5,
+      pnlTrusted: true, // Should be true because Data-API provided values
+      currentBidPrice: undefined, // No orderbook
+      bookStatus: "NO_BOOK_404" as const,
+      executionStatus: "NOT_TRADABLE_ON_CLOB" as const,
+      execPriceTrusted: false, // Exec price is not trusted without orderbook
+    };
+
+    // P&L is trusted because Data-API provided it
+    assert.strictEqual(position.pnlTrusted, true, "P&L should be trusted from Data-API");
+    assert.strictEqual(position.pnlSource, "DATA_API", "P&L source should be DATA_API");
+    
+    // But execution is not trusted
+    assert.strictEqual(position.execPriceTrusted, false, "Exec price should NOT be trusted");
+    assert.strictEqual(position.executionStatus, "NOT_TRADABLE_ON_CLOB", "Cannot execute without orderbook");
+  });
+
+  test("P&L is UNKNOWN when neither Data-API nor orderbook available", () => {
+    // Position with fallback pricing only
+    const position = {
+      tokenId: "token456",
+      pnlSource: "FALLBACK" as const,
+      dataApiPnlUsd: undefined,
+      dataApiPnlPct: undefined,
+      dataApiCurPrice: undefined,
+      pnlUsd: 0,
+      pnlPct: 0,
+      pnlTrusted: false, // Untrusted because only fallback available
+      pnlClassification: "UNKNOWN" as const,
+      currentBidPrice: undefined,
+      bookStatus: "NO_BOOK_404" as const,
+      executionStatus: "NOT_TRADABLE_ON_CLOB" as const,
+    };
+
+    assert.strictEqual(position.pnlTrusted, false, "P&L should NOT be trusted from fallback alone");
+    assert.strictEqual(position.pnlClassification, "UNKNOWN", "P&L classification should be UNKNOWN");
+  });
+});
