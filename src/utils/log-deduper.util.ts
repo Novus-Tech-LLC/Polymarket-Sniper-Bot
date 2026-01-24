@@ -51,6 +51,26 @@ export const SKIP_LOG_TTL_MS = parseSkipLogTtl();
 export const HEARTBEAT_INTERVAL_MS = 120_000;
 
 /**
+ * Default heartbeat interval for Monitor logs (1 minute)
+ * Configurable via environment variable MONITOR_HEARTBEAT_MS
+ */
+const parseMonitorHeartbeat = (): number => {
+  const envValue = process.env.MONITOR_HEARTBEAT_MS;
+  if (!envValue) return 60_000;
+  
+  const parsed = parseInt(envValue, 10);
+  if (isNaN(parsed) || parsed < 0) {
+    console.warn(
+      `[LogDeduper] Invalid MONITOR_HEARTBEAT_MS value "${envValue}", using default 60000ms`
+    );
+    return 60_000;
+  }
+  return parsed;
+};
+
+export const MONITOR_HEARTBEAT_MS = parseMonitorHeartbeat();
+
+/**
  * Standard truncation length for tokenIds in log messages
  * Provides enough characters to identify tokens while keeping logs readable
  */

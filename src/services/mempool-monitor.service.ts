@@ -15,6 +15,7 @@ import {
   sanitizeErrorMessage,
 } from "../utils/sanitize-axios-error.util";
 import { parallelBatch } from "../utils/parallel-utils";
+import { MONITOR_HEARTBEAT_MS } from "../utils/log-deduper.util";
 
 export type MempoolMonitorDeps = {
   client: ClobClient;
@@ -45,6 +46,10 @@ export class MempoolMonitorService {
   private readonly targetAddresses: Set<string> = new Set();
   private timer?: NodeJS.Timeout;
   private readonly lastFetchTime: Map<string, number> = new Map();
+
+  // === LOG DEDUPLICATION STATE ===
+  private lastLoggedSummaryHash: string | null = null;
+  private lastLoggedAt: number = 0;
 
   constructor(deps: MempoolMonitorDeps) {
     this.deps = deps;
@@ -274,8 +279,60 @@ export class MempoolMonitorService {
     checkedAddresses += batchResult.errors.length;
 
     const durationMs = Date.now() - startTime;
-    logger.info(
-      `[Monitor] Checked ${checkedAddresses} address(es) in ${durationMs}ms (${failedAddressChecks} failed) | trades: ${stats.tradesSeen}, recent: ${stats.recentTrades}, eligible: ${stats.eligibleTrades}, skipped_small: ${stats.skippedSmallTrades}, skipped_low_price: ${stats.skippedLowPriceTrades}, skipped_unconfirmed: ${stats.skippedUnconfirmedTrades}, skipped_non_target: ${stats.skippedNonTargetTrades}, skipped_parse_error: ${stats.skippedParseErrorTrades}, skipped_outside_recent_window: ${stats.skippedOutsideRecentWindowTrades}, skipped_unsupported_action: ${stats.skippedUnsupportedActionTrades}, skipped_missing_fields: ${stats.skippedMissingFieldsTrades}, skipped_api_error: ${stats.skippedApiErrorTrades}, skipped_other: ${stats.skippedOtherTrades}`,
+
+    // === CHANGE-BASED LOGGING ===
+    // Compute total skipped count for compact log output
+    const totalSkipped =
+      stats.skippedSmallTrades +
+      stats.skippedLowPriceTrades +
+      stats.skippedUnconfirmedTrades +
+      stats.skippedNonTargetTrades +
+      stats.skippedParseErrorTrades +
+      stats.skippedOutsideRecentWindowTrades +
+      stats.skippedUnsupportedActionTrades +
+      stats.skippedMissingFieldsTrades +
+      stats.skippedApiErrorTrades +
+      stats.skippedOtherTrades;
+
+    // Compute summary hash for deduplication (based on key metrics only)
+    const summaryHashObj = {
+      addrs: checkedAddresses,
+      eligible: stats.eligibleTrades,
+      recent: stats.recentTrades,
+      skipped: totalSkipped,
+      failed: failedAddressChecks,
+    };
+    const summaryHash = JSON.stringify(summaryHashObj);
+
+    const now = Date.now();
+    const heartbeatElapsed = now - this.lastLoggedAt >= MONITOR_HEARTBEAT_MS;
+    const hashChanged = summaryHash !== this.lastLoggedSummaryHash;
+
+    // ALWAYS log if there are failures or eligible trades (safety requirement)
+    const hasFailures = failedAddressChecks > 0;
+    const hasEligibleTrades = stats.eligibleTrades > 0;
+
+    // Decide whether to log
+    const shouldLog =
+      hasFailures || hasEligibleTrades || hashChanged || heartbeatElapsed;
+
+    if (shouldLog) {
+      // Compute indicator for change type (Δ = changed, ♥ = heartbeat)
+      const indicator = hashChanged ? "Δ" : "♥";
+
+      // Log compact INFO summary
+      logger.info(
+        `[Monitor] ✓ ${checkedAddresses} addrs | eligible=${stats.eligibleTrades} recent=${stats.recentTrades} skipped=${totalSkipped} unsupported=${stats.skippedUnsupportedActionTrades} failed=${failedAddressChecks} (${indicator}) [${durationMs}ms]`,
+      );
+
+      // Update deduplication state
+      this.lastLoggedSummaryHash = summaryHash;
+      this.lastLoggedAt = now;
+    }
+
+    // Always log detailed skip breakdown at DEBUG level for troubleshooting
+    logger.debug(
+      `[Monitor] Detail: trades=${stats.tradesSeen} small=${stats.skippedSmallTrades} low_price=${stats.skippedLowPriceTrades} unconfirmed=${stats.skippedUnconfirmedTrades} non_target=${stats.skippedNonTargetTrades} parse_err=${stats.skippedParseErrorTrades} outside_window=${stats.skippedOutsideRecentWindowTrades} unsupported=${stats.skippedUnsupportedActionTrades} missing=${stats.skippedMissingFieldsTrades} api_err=${stats.skippedApiErrorTrades} other=${stats.skippedOtherTrades}`,
     );
   }
 

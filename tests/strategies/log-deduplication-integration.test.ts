@@ -286,4 +286,170 @@ describe("Log Deduplication Integration", () => {
     assert.ok(logs[1].includes("[ScalpTakeProfit]"));
     assert.ok(logs[2].includes("[Monitor]"));
   });
+
+  test("MempoolMonitor pattern: change-based logging prevents spam", () => {
+    // Simulate the MempoolMonitor's new change-based logging behavior
+    // This mirrors the implementation in mempool-monitor.service.ts
+    
+    let lastLoggedSummaryHash: string | null = null;
+    let lastLoggedAt = 0;
+    const HEARTBEAT_MS = 60_000; // Matches MONITOR_HEARTBEAT_MS default
+    
+    // Helper function that mirrors the Monitor's shouldLog logic
+    function shouldLogMonitorSummary(
+      checkedAddresses: number,
+      eligibleTrades: number,
+      recentTrades: number,
+      totalSkipped: number,
+      failedCount: number,
+      currentTime: number,
+    ): { shouldLog: boolean; indicator: string } {
+      const summaryHashObj = {
+        addrs: checkedAddresses,
+        eligible: eligibleTrades,
+        recent: recentTrades,
+        skipped: totalSkipped,
+        failed: failedCount,
+      };
+      const summaryHash = JSON.stringify(summaryHashObj);
+      
+      const heartbeatElapsed = currentTime - lastLoggedAt >= HEARTBEAT_MS;
+      const hashChanged = summaryHash !== lastLoggedSummaryHash;
+      
+      // ALWAYS log if there are failures or eligible trades
+      const hasFailures = failedCount > 0;
+      const hasEligibleTrades = eligibleTrades > 0;
+      
+      const shouldLog = hasFailures || hasEligibleTrades || hashChanged || heartbeatElapsed;
+      
+      if (shouldLog) {
+        lastLoggedSummaryHash = summaryHash;
+        lastLoggedAt = currentTime;
+      }
+      
+      return { shouldLog, indicator: hashChanged ? "Δ" : "♥" };
+    }
+    
+    const baseTime = Date.now();
+    
+    // Cycle 1: First call - should log (first_time)
+    let result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime);
+    if (result.shouldLog) {
+      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1379 (${result.indicator})`);
+    }
+    assert.strictEqual(result.shouldLog, true, "First call should log");
+    
+    // Cycles 2-10: Same data (no eligible, no failures), no time elapsed - should NOT log
+    for (let i = 2; i <= 10; i++) {
+      result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime + i * 1000); // 1 second intervals
+      if (result.shouldLog) {
+        mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1379 (${result.indicator})`);
+      }
+    }
+    
+    // Should only have 1 log so far (spam prevented!)
+    let monitorLogs = logs.filter((l) => l.includes("[Monitor] ✓"));
+    assert.strictEqual(
+      monitorLogs.length,
+      1,
+      `Expected 1 Monitor log after 10 identical cycles, got ${monitorLogs.length}`,
+    );
+    
+    // Cycle 11: Hash changed (different skipped count) - should log immediately
+    // Note: We keep eligible=0 to test pure hash change behavior
+    result = shouldLogMonitorSummary(17, 0, 0, 1380, 0, baseTime + 11000);
+    if (result.shouldLog) {
+      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`);
+    }
+    assert.strictEqual(result.shouldLog, true, "Hash change should trigger log");
+    assert.strictEqual(result.indicator, "Δ", "Should indicate change with Δ");
+    
+    // Cycle 12: Same as cycle 11 - should NOT log (no eligible, no failures, no hash change)
+    result = shouldLogMonitorSummary(17, 0, 0, 1380, 0, baseTime + 12000);
+    if (result.shouldLog) {
+      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`);
+    }
+    assert.strictEqual(result.shouldLog, false, "Duplicate should be suppressed");
+    
+    // Should have exactly 2 logs now
+    monitorLogs = logs.filter((l) => l.includes("[Monitor] ✓"));
+    assert.strictEqual(
+      monitorLogs.length,
+      2,
+      `Expected 2 Monitor logs after hash change, got ${monitorLogs.length}`,
+    );
+    
+    // Cycle 13: Heartbeat elapsed (60 seconds later) - should log
+    result = shouldLogMonitorSummary(17, 0, 0, 1380, 0, baseTime + 12000 + HEARTBEAT_MS);
+    if (result.shouldLog) {
+      mockLogger.info(`[Monitor] ✓ 17 addrs | eligible=0 recent=0 skipped=1380 (${result.indicator})`);
+    }
+    assert.strictEqual(result.shouldLog, true, "Heartbeat should trigger log");
+    assert.strictEqual(result.indicator, "♥", "Should indicate heartbeat with ♥");
+    
+    // Should have exactly 3 logs now
+    monitorLogs = logs.filter((l) => l.includes("[Monitor] ✓"));
+    assert.strictEqual(
+      monitorLogs.length,
+      3,
+      `Expected 3 Monitor logs after heartbeat, got ${monitorLogs.length}`,
+    );
+  });
+
+  test("MempoolMonitor pattern: failures always bypass throttling", () => {
+    // Reset state for this test
+    let lastLoggedSummaryHash: string | null = null;
+    let lastLoggedAt = 0;
+    const HEARTBEAT_MS = 60_000;
+    
+    function shouldLogMonitorSummary(
+      checkedAddresses: number,
+      eligibleTrades: number,
+      recentTrades: number,
+      totalSkipped: number,
+      failedCount: number,
+      currentTime: number,
+    ): boolean {
+      const summaryHashObj = {
+        addrs: checkedAddresses,
+        eligible: eligibleTrades,
+        recent: recentTrades,
+        skipped: totalSkipped,
+        failed: failedCount,
+      };
+      const summaryHash = JSON.stringify(summaryHashObj);
+      
+      const heartbeatElapsed = currentTime - lastLoggedAt >= HEARTBEAT_MS;
+      const hashChanged = summaryHash !== lastLoggedSummaryHash;
+      const hasFailures = failedCount > 0;
+      const hasEligibleTrades = eligibleTrades > 0;
+      
+      const shouldLog = hasFailures || hasEligibleTrades || hashChanged || heartbeatElapsed;
+      
+      if (shouldLog) {
+        lastLoggedSummaryHash = summaryHash;
+        lastLoggedAt = currentTime;
+      }
+      
+      return shouldLog;
+    }
+    
+    const baseTime = Date.now();
+    
+    // First log establishes baseline
+    let result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime);
+    assert.strictEqual(result, true, "First log should happen");
+    
+    // Same stats immediately after - should NOT log
+    result = shouldLogMonitorSummary(17, 0, 0, 1379, 0, baseTime + 1000);
+    assert.strictEqual(result, false, "Duplicate should be suppressed");
+    
+    // BUT if there's a failure, it ALWAYS logs (safety requirement)
+    result = shouldLogMonitorSummary(17, 0, 0, 1379, 1, baseTime + 2000);
+    assert.strictEqual(result, true, "Failures must always log");
+    
+    // And if there are eligible trades, it ALWAYS logs (important event)
+    result = shouldLogMonitorSummary(17, 1, 1, 1378, 0, baseTime + 3000);
+    assert.strictEqual(result, true, "Eligible trades must always log");
+  });
 });
