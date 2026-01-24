@@ -1286,6 +1286,39 @@ export type StrategyConfig = {
    * Set to 0 to disable (hold indefinitely). Default: 3 minutes (quick scalps!)
    */
   scalpLowPriceMaxHoldMinutes: number;
+  // === SELL EARLY STRATEGY SETTINGS ===
+  // Capital efficiency: Sell positions at ~99.9¢ instead of waiting for slow redemption
+  /**
+   * Enable sell-early strategy for capital efficiency
+   * When a position is essentially won (price near $1) but not yet redeemable,
+   * sell into the book to free capital immediately.
+   * Default: true
+   */
+  sellEarlyEnabled: boolean;
+  /**
+   * Minimum bid price in cents to trigger sell-early (e.g., 99.9 = 99.9¢)
+   * Position will be sold if best bid >= this threshold.
+   * Default: 99.9 (99.9¢)
+   */
+  sellEarlyBidCents: number;
+  /**
+   * Minimum liquidity in USD at/near best bid to consider selling.
+   * Prevents selling into thin books where slippage would be significant.
+   * Default: 50 USD
+   */
+  sellEarlyMinLiquidityUsd: number;
+  /**
+   * Maximum spread in cents allowed for sell-early.
+   * If spread > this, the book may be stale or illiquid.
+   * Default: 0.3 cents
+   */
+  sellEarlyMaxSpreadCents: number;
+  /**
+   * Minimum time (seconds) to hold a position before sell-early can trigger.
+   * Prevents instant flips if desired.
+   * Default: 60 seconds
+   */
+  sellEarlyMinHoldSec: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
   monitorConfig?: MonitorRuntimeConfig;
@@ -1676,6 +1709,44 @@ export function loadStrategyConfig(
             .SCALP_LOW_PRICE_MAX_HOLD_MINUTES
         : undefined) ??
       3, // Default: 3 minutes - quick scalps, don't hold volatile positions
+    // === SELL EARLY STRATEGY (Capital Efficiency) ===
+    // SELL_EARLY_ENABLED: Enable selling near-$1 positions before redemption
+    sellEarlyEnabled:
+      parseBool(readEnv("SELL_EARLY_ENABLED", overrides) ?? "") ??
+      ("SELL_EARLY_ENABLED" in preset
+        ? (preset as { SELL_EARLY_ENABLED: boolean }).SELL_EARLY_ENABLED
+        : undefined) ??
+      true, // Default: enabled - free capital instead of waiting for redemption
+    // SELL_EARLY_BID_CENTS: Minimum bid to trigger sell-early (in cents)
+    sellEarlyBidCents:
+      parseNumber(readEnv("SELL_EARLY_BID_CENTS", overrides) ?? "") ??
+      ("SELL_EARLY_BID_CENTS" in preset
+        ? (preset as { SELL_EARLY_BID_CENTS: number }).SELL_EARLY_BID_CENTS
+        : undefined) ??
+      99.9, // Default: 99.9¢ - essentially won positions
+    // SELL_EARLY_MIN_LIQUIDITY_USD: Minimum depth at best bid
+    sellEarlyMinLiquidityUsd:
+      parseNumber(readEnv("SELL_EARLY_MIN_LIQUIDITY_USD", overrides) ?? "") ??
+      ("SELL_EARLY_MIN_LIQUIDITY_USD" in preset
+        ? (preset as { SELL_EARLY_MIN_LIQUIDITY_USD: number })
+            .SELL_EARLY_MIN_LIQUIDITY_USD
+        : undefined) ??
+      50, // Default: $50 liquidity required
+    // SELL_EARLY_MAX_SPREAD_CENTS: Maximum allowed spread
+    sellEarlyMaxSpreadCents:
+      parseNumber(readEnv("SELL_EARLY_MAX_SPREAD_CENTS", overrides) ?? "") ??
+      ("SELL_EARLY_MAX_SPREAD_CENTS" in preset
+        ? (preset as { SELL_EARLY_MAX_SPREAD_CENTS: number })
+            .SELL_EARLY_MAX_SPREAD_CENTS
+        : undefined) ??
+      0.3, // Default: 0.3¢ max spread
+    // SELL_EARLY_MIN_HOLD_SEC: Minimum hold time before sell-early
+    sellEarlyMinHoldSec:
+      parseNumber(readEnv("SELL_EARLY_MIN_HOLD_SEC", overrides) ?? "") ??
+      ("SELL_EARLY_MIN_HOLD_SEC" in preset
+        ? (preset as { SELL_EARLY_MIN_HOLD_SEC: number }).SELL_EARLY_MIN_HOLD_SEC
+        : undefined) ??
+      60, // Default: 60 seconds
   };
 
   // Apply preset settings to environment for ARB and MONITOR config loaders

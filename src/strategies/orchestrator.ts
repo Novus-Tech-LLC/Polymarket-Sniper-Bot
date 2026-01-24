@@ -12,11 +12,12 @@
  *
  * EXECUTION ORDER:
  * 1. Refresh PositionTracker (single-flight, awaited by all strategies)
- * 2. Auto-Redeem - Claim resolved positions (HIGHEST PRIORITY - get money back!)
- * 3. Smart Hedging - Hedge losing positions
- * 4. Universal Stop-Loss - Sell positions at max loss
- * 5. Scalp Take-Profit - Time-based profit taking with momentum checks
- * 6. Endgame Sweep - Buy high-confidence positions
+ * 2. SellEarly - CAPITAL EFFICIENCY: Sell near-$1 ACTIVE positions before redemption
+ * 3. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
+ * 4. Smart Hedging - Hedge losing positions
+ * 5. Universal Stop-Loss - Sell positions at max loss
+ * 6. Scalp Take-Profit - Time-based profit taking with momentum checks
+ * 7. Endgame Sweep - Buy high-confidence positions
  */
 
 import { randomUUID } from "crypto";
@@ -47,6 +48,11 @@ import {
 } from "./scalp-take-profit";
 import { AutoRedeemStrategy, type AutoRedeemConfig } from "./auto-redeem";
 import {
+  SellEarlyStrategy,
+  type SellEarlyConfig,
+  DEFAULT_SELL_EARLY_CONFIG,
+} from "./sell-early";
+import {
   UniversalStopLossStrategy,
   type UniversalStopLossConfig,
 } from "./universal-stop-loss";
@@ -68,6 +74,7 @@ export interface OrchestratorConfig {
   // quickFlipConfig removed - module deprecated
   scalpConfig?: Partial<ScalpTakeProfitConfig>;
   autoRedeemConfig?: Partial<AutoRedeemConfig>;
+  sellEarlyConfig?: Partial<SellEarlyConfig>;
   stopLossConfig?: Partial<UniversalStopLossConfig>;
 }
 
@@ -79,6 +86,7 @@ export class Orchestrator {
   private pnlLedger: PnLLedger;
 
   // All strategies
+  private sellEarlyStrategy: SellEarlyStrategy;
   private autoRedeemStrategy: AutoRedeemStrategy;
   private hedgingStrategy: SmartHedgingStrategy;
   private stopLossStrategy: UniversalStopLossStrategy;
@@ -141,7 +149,20 @@ export class Orchestrator {
       config.client as { relayerContext?: RelayerContext }
     ).relayerContext;
 
-    // 1. Auto-Redeem - Claim resolved positions (HIGHEST PRIORITY)
+    // 1. SellEarly - CAPITAL EFFICIENCY: Sell near-$1 ACTIVE positions
+    // Runs BEFORE AutoRedeem to free capital instead of waiting for slow redemption
+    // Only applies to ACTIVE positions (never REDEEMABLE - those go to AutoRedeem)
+    this.sellEarlyStrategy = new SellEarlyStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: {
+        ...DEFAULT_SELL_EARLY_CONFIG,
+        ...config.sellEarlyConfig,
+      },
+    });
+
+    // 2. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
     // Uses relayer for gasless redemptions when available (recommended)
     this.autoRedeemStrategy = new AutoRedeemStrategy({
       client: config.client,
@@ -156,7 +177,7 @@ export class Orchestrator {
       },
     });
 
-    // 2. Smart Hedging - Hedge losing positions
+    // 3. Smart Hedging - Hedge losing positions
     const hedgingConfig = {
       ...DEFAULT_HEDGING_CONFIG,
       maxHedgeUsd: config.maxPositionUsd,
@@ -169,7 +190,7 @@ export class Orchestrator {
       config: hedgingConfig,
     });
 
-    // 3. Universal Stop-Loss - Protect against big losses
+    // 4. Universal Stop-Loss - Protect against big losses
     // When Smart Hedging is enabled, skip positions it handles (entry < maxEntryPrice)
     const smartHedgingEnabled = hedgingConfig.enabled;
     this.stopLossStrategy = new UniversalStopLossStrategy({
@@ -188,7 +209,7 @@ export class Orchestrator {
       },
     });
 
-    // 4. Endgame Sweep - Buy high-confidence positions
+    // 5. Endgame Sweep - Buy high-confidence positions
     this.endgameStrategy = new EndgameSweepStrategy({
       client: config.client,
       logger: config.logger,
@@ -200,7 +221,7 @@ export class Orchestrator {
       },
     });
 
-    // 5. Scalp Take-Profit - Time-and-momentum-based profit taking
+    // 6. Scalp Take-Profit - Time-and-momentum-based profit taking
     // Enabled by default - takes profits on positions after holding 45-90 min
     // with 5%+ profit, or captures sudden spikes (15%+ in 10 min)
     // CRITICAL: Never forces time-exit on ≤60¢ entries that reach 90¢+
@@ -323,8 +344,15 @@ export class Orchestrator {
         durationMs: Date.now() - refreshStart,
       });
 
-      // Phase 2: Risk checks and redemption
-      // 1. Auto-Redeem - HIGHEST PRIORITY - get money back from resolved positions
+      // Phase 2: Capital efficiency and redemption
+      // 1. SellEarly - CAPITAL EFFICIENCY - sell near-$1 ACTIVE positions before redemption
+      await this.runStrategyTimed(
+        "SellEarly",
+        () => this.sellEarlyStrategy.execute(),
+        strategyTimings,
+      );
+
+      // 2. Auto-Redeem - get money back from REDEEMABLE positions
       await this.runStrategyTimed(
         "AutoRedeem",
         () => this.autoRedeemStrategy.execute(),
@@ -332,14 +360,14 @@ export class Orchestrator {
       );
 
       // Phase 3: Risk management
-      // 2. Smart Hedging - protect losing positions by buying opposite side
+      // 3. Smart Hedging - protect losing positions by buying opposite side
       await this.runStrategyTimed(
         "Hedging",
         () => this.hedgingStrategy.execute(),
         strategyTimings,
       );
 
-      // 3. Universal Stop-Loss - sell positions exceeding max loss threshold
+      // 4. Universal Stop-Loss - sell positions exceeding max loss threshold
       await this.runStrategyTimed(
         "StopLoss",
         () => this.stopLossStrategy.execute(),
@@ -347,14 +375,14 @@ export class Orchestrator {
       );
 
       // Phase 4: Trading strategies
-      // 4. Scalp Take-Profit - time-based profit taking with momentum checks
+      // 5. Scalp Take-Profit - time-based profit taking with momentum checks
       await this.runStrategyTimed(
         "ScalpTakeProfit",
         () => this.scalpStrategy.execute(),
         strategyTimings,
       );
 
-      // 5. Endgame Sweep - buy high-confidence positions (85-99¢)
+      // 6. Endgame Sweep - buy high-confidence positions (85-99¢)
       await this.runStrategyTimed(
         "Endgame",
         () => this.endgameStrategy.execute(),

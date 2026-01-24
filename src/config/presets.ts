@@ -196,6 +196,15 @@ export const STRATEGY_PRESETS = {
     SCALP_TARGET_PROFIT_PCT: 5.0,
     SCALP_MIN_PROFIT_USD: 0.5,
     SCALP_RESOLUTION_EXCLUSION_PRICE: 0.6, // Never time-exit ≤60¢ entry positions that reach 90¢+ (near resolution)
+    /**
+     * SELL EARLY - Disabled in off preset
+     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
+     */
+    SELL_EARLY_ENABLED: false,
+    SELL_EARLY_BID_CENTS: 99.9,
+    SELL_EARLY_MIN_LIQUIDITY_USD: 50,
+    SELL_EARLY_MAX_SPREAD_CENTS: 0.3,
+    SELL_EARLY_MIN_HOLD_SEC: 60,
   },
   conservative: {
     STRATEGY_ENABLED: true,
@@ -272,6 +281,16 @@ export const STRATEGY_PRESETS = {
     SCALP_SUDDEN_SPIKE_ENABLED: true,
     SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 20.0, // Only capture 20%+ spikes (conservative)
     SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 10,
+    /**
+     * SELL EARLY - Conservative settings
+     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
+     * Only applies to ACTIVE positions (never to REDEEMABLE - those go to AutoRedeem).
+     */
+    SELL_EARLY_ENABLED: true,
+    SELL_EARLY_BID_CENTS: 99.9, // Sell when bid >= 99.9¢
+    SELL_EARLY_MIN_LIQUIDITY_USD: 100, // Conservative: require $100 liquidity
+    SELL_EARLY_MAX_SPREAD_CENTS: 0.2, // Conservative: tighter spread requirement
+    SELL_EARLY_MIN_HOLD_SEC: 120, // Conservative: hold at least 2 minutes
     // Rate limits
     ORDER_SUBMIT_MAX_PER_HOUR: 30,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
@@ -365,6 +384,16 @@ export const STRATEGY_PRESETS = {
     SCALP_SUDDEN_SPIKE_ENABLED: true,
     SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 15.0, // Capture 15%+ spikes
     SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 10,
+    /**
+     * SELL EARLY - Balanced settings
+     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
+     * Only applies to ACTIVE positions (never to REDEEMABLE - those go to AutoRedeem).
+     */
+    SELL_EARLY_ENABLED: true,
+    SELL_EARLY_BID_CENTS: 99.9, // Sell when bid >= 99.9¢
+    SELL_EARLY_MIN_LIQUIDITY_USD: 50, // Balanced: require $50 liquidity
+    SELL_EARLY_MAX_SPREAD_CENTS: 0.3, // Balanced: allow 0.3¢ spread
+    SELL_EARLY_MIN_HOLD_SEC: 60, // Balanced: hold at least 60 seconds
     // Rate limits (higher for more trades)
     ORDER_SUBMIT_MAX_PER_HOUR: 60,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
@@ -513,6 +542,17 @@ export const STRATEGY_PRESETS = {
     SCALP_SUDDEN_SPIKE_ENABLED: true,
     SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 12.0, // Capture 12%+ spikes (more aggressive)
     SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 5, // Shorter window - faster detection
+
+    /**
+     * SELL EARLY - Aggressive settings
+     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
+     * Only applies to ACTIVE positions (never to REDEEMABLE - those go to AutoRedeem).
+     */
+    SELL_EARLY_ENABLED: true,
+    SELL_EARLY_BID_CENTS: 99.8, // Aggressive: sell at slightly lower threshold 99.8¢
+    SELL_EARLY_MIN_LIQUIDITY_USD: 25, // Aggressive: lower liquidity requirement
+    SELL_EARLY_MAX_SPREAD_CENTS: 0.5, // Aggressive: allow wider spread
+    SELL_EARLY_MIN_HOLD_SEC: 30, // Aggressive: faster reaction
 
     /**
      * RATE LIMITS - HIGH THROUGHPUT
