@@ -258,7 +258,7 @@ export const STRATEGY_PRESETS = {
      * SCALP TAKE-PROFIT - Conservative settings
      * Time-and-momentum-based profit taking. Patient approach with higher targets.
      * CRITICAL: Never forces time-exit on positions ≤60¢ that reach 90¢+ (near resolution).
-     * 
+     *
      * PROFIT TARGETS: Must clear transaction costs (fees + slippage + spread)!
      * Conservative targets 8-12% to ensure meaningful profit after all costs.
      */
@@ -351,7 +351,7 @@ export const STRATEGY_PRESETS = {
      * SCALP TAKE-PROFIT - Balanced settings
      * Time-and-momentum-based profit taking. Moderate patience with 5-8% targets.
      * CRITICAL: Never forces time-exit on positions ≤60¢ that reach 90¢+ (near resolution).
-     * 
+     *
      * PROFIT TARGETS: Must clear transaction costs (fees + slippage + spread)!
      * Balanced targets 5-8% to ensure profit after typical ~3% costs.
      */
@@ -498,7 +498,7 @@ export const STRATEGY_PRESETS = {
      * Faster exits with 4-6% targets for quicker churn.
      * More sensitive to momentum changes.
      * CRITICAL: Never forces time-exit on positions ≤60¢ that reach 90¢+ (near resolution).
-     * 
+     *
      * PROFIT TARGETS: Even aggressive needs 4%+ to clear costs!
      * We're aggressive on TIME, not on accepting tiny profits.
      * A 2% "profit" after fees/slippage is basically break-even - stupid!
@@ -508,7 +508,7 @@ export const STRATEGY_PRESETS = {
     SCALP_MAX_HOLD_MINUTES: 60, // Force exit at 60 minutes if profitable
     SCALP_MIN_PROFIT_PCT: 4.0, // Minimum 4% - even aggressive needs real profit
     SCALP_TARGET_PROFIT_PCT: 6.0, // Target 6% profit
-    SCALP_MIN_PROFIT_USD: 0.50, // Don't scalp for less than $0.50
+    SCALP_MIN_PROFIT_USD: 0.5, // Don't scalp for less than $0.50
     SCALP_RESOLUTION_EXCLUSION_PRICE: 0.6, // Never time-exit ≤60¢ entry positions that reach 90¢+ (near resolution)
     SCALP_SUDDEN_SPIKE_ENABLED: true,
     SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 12.0, // Capture 12%+ spikes (more aggressive)

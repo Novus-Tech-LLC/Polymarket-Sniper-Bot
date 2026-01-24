@@ -101,7 +101,7 @@ export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
 
 /**
  * Cooldown duration for failed liquidation attempts (5 minutes).
- * 
+ *
  * RATIONALE:
  * - After a sell/hedge fails (due to insufficient balance, allowance, or liquidity),
  *   retrying immediately will almost certainly fail again.
@@ -109,7 +109,7 @@ export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
  *   (e.g., deposits, approvals, or liquidity improvements).
  * - This prevents repeated attempts that spam logs, waste resources, and may
  *   trigger rate limits.
- * 
+ *
  * WHEN APPLIED:
  * - When a sell order fails after hedge fails (both attempts exhausted)
  * - When a liquidation order fails in force-liquidation scenario
@@ -271,7 +271,10 @@ export class SimpleSmartHedgingStrategy {
               this.hedgedPositions.add(key);
             } else {
               // Sell failed in no-hedge window - add to cooldown
-              this.failedLiquidationCooldowns.set(key, now + FAILED_LIQUIDATION_COOLDOWN_MS);
+              this.failedLiquidationCooldowns.set(
+                key,
+                now + FAILED_LIQUIDATION_COOLDOWN_MS,
+              );
               this.logger.warn(
                 `[SimpleHedging] ⏳ Liquidation failed in no-hedge window - position on cooldown for 5 minutes: ${key}`,
               );
@@ -319,7 +322,10 @@ export class SimpleSmartHedgingStrategy {
           this.hedgedPositions.add(key);
         } else {
           // Sell failed - add to cooldown to prevent repeated attempts
-          this.failedLiquidationCooldowns.set(key, now + FAILED_LIQUIDATION_COOLDOWN_MS);
+          this.failedLiquidationCooldowns.set(
+            key,
+            now + FAILED_LIQUIDATION_COOLDOWN_MS,
+          );
           this.logger.warn(
             `[SimpleHedging] ⏳ Liquidation failed - position on cooldown for 5 minutes: ${key}`,
           );
@@ -351,14 +357,19 @@ export class SimpleSmartHedgingStrategy {
       }
 
       // Hedge failed - liquidate to stop bleeding
-      this.logger.warn(`[SimpleHedging] ⚠️ Hedge failed (${hedgeResult.reason}) - liquidating instead`);
+      this.logger.warn(
+        `[SimpleHedging] ⚠️ Hedge failed (${hedgeResult.reason}) - liquidating instead`,
+      );
       const sold = await this.sellPosition(position);
       if (sold) {
         actionsCount++;
         this.hedgedPositions.add(key);
       } else {
         // Both hedge and sell failed - add to cooldown to prevent repeated attempts
-        this.failedLiquidationCooldowns.set(key, now + FAILED_LIQUIDATION_COOLDOWN_MS);
+        this.failedLiquidationCooldowns.set(
+          key,
+          now + FAILED_LIQUIDATION_COOLDOWN_MS,
+        );
         this.logger.warn(
           `[SimpleHedging] ⏳ Hedge and liquidation both failed - position on cooldown for 5 minutes: ${key}`,
         );
@@ -371,13 +382,15 @@ export class SimpleSmartHedgingStrategy {
   /**
    * Execute a hedge - buy the opposite side
    * Supports all binary market types: YES/NO, Over/Under, Team A/Team B, etc.
-   * 
+   *
    * @returns Object with success status and reason for failure
    *          - reason "MARKET_RESOLVED" means opposite side >= 95¢, skip liquidation
    *          - reason "TOO_EXPENSIVE" means opposite side >= 90¢ but < 95¢, try liquidation
    *          - other reasons indicate hedge attempt failed, try liquidation
    */
-  private async executeHedge(position: Position): Promise<{ success: boolean; reason?: string }> {
+  private async executeHedge(
+    position: Position,
+  ): Promise<{ success: boolean; reason?: string }> {
     const currentSide = position.side?.toUpperCase();
 
     // Get the opposite token (works for any binary market)
@@ -632,11 +645,11 @@ export class SimpleSmartHedgingStrategy {
 
   /**
    * Clean up expired cooldown entries to prevent unbounded memory growth.
-   * 
+   *
    * This handles cases where positions are removed through other means
    * (e.g., sold externally, redeemed, manually removed) before their
    * cooldown expires. Without cleanup, entries would accumulate indefinitely.
-   * 
+   *
    * Strategy:
    * 1. Remove all entries with expired timestamps
    * 2. If still over max size, remove oldest entries
@@ -654,16 +667,19 @@ export class SimpleSmartHedgingStrategy {
     }
 
     // Second pass: if still over max size, remove oldest entries
-    if (this.failedLiquidationCooldowns.size > MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES) {
+    if (
+      this.failedLiquidationCooldowns.size >
+      MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES
+    ) {
       const entries = Array.from(this.failedLiquidationCooldowns.entries());
       // Sort by expiration time (oldest first)
       entries.sort((a, b) => a[1] - b[1]);
-      
+
       const toRemove = entries.length - MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES;
       for (let i = 0; i < toRemove; i++) {
         this.failedLiquidationCooldowns.delete(entries[i][0]);
       }
-      
+
       this.logger.debug(
         `[SimpleHedging] Cleaned up ${expiredCount} expired + ${toRemove} oldest cooldown entries (max: ${MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES})`,
       );
@@ -677,7 +693,11 @@ export class SimpleSmartHedgingStrategy {
   /**
    * Get strategy stats
    */
-  getStats(): { enabled: boolean; hedgedCount: number; failedLiquidationCooldownCount: number } {
+  getStats(): {
+    enabled: boolean;
+    hedgedCount: number;
+    failedLiquidationCooldownCount: number;
+  } {
     return {
       enabled: this.config.enabled,
       hedgedCount: this.hedgedPositions.size,
@@ -693,5 +713,57 @@ export class SimpleSmartHedgingStrategy {
     return this.config.allowExceedMax
       ? this.config.absoluteMaxUsd
       : this.config.maxHedgeUsd;
+  }
+
+  /**
+   * Get positions that are candidates for liquidation when funds are insufficient.
+   * This exposes the PositionTracker's liquidation candidates for external visibility
+   * (e.g., for monitoring, debugging, or external fund management).
+   *
+   * Returns active losing positions that can be sold to free up funds for hedging,
+   * sorted by worst loss first. Excludes positions that are already hedged or
+   * in cooldown.
+   *
+   * @returns Array of positions suitable for liquidation, sorted by worst loss first
+   */
+  getLiquidationCandidates(): Position[] {
+    const candidates = this.positionTracker.getLiquidationCandidates(
+      this.config.triggerLossPct,
+      this.config.minHoldSeconds,
+    );
+
+    // Exclude positions we've already hedged or that are in cooldown
+    const now = Date.now();
+    return candidates.filter((pos) => {
+      const key = `${pos.marketId}-${pos.tokenId}`;
+
+      // Skip if already hedged
+      if (this.hedgedPositions.has(key)) {
+        return false;
+      }
+
+      // Skip if in failed liquidation cooldown
+      const cooldownUntil = this.failedLiquidationCooldowns.get(key);
+      if (cooldownUntil && now < cooldownUntil) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Get the total USD value that could be recovered by liquidating losing positions.
+   * This is useful for determining how much funds could potentially be freed up
+   * for hedging operations when the wallet balance is insufficient.
+   *
+   * @returns Total USD value of liquidation candidates (current market value)
+   */
+  getLiquidationCandidatesValue(): number {
+    const candidates = this.getLiquidationCandidates();
+    return candidates.reduce(
+      (total, pos) => total + pos.size * pos.currentPrice,
+      0,
+    );
   }
 }

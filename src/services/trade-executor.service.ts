@@ -69,21 +69,22 @@ export class TradeExecutorService {
     // === MINIMUM BUY PRICE CHECK ===
     // Prevents buying extremely low-probability "loser" positions (e.g., 3¢ positions)
     // This protects against copying trades into positions that are almost certain to lose.
-    // 
+    //
     // EXCEPTION: If SCALP_LOW_PRICE_THRESHOLD is set, allow buys at or below that threshold.
     // This enables scalping volatile low-price positions with one simple setting.
     if (signal.side === "BUY") {
       const minBuyPrice = env.minBuyPrice ?? DEFAULT_CONFIG.MIN_BUY_PRICE;
       const scalpThreshold = env.scalpLowPriceThreshold ?? 0;
-      const allowedByScalpThreshold = scalpThreshold > 0 && signal.price <= scalpThreshold;
-      
+      const allowedByScalpThreshold =
+        scalpThreshold > 0 && signal.price <= scalpThreshold;
+
       if (!allowedByScalpThreshold && signal.price < minBuyPrice) {
         logger.warn(
           `[Frontrun] 🚫 Skipping BUY - price ${(signal.price * 100).toFixed(1)}¢ is below minimum ${(minBuyPrice * 100).toFixed(1)}¢ (prevents buying loser positions). Market: ${signal.marketId}`,
         );
         return;
       }
-      
+
       if (allowedByScalpThreshold) {
         logger.info(
           `[Frontrun] ⚡ Low-price scalp allowed: ${(signal.price * 100).toFixed(1)}¢ ≤ ${(scalpThreshold * 100).toFixed(0)}¢ threshold. Market: ${signal.marketId}`,

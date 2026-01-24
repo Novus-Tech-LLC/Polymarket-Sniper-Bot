@@ -102,7 +102,9 @@ export class SimpleOrchestrator {
     // === INITIALIZE ALL STRATEGIES ===
 
     // Extract relayer context from client (set by preflight if available)
-    const relayerContext = (config.client as { relayerContext?: RelayerContext }).relayerContext;
+    const relayerContext = (
+      config.client as { relayerContext?: RelayerContext }
+    ).relayerContext;
 
     // 1. Auto-Redeem - Claim resolved positions (HIGHEST PRIORITY)
     // Uses relayer for gasless redemptions when available (recommended)

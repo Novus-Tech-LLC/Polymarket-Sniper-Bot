@@ -110,14 +110,14 @@ export class PositionTracker {
     // This is critical - without positions loaded, strategies can't identify what to sell/redeem
     try {
       await this.refresh();
-      
+
       // Log positions without entry times (critical diagnostic)
       const positions = this.getPositions();
       const withoutEntryTime = positions.filter((p) => {
         const key = `${p.marketId}-${p.tokenId}`;
         return !this.positionEntryTimes.has(key);
       });
-      
+
       if (withoutEntryTime.length > 0) {
         this.logger.warn(
           `[PositionTracker] ⚠️ ${withoutEntryTime.length} position(s) have NO entry time (external purchases?): ${withoutEntryTime.map((p) => `${p.tokenId.slice(0, 8)}...${p.pnlPct >= 0 ? "+" : ""}${p.pnlPct.toFixed(1)}%`).join(", ")}`,
@@ -328,6 +328,74 @@ export class PositionTracker {
   }
 
   /**
+   * Get positions that are candidates for liquidation when funds are insufficient.
+   * Used by Smart Hedging to determine what positions to sell to free up funds
+   * for hedging other positions.
+   *
+   * Returns active losing positions sorted by loss percentage (worst losses first),
+   * filtered to only include positions with valid side info (required for selling).
+   *
+   * @param minLossPct - Minimum loss percentage to consider for liquidation (default: 10)
+   * @param minHoldSeconds - Minimum hold time in seconds before a position can be liquidated (default: 60)
+   * @returns Array of positions suitable for liquidation, sorted by worst loss first
+   */
+  getLiquidationCandidates(minLossPct = 10, minHoldSeconds = 60): Position[] {
+    const now = Date.now();
+
+    return (
+      this.getActiveLosingPositions()
+        .filter((pos) => {
+          // Must have valid side info for selling
+          if (!pos.side || pos.side.trim() === "") {
+            return false;
+          }
+
+          // Must meet minimum loss threshold
+          if (Math.abs(pos.pnlPct) < minLossPct) {
+            return false;
+          }
+
+          // Must have been held for minimum time (prevent immediate sells on new positions)
+          const entryTime = this.getPositionEntryTime(
+            pos.marketId,
+            pos.tokenId,
+          );
+          if (entryTime) {
+            const holdSeconds = (now - entryTime) / 1000;
+            if (holdSeconds < minHoldSeconds) {
+              return false;
+            }
+          }
+          // If no entry time, be conservative and include it (may be externally acquired)
+
+          return true;
+        })
+        // Sort by worst loss first (most negative pnlPct)
+        .sort((a, b) => a.pnlPct - b.pnlPct)
+    );
+  }
+
+  /**
+   * Get the total current value (in USD) of positions that could be liquidated.
+   * This represents the approximate funds that could be recovered by liquidating
+   * losing positions.
+   *
+   * @param minLossPct - Minimum loss percentage to consider for liquidation (default: 10)
+   * @param minHoldSeconds - Minimum hold time before a position can be liquidated (default: 60)
+   * @returns Total USD value that could be recovered from liquidation candidates
+   */
+  getLiquidationCandidatesValue(minLossPct = 10, minHoldSeconds = 60): number {
+    const candidates = this.getLiquidationCandidates(
+      minLossPct,
+      minHoldSeconds,
+    );
+    return candidates.reduce(
+      (total, pos) => total + pos.size * pos.currentPrice,
+      0,
+    );
+  }
+
+  /**
    * Get a summary of position counts for logging
    * Provides consistent breakdown across all strategies
    */
@@ -510,7 +578,8 @@ export class PositionTracker {
                     // First try orderbook
                     if (!this.missingOrderbooks.has(tokenId)) {
                       try {
-                        const orderbook = await this.client.getOrderBook(tokenId);
+                        const orderbook =
+                          await this.client.getOrderBook(tokenId);
                         if (orderbook.bids?.[0] && orderbook.asks?.[0]) {
                           const bestBid = parseFloat(orderbook.bids[0].price);
                           const bestAsk = parseFloat(orderbook.asks[0].price);
@@ -555,7 +624,8 @@ export class PositionTracker {
                   // Normalize both strings for comparison (case-insensitive, trimmed)
                   const normalizedSide = side.toLowerCase().trim();
                   const normalizedWinner = winningOutcome.toLowerCase().trim();
-                  currentPrice = normalizedSide === normalizedWinner ? 1.0 : 0.0;
+                  currentPrice =
+                    normalizedSide === normalizedWinner ? 1.0 : 0.0;
                   resolvedCount++;
 
                   // Only log on first resolution (not cached) to reduce noise
@@ -628,7 +698,8 @@ export class PositionTracker {
               let finalRedeemable = isRedeemable;
               if (
                 !isRedeemable &&
-                (currentPrice >= PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
+                (currentPrice >=
+                  PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
                   currentPrice <= PositionTracker.RESOLVED_PRICE_LOW_THRESHOLD)
               ) {
                 // Price suggests market is resolved - verify with Gamma API
@@ -640,7 +711,8 @@ export class PositionTracker {
                   // Normalize both strings for comparison (case-insensitive, trimmed)
                   const normalizedSide = side.toLowerCase().trim();
                   const normalizedWinner = winningOutcome.toLowerCase().trim();
-                  currentPrice = normalizedSide === normalizedWinner ? 1.0 : 0.0;
+                  currentPrice =
+                    normalizedSide === normalizedWinner ? 1.0 : 0.0;
                   resolvedCount++;
                   activeCount--; // Was counted as active, now resolved
                   this.logger.info(
@@ -758,7 +830,8 @@ export class PositionTracker {
           this.lastLoggedPnlCounts.redeemable !== redeemablePositions.length;
         const shouldLogPnlSummary =
           countsChanged ||
-          now - this.lastPnlSummaryLogAt >= PositionTracker.PNL_SUMMARY_LOG_INTERVAL_MS;
+          now - this.lastPnlSummaryLogAt >=
+            PositionTracker.PNL_SUMMARY_LOG_INTERVAL_MS;
 
         if (shouldLogPnlSummary) {
           this.lastPnlSummaryLogAt = now;
@@ -1237,10 +1310,9 @@ export class PositionTracker {
         // TRADES_ENDPOINT already includes ?user=, so we use & for additional params
         const tradesUrl = `${POLYMARKET_API.TRADES_ENDPOINT(walletAddress)}&side=BUY&limit=${PositionTracker.TRADES_PAGE_LIMIT}&offset=${offset}`;
 
-        const trades = await httpGet<TradeItem[]>(
-          tradesUrl,
-          { timeout: PositionTracker.API_TIMEOUT_MS },
-        );
+        const trades = await httpGet<TradeItem[]>(tradesUrl, {
+          timeout: PositionTracker.API_TIMEOUT_MS,
+        });
 
         // Stop if no more trades
         if (!trades || trades.length === 0) {
@@ -1299,7 +1371,9 @@ export class PositionTracker {
       }
 
       if (totalTrades === 0) {
-        this.logger.info("[PositionTracker] No purchase history found in wallet");
+        this.logger.info(
+          "[PositionTracker] No purchase history found in wallet",
+        );
         this.historicalEntryTimesLoaded = true;
         return;
       }

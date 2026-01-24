@@ -245,7 +245,7 @@ export class OrderSubmissionController {
       const reason = normalizeReason(
         extractReason(response) || "order_rejected",
       );
-      
+
       // Check for cooldownUntil in the response and cache it
       const cooldownUntil = extractCooldownUntil(response);
       if (cooldownUntil && params.tokenId && params.side) {
@@ -255,7 +255,7 @@ export class OrderSubmissionController {
           `[CLOB] Hard cooldown set: ${params.side} on token ${params.tokenId.slice(0, 8)}... until ${new Date(cooldownUntil).toISOString()}`,
         );
       }
-      
+
       if (statusCode === 400 && isBalanceOrAllowanceReason(reason)) {
         this.applyBalanceCooldown(
           now,
@@ -297,7 +297,7 @@ export class OrderSubmissionController {
       }
 
       const reason = normalizeReason(extractReason(error) || "request_error");
-      
+
       // Check for cooldownUntil in the error response and cache it
       const cooldownUntil = extractCooldownUntil(error);
       if (cooldownUntil && params.tokenId && params.side) {
@@ -307,7 +307,7 @@ export class OrderSubmissionController {
           `[CLOB] Hard cooldown set: ${params.side} on token ${params.tokenId.slice(0, 8)}... until ${new Date(cooldownUntil).toISOString()}`,
         );
       }
-      
+
       if (statusCode === 400 && isBalanceOrAllowanceReason(reason)) {
         this.applyBalanceCooldown(
           now,
@@ -400,7 +400,9 @@ export class OrderSubmissionController {
       const hardCooldownUntil = this.hardCooldownCache.get(hardCooldownKey);
       if (hardCooldownUntil) {
         if (params.now < hardCooldownUntil) {
-          const remainingSec = Math.ceil((hardCooldownUntil - params.now) / 1000);
+          const remainingSec = Math.ceil(
+            (hardCooldownUntil - params.now) / 1000,
+          );
           params.logger.warn(
             `[CLOB] Order skipped (COOLDOWN_ACTIVE): ${params.side} on token ${params.tokenId.slice(0, 8)}... blocked for ${remainingSec}s (server-imposed cooldown)`,
           );
@@ -731,7 +733,9 @@ function extractCooldownUntil(response: unknown): number | undefined {
 
   // Helper to parse and normalize the value
   // Values < 1e12 are assumed to be in seconds, otherwise milliseconds
-  const parseValue = (value: number | string | undefined): number | undefined => {
+  const parseValue = (
+    value: number | string | undefined,
+  ): number | undefined => {
     if (value === undefined) return undefined;
     const parsed = typeof value === "string" ? parseInt(value, 10) : value;
     if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
@@ -740,7 +744,9 @@ function extractCooldownUntil(response: unknown): number | undefined {
   };
 
   // Check direct field
-  const directValue = parseValue(candidate?.cooldownUntil ?? candidate?.cooldown_until);
+  const directValue = parseValue(
+    candidate?.cooldownUntil ?? candidate?.cooldown_until,
+  );
   if (directValue !== undefined) {
     return directValue;
   }
@@ -748,7 +754,7 @@ function extractCooldownUntil(response: unknown): number | undefined {
   // Check nested response.data field
   const nestedValue = parseValue(
     candidate?.response?.data?.cooldownUntil ??
-    candidate?.response?.data?.cooldown_until
+      candidate?.response?.data?.cooldown_until,
   );
   if (nestedValue !== undefined) {
     return nestedValue;

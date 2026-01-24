@@ -542,8 +542,8 @@ test("frontrun allows low-price BUY when scalpLowPriceThreshold is set", async (
     proxyWallet: "0x" + "11".repeat(20),
     env: {
       ...baseEnv,
-      minBuyPrice: 0.50, // 50¢ minimum normally
-      scalpLowPriceThreshold: 0.20, // But allow scalping at ≤20¢
+      minBuyPrice: 0.5, // 50¢ minimum normally
+      scalpLowPriceThreshold: 0.2, // But allow scalping at ≤20¢
     },
     logger,
   });
@@ -610,8 +610,8 @@ test("frontrun blocks low-price BUY when price exceeds scalpLowPriceThreshold", 
     proxyWallet: "0x" + "11".repeat(20),
     env: {
       ...baseEnv,
-      minBuyPrice: 0.50, // 50¢ minimum
-      scalpLowPriceThreshold: 0.20, // Scalp threshold at 20¢
+      minBuyPrice: 0.5, // 50¢ minimum
+      scalpLowPriceThreshold: 0.2, // Scalp threshold at 20¢
     },
     logger,
   });
@@ -625,13 +625,15 @@ test("frontrun blocks low-price BUY when price exceeds scalpLowPriceThreshold", 
     outcome: "YES",
     side: "BUY",
     sizeUsd: 100,
-    price: 0.30, // 30¢ - above scalpLowPriceThreshold (20¢), below minBuyPrice (50¢)
+    price: 0.3, // 30¢ - above scalpLowPriceThreshold (20¢), below minBuyPrice (50¢)
     timestamp: Date.now(),
   });
 
   // Verify the order was blocked
   assert.ok(
-    logs.some((line) => line.includes("Skipping BUY - price 30.0¢ is below minimum 50.0¢")),
+    logs.some((line) =>
+      line.includes("Skipping BUY - price 30.0¢ is below minimum 50.0¢"),
+    ),
     "Should be blocked by minBuyPrice since price exceeds scalpLowPriceThreshold",
   );
   assert.equal(

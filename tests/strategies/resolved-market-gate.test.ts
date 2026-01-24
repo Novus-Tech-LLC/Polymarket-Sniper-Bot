@@ -349,7 +349,12 @@ describe("Resolved Market Strategy Gate", () => {
       cooldownCache.set("token-123:SELL", now + 60_000); // 60s cooldown
       cooldownCache.set("token-456:BUY", now + 10_000); // 10s cooldown
 
-      const buyResult = isCooldownActive("token-123", "BUY", cooldownCache, now);
+      const buyResult = isCooldownActive(
+        "token-123",
+        "BUY",
+        cooldownCache,
+        now,
+      );
       const sellResult = isCooldownActive(
         "token-123",
         "SELL",
@@ -363,9 +368,21 @@ describe("Resolved Market Strategy Gate", () => {
         now,
       );
 
-      assert.strictEqual(buyResult.blocked, true, "token-123:BUY should be blocked");
-      assert.strictEqual(sellResult.blocked, true, "token-123:SELL should be blocked");
-      assert.strictEqual(otherBuyResult.blocked, true, "token-456:BUY should be blocked");
+      assert.strictEqual(
+        buyResult.blocked,
+        true,
+        "token-123:BUY should be blocked",
+      );
+      assert.strictEqual(
+        sellResult.blocked,
+        true,
+        "token-123:SELL should be blocked",
+      );
+      assert.strictEqual(
+        otherBuyResult.blocked,
+        true,
+        "token-456:BUY should be blocked",
+      );
 
       // Verify different remaining times
       assert.ok(
@@ -461,7 +478,8 @@ describe("Entry Time Handling for External Purchases", () => {
     const meetsMinProfitUsd = profitablePosition.pnlUsd >= 0.5;
 
     // The fix: if position is profitable without entry time, allow selling
-    const shouldAllowSale = !hasEntryTime && meetsTargetProfit && meetsMinProfitUsd;
+    const shouldAllowSale =
+      !hasEntryTime && meetsTargetProfit && meetsMinProfitUsd;
 
     assert.strictEqual(
       shouldAllowSale,

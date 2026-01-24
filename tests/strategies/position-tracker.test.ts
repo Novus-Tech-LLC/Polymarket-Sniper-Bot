@@ -561,12 +561,12 @@ describe("PositionTracker Fallback Redemption Detection", () => {
     // Simulates fallback detection for high-price positions
     const currentPrice = 0.995; // 99.5¢
     const isRedeemable = false; // API didn't mark as redeemable
-    
+
     const shouldCheckResolution =
       !isRedeemable &&
       (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
         currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
-    
+
     assert.ok(
       shouldCheckResolution,
       "Position at 99.5¢ should trigger resolution check",
@@ -577,12 +577,12 @@ describe("PositionTracker Fallback Redemption Detection", () => {
     // Simulates fallback detection for low-price positions
     const currentPrice = 0.005; // 0.5¢
     const isRedeemable = false;
-    
+
     const shouldCheckResolution =
       !isRedeemable &&
       (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
         currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
-    
+
     assert.ok(
       shouldCheckResolution,
       "Position at 0.5¢ should trigger resolution check",
@@ -593,12 +593,12 @@ describe("PositionTracker Fallback Redemption Detection", () => {
     // Simulates normal active position
     const currentPrice = 0.5; // 50¢
     const isRedeemable = false;
-    
+
     const shouldCheckResolution =
       !isRedeemable &&
       (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
         currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
-    
+
     assert.ok(
       !shouldCheckResolution,
       "Position at 50¢ should NOT trigger resolution check",
@@ -609,12 +609,12 @@ describe("PositionTracker Fallback Redemption Detection", () => {
     // If API already marked as redeemable, skip fallback check
     const currentPrice = 1.0; // 100¢
     const isRedeemable = true; // API already marked as redeemable
-    
+
     const shouldCheckResolution =
       !isRedeemable &&
       (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
         currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
-    
+
     assert.ok(
       !shouldCheckResolution,
       "Already redeemable position should NOT trigger fallback check",
@@ -626,11 +626,11 @@ describe("PositionTracker Fallback Redemption Detection", () => {
     const isRedeemable = false;
     const winningOutcome = "YES"; // Gamma API returned winning outcome
     let finalRedeemable = isRedeemable;
-    
+
     if (winningOutcome !== null) {
       finalRedeemable = true;
     }
-    
+
     assert.strictEqual(
       finalRedeemable,
       true,
@@ -643,11 +643,11 @@ describe("PositionTracker Fallback Redemption Detection", () => {
     const side = "YES";
     const winningOutcome = "YES";
     let currentPrice = 0.995; // Was at 99.5¢
-    
+
     if (winningOutcome !== null) {
       currentPrice = side === winningOutcome ? 1.0 : 0.0;
     }
-    
+
     assert.strictEqual(
       currentPrice,
       1.0,
@@ -660,11 +660,11 @@ describe("PositionTracker Fallback Redemption Detection", () => {
     const side = "NO";
     const winningOutcome = "YES";
     let currentPrice = 0.005; // Was at 0.5¢
-    
+
     if (winningOutcome !== null) {
       currentPrice = side === winningOutcome ? 1.0 : 0.0;
     }
-    
+
     assert.strictEqual(
       currentPrice,
       0.0,
@@ -986,14 +986,34 @@ describe("Historical Trade Pagination Logic", () => {
 
     // Page 1 (most recent trades)
     const page1: TradeItem[] = [
-      { timestamp: 1700002000, conditionId: "market1", asset: "token1", side: "BUY" },
-      { timestamp: 1700001500, conditionId: "market2", asset: "token2", side: "BUY" },
+      {
+        timestamp: 1700002000,
+        conditionId: "market1",
+        asset: "token1",
+        side: "BUY",
+      },
+      {
+        timestamp: 1700001500,
+        conditionId: "market2",
+        asset: "token2",
+        side: "BUY",
+      },
     ];
 
     // Page 2 (older trades) - contains earlier BUY for market1
     const page2: TradeItem[] = [
-      { timestamp: 1700000000, conditionId: "market1", asset: "token1", side: "BUY" }, // Earlier!
-      { timestamp: 1700000500, conditionId: "market3", asset: "token3", side: "BUY" },
+      {
+        timestamp: 1700000000,
+        conditionId: "market1",
+        asset: "token1",
+        side: "BUY",
+      }, // Earlier!
+      {
+        timestamp: 1700000500,
+        conditionId: "market3",
+        asset: "token3",
+        side: "BUY",
+      },
     ];
 
     const earliestBuyTimes = new Map<string, number>();
@@ -1077,7 +1097,10 @@ describe("Historical Trade Pagination Logic", () => {
       pageCount1 >= MAX_PAGES &&
       totalTrades1 > 0 &&
       totalTrades1 % PAGE_LIMIT === 0;
-    assert.ok(shouldWarn1, "Should warn when max pages hit and last page was full");
+    assert.ok(
+      shouldWarn1,
+      "Should warn when max pages hit and last page was full",
+    );
 
     // Case 2: Hit max pages but last page was partial (no warning needed)
     const pageCount2 = MAX_PAGES;
@@ -1096,5 +1119,411 @@ describe("Historical Trade Pagination Logic", () => {
       totalTrades3 > 0 &&
       totalTrades3 % PAGE_LIMIT === 0;
     assert.ok(!shouldWarn3, "Should NOT warn when max pages not reached");
+  });
+});
+
+describe("Liquidation Candidates Logic", () => {
+  // Helper type to represent a position for testing
+  interface TestPosition {
+    marketId: string;
+    tokenId: string;
+    side: string;
+    size: number;
+    entryPrice: number;
+    currentPrice: number;
+    pnlPct: number;
+    pnlUsd: number;
+    redeemable?: boolean;
+  }
+
+  // Helper function to simulate the filtering logic in getLiquidationCandidates
+  function getLiquidationCandidates(
+    positions: TestPosition[],
+    entryTimes: Map<string, number>,
+    minLossPct: number,
+    minHoldSeconds: number,
+  ): TestPosition[] {
+    const now = Date.now();
+
+    return (
+      positions
+        .filter((pos) => {
+          // Must be active (not redeemable)
+          if (pos.redeemable) return false;
+
+          // Must be losing
+          if (pos.pnlPct >= 0) return false;
+
+          // Must have valid side info for selling
+          if (!pos.side || pos.side.trim() === "") return false;
+
+          // Must meet minimum loss threshold
+          if (Math.abs(pos.pnlPct) < minLossPct) return false;
+
+          // Must have been held for minimum time
+          const key = `${pos.marketId}-${pos.tokenId}`;
+          const entryTime = entryTimes.get(key);
+          if (entryTime) {
+            const holdSeconds = (now - entryTime) / 1000;
+            if (holdSeconds < minHoldSeconds) return false;
+          }
+
+          return true;
+        })
+        // Sort by worst loss first
+        .sort((a, b) => a.pnlPct - b.pnlPct)
+    );
+  }
+
+  test("Filters out profitable positions", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.6,
+        pnlPct: 20,
+        pnlUsd: 10,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.3,
+        pnlPct: -25,
+        pnlUsd: -5,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000); // 5 min ago
+    entryTimes.set("m2-t2", Date.now() - 300000); // 5 min ago
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should only include losing position",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include the losing position",
+    );
+  });
+
+  test("Filters out positions without valid side info", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -20,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "YES",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.25,
+        pnlPct: -37.5,
+        pnlUsd: -7.5,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000);
+    entryTimes.set("m2-t2", Date.now() - 300000);
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should only include position with valid side",
+    );
+    assert.strictEqual(
+      candidates[0].side,
+      "YES",
+      "Should include position with YES side",
+    );
+  });
+
+  test("Filters out positions below minimum loss threshold", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.48,
+        pnlPct: -4,
+        pnlUsd: -2,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.3,
+        pnlPct: -25,
+        pnlUsd: -5,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000);
+    entryTimes.set("m2-t2", Date.now() - 300000);
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should only include position above threshold",
+    );
+    assert.strictEqual(
+      candidates[0].pnlPct,
+      -25,
+      "Should include position with -25% loss",
+    );
+  });
+
+  test("Filters out positions held for less than minHoldSeconds", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -20,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.25,
+        pnlPct: -37.5,
+        pnlUsd: -7.5,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 30000); // 30 seconds ago (too recent)
+    entryTimes.set("m2-t2", Date.now() - 300000); // 5 min ago (OK)
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should only include position held long enough",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include the older position",
+    );
+  });
+
+  test("Filters out redeemable positions", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.0,
+        pnlPct: -100,
+        pnlUsd: -50,
+        redeemable: true,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.25,
+        pnlPct: -37.5,
+        pnlUsd: -7.5,
+        redeemable: false,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000);
+    entryTimes.set("m2-t2", Date.now() - 300000);
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should only include non-redeemable position",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include the active position",
+    );
+  });
+
+  test("Sorts candidates by worst loss first", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.4,
+        pnlPct: -20,
+        pnlUsd: -10,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.2,
+        pnlPct: -50,
+        pnlUsd: -10,
+      },
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "YES",
+        size: 75,
+        entryPrice: 0.6,
+        currentPrice: 0.42,
+        pnlPct: -30,
+        pnlUsd: -13.5,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000);
+    entryTimes.set("m2-t2", Date.now() - 300000);
+    entryTimes.set("m3-t3", Date.now() - 300000);
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    assert.strictEqual(
+      candidates.length,
+      3,
+      "Should include all three losing positions",
+    );
+    assert.strictEqual(
+      candidates[0].pnlPct,
+      -50,
+      "First should be worst loss (-50%)",
+    );
+    assert.strictEqual(candidates[1].pnlPct, -30, "Second should be -30%");
+    assert.strictEqual(candidates[2].pnlPct, -20, "Third should be -20%");
+  });
+
+  test("Returns empty array when no positions meet criteria", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.6,
+        pnlPct: 20,
+        pnlUsd: 10,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000);
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    assert.strictEqual(
+      candidates.length,
+      0,
+      "Should return empty array when no losing positions",
+    );
+  });
+
+  test("Calculates total liquidation value correctly", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -20,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.2,
+        pnlPct: -50,
+        pnlUsd: -10,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000);
+    entryTimes.set("m2-t2", Date.now() - 300000);
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    // Calculate total value
+    const totalValue = candidates.reduce(
+      (total, pos) => total + pos.size * pos.currentPrice,
+      0,
+    );
+
+    // m1: 100 * 0.3 = 30
+    // m2: 50 * 0.2 = 10
+    // Total: 40
+    assert.strictEqual(totalValue, 40, "Total liquidation value should be $40");
+  });
+
+  test("Includes positions without entry time (externally acquired)", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -20,
+      },
+    ];
+    const entryTimes = new Map<string, number>(); // No entry time for this position
+
+    const candidates = getLiquidationCandidates(positions, entryTimes, 10, 60);
+
+    // Position without entry time should still be included (conservative approach for externally acquired)
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should include position without entry time",
+    );
   });
 });

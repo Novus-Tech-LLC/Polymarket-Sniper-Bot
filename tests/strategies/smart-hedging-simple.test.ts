@@ -615,3 +615,315 @@ describe("Default Configuration Values", () => {
     );
   });
 });
+
+describe("Smart Hedging Liquidation Candidate Filtering", () => {
+  // Helper type to represent a position for testing
+  interface TestPosition {
+    marketId: string;
+    tokenId: string;
+    side: string;
+    size: number;
+    entryPrice: number;
+    currentPrice: number;
+    pnlPct: number;
+    pnlUsd: number;
+    redeemable?: boolean;
+  }
+
+  // Helper function to simulate the getLiquidationCandidates logic in smart hedging
+  function filterLiquidationCandidates(
+    positions: TestPosition[],
+    entryTimes: Map<string, number>,
+    hedgedPositions: Set<string>,
+    cooldownPositions: Map<string, number>,
+    config: {
+      triggerLossPct: number;
+      minHoldSeconds: number;
+    },
+  ): TestPosition[] {
+    const now = Date.now();
+
+    // First filter by basic criteria (like PositionTracker.getLiquidationCandidates)
+    const baseCandidates = positions
+      .filter((pos) => {
+        // Must be active (not redeemable)
+        if (pos.redeemable) return false;
+
+        // Must be losing
+        if (pos.pnlPct >= 0) return false;
+
+        // Must have valid side info
+        if (!pos.side || pos.side.trim() === "") return false;
+
+        // Must meet minimum loss threshold
+        if (Math.abs(pos.pnlPct) < config.triggerLossPct) return false;
+
+        // Must have been held for minimum time
+        const key = `${pos.marketId}-${pos.tokenId}`;
+        const entryTime = entryTimes.get(key);
+        if (entryTime) {
+          const holdSeconds = (now - entryTime) / 1000;
+          if (holdSeconds < config.minHoldSeconds) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => a.pnlPct - b.pnlPct);
+
+    // Then filter out already hedged and positions in cooldown
+    return baseCandidates.filter((pos) => {
+      const key = `${pos.marketId}-${pos.tokenId}`;
+
+      // Skip if already hedged
+      if (hedgedPositions.has(key)) return false;
+
+      // Skip if in cooldown
+      const cooldownUntil = cooldownPositions.get(key);
+      if (cooldownUntil && now < cooldownUntil) return false;
+
+      return true;
+    });
+  }
+
+  test("Excludes already hedged positions", () => {
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -20,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.2,
+        pnlPct: -50,
+        pnlUsd: -10,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", Date.now() - 300000);
+    entryTimes.set("m2-t2", Date.now() - 300000);
+
+    const hedgedPositions = new Set<string>(["m1-t1"]); // m1 already hedged
+    const cooldownPositions = new Map<string, number>();
+
+    const candidates = filterLiquidationCandidates(
+      positions,
+      entryTimes,
+      hedgedPositions,
+      cooldownPositions,
+      { triggerLossPct: 20, minHoldSeconds: 60 },
+    );
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should exclude already hedged position",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should only include non-hedged position",
+    );
+  });
+
+  test("Excludes positions in cooldown", () => {
+    const now = Date.now();
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -20,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.2,
+        pnlPct: -50,
+        pnlUsd: -10,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", now - 300000);
+    entryTimes.set("m2-t2", now - 300000);
+
+    const hedgedPositions = new Set<string>();
+    const cooldownPositions = new Map<string, number>();
+    cooldownPositions.set("m2-t2", now + 300000); // m2 in cooldown for 5 more minutes
+
+    const candidates = filterLiquidationCandidates(
+      positions,
+      entryTimes,
+      hedgedPositions,
+      cooldownPositions,
+      { triggerLossPct: 20, minHoldSeconds: 60 },
+    );
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should exclude position in cooldown",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m1",
+      "Should only include non-cooldown position",
+    );
+  });
+
+  test("Includes positions with expired cooldown", () => {
+    const now = Date.now();
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -20,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", now - 300000);
+
+    const hedgedPositions = new Set<string>();
+    const cooldownPositions = new Map<string, number>();
+    cooldownPositions.set("m1-t1", now - 1000); // Cooldown expired 1 second ago
+
+    const candidates = filterLiquidationCandidates(
+      positions,
+      entryTimes,
+      hedgedPositions,
+      cooldownPositions,
+      { triggerLossPct: 20, minHoldSeconds: 60 },
+    );
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should include position with expired cooldown",
+    );
+  });
+
+  test("Combines all filters correctly", () => {
+    const now = Date.now();
+    const positions: TestPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.6,
+        pnlPct: 20,
+        pnlUsd: 10,
+      }, // Profitable - skip
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.2,
+        pnlPct: -50,
+        pnlUsd: -10,
+      }, // Hedged - skip
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "YES",
+        size: 75,
+        entryPrice: 0.6,
+        currentPrice: 0.42,
+        pnlPct: -30,
+        pnlUsd: -13.5,
+      }, // In cooldown - skip
+      {
+        marketId: "m4",
+        tokenId: "t4",
+        side: "",
+        size: 40,
+        entryPrice: 0.5,
+        currentPrice: 0.3,
+        pnlPct: -40,
+        pnlUsd: -8,
+      }, // No side - skip
+      {
+        marketId: "m5",
+        tokenId: "t5",
+        side: "NO",
+        size: 60,
+        entryPrice: 0.7,
+        currentPrice: 0.35,
+        pnlPct: -50,
+        pnlUsd: -21,
+      }, // Valid candidate
+      {
+        marketId: "m6",
+        tokenId: "t6",
+        side: "YES",
+        size: 30,
+        entryPrice: 0.3,
+        currentPrice: 0.27,
+        pnlPct: -10,
+        pnlUsd: -0.9,
+      }, // Below threshold - skip
+      {
+        marketId: "m7",
+        tokenId: "t7",
+        side: "NO",
+        size: 80,
+        entryPrice: 0.8,
+        currentPrice: 0.4,
+        pnlPct: -50,
+        pnlUsd: -32,
+        redeemable: true,
+      }, // Redeemable - skip
+    ];
+    const entryTimes = new Map<string, number>();
+    positions.forEach((p) =>
+      entryTimes.set(`${p.marketId}-${p.tokenId}`, now - 300000),
+    );
+
+    const hedgedPositions = new Set<string>(["m2-t2"]);
+    const cooldownPositions = new Map<string, number>();
+    cooldownPositions.set("m3-t3", now + 300000);
+
+    const candidates = filterLiquidationCandidates(
+      positions,
+      entryTimes,
+      hedgedPositions,
+      cooldownPositions,
+      { triggerLossPct: 20, minHoldSeconds: 60 },
+    );
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should only include one valid candidate",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m5",
+      "Should be the valid losing position",
+    );
+  });
+});
