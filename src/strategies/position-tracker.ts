@@ -1700,11 +1700,21 @@ export class PositionTracker {
       // NEW: Check if the collapse is due to orderbook failures (404, empty book, etc.)
       // If ALL filtered positions are due to enrichment/orderbook failures, this is NOT a bug
       // but rather a temporary network/API issue. Accept the snapshot with UNKNOWN pnl positions.
-      const isOrderbookFailureCase = 
-        reasonsStr.includes("ENRICH_FAILED") ||
-        reasonsStr.includes("NO_BOOK") ||
-        reasonsStr.includes("BOOK_404") ||
-        reasonsStr.includes("PRICING_FETCH_FAILED");
+      // Check the actual classification reasons Map for more reliable detection.
+      const classificationReasons = newSnap.classificationReasons;
+      const hasOrderbookFailureReasons = classificationReasons && (
+        classificationReasons.has("ENRICH_FAILED") ||
+        classificationReasons.has("NO_BOOK") ||
+        classificationReasons.has("BOOK_404") ||
+        classificationReasons.has("PRICING_FETCH_FAILED")
+      );
+      // Fallback to string matching for backward compatibility (if Map not available)
+      const isOrderbookFailureCase = hasOrderbookFailureReasons || (
+        reasonsStr.includes("ENRICH_FAILED=") ||
+        reasonsStr.includes("NO_BOOK=") ||
+        reasonsStr.includes("BOOK_404=") ||
+        reasonsStr.includes("PRICING_FETCH_FAILED=")
+      );
 
       if (this.allowBootstrapAfterAutoRecovery) {
         // Bootstrap mode: log and accept the snapshot despite ACTIVE_COLLAPSE_BUG
@@ -2792,7 +2802,12 @@ export class PositionTracker {
               let cacheAgeMs: number | undefined;
 
               // === NEW: Book status tracking (Jan 2025 - Decouple from snapshot) ===
-              // Track orderbook availability separately from position state
+              // Track orderbook availability separately from position state.
+              // SAFE DEFAULTS: Initialize to "not tradable" state.
+              // - bookStatus = NOT_FETCHED: We haven't attempted to fetch the orderbook yet
+              // - executionStatus = NOT_TRADABLE_ON_CLOB: Default to non-tradable until proven otherwise
+              // - execPriceTrusted = false: Don't trust the executable price until we have valid orderbook data
+              // These will be updated to AVAILABLE/TRADABLE/true if orderbook fetch succeeds.
               let bookStatus: BookStatus = "NOT_FETCHED";
               let executionStatus: ExecutionStatus = "NOT_TRADABLE_ON_CLOB";
               let execPriceTrusted = false;

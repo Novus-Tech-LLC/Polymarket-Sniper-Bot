@@ -4547,9 +4547,13 @@ describe("Orderbook Decoupling: ACTIVE_COLLAPSE_BUG Validation", () => {
     const finalActiveCount = 0;
     
     // Classification reasons indicate orderbook failures
+    // Using named constants for test data clarity
+    const ENRICH_FAILED_COUNT = 8;  // Enrichment failed due to 404
+    const NO_BOOK_COUNT = 2;        // Empty orderbook
+    
     const classificationReasons = new Map<string, number>();
-    classificationReasons.set("ENRICH_FAILED", 8);  // Enrichment failed due to 404
-    classificationReasons.set("NO_BOOK", 2);        // Empty orderbook
+    classificationReasons.set("ENRICH_FAILED", ENRICH_FAILED_COUNT);
+    classificationReasons.set("NO_BOOK", NO_BOOK_COUNT);
     
     // Build reasons string
     const reasonCounts: string[] = [];
@@ -4558,12 +4562,21 @@ describe("Orderbook Decoupling: ACTIVE_COLLAPSE_BUG Validation", () => {
     }
     const reasonsStr = reasonCounts.join(", ");
     
-    // Check for orderbook failure case
-    const isOrderbookFailureCase = 
-      reasonsStr.includes("ENRICH_FAILED") ||
-      reasonsStr.includes("NO_BOOK") ||
-      reasonsStr.includes("BOOK_404") ||
-      reasonsStr.includes("PRICING_FETCH_FAILED");
+    // Check for orderbook failure case using Map keys (more reliable than string matching)
+    const hasOrderbookFailureReasons = 
+      classificationReasons.has("ENRICH_FAILED") ||
+      classificationReasons.has("NO_BOOK") ||
+      classificationReasons.has("BOOK_404") ||
+      classificationReasons.has("PRICING_FETCH_FAILED");
+    
+    // Fallback string matching for completeness
+    const isOrderbookFailureFromString = 
+      reasonsStr.includes("ENRICH_FAILED=") ||
+      reasonsStr.includes("NO_BOOK=") ||
+      reasonsStr.includes("BOOK_404=") ||
+      reasonsStr.includes("PRICING_FETCH_FAILED=");
+    
+    const isOrderbookFailureCase = hasOrderbookFailureReasons || isOrderbookFailureFromString;
     
     // This is the bug condition
     const isActiveCollapseBugCondition = rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0;
@@ -4670,6 +4683,7 @@ describe("Orderbook Decoupling: P&L Calculation Source", () => {
       currentBidPrice: undefined, // No orderbook
       bookStatus: "NO_BOOK_404" as const,
       executionStatus: "NOT_TRADABLE_ON_CLOB" as const,
+      execPriceTrusted: false, // Exec price is not trusted without orderbook
     };
 
     // P&L is trusted because Data-API provided it
@@ -4677,7 +4691,7 @@ describe("Orderbook Decoupling: P&L Calculation Source", () => {
     assert.strictEqual(position.pnlSource, "DATA_API", "P&L source should be DATA_API");
     
     // But execution is not trusted
-    assert.strictEqual(position.execPriceTrusted, undefined, "Exec price trust not set");
+    assert.strictEqual(position.execPriceTrusted, false, "Exec price should NOT be trusted");
     assert.strictEqual(position.executionStatus, "NOT_TRADABLE_ON_CLOB", "Cannot execute without orderbook");
   });
 
