@@ -38,6 +38,15 @@ export interface AutoRedeemConfig {
 }
 
 /**
+ * Redemption skip reason for detailed tracking
+ */
+export type RedemptionSkipReason =
+  | "NOT_RESOLVED_ONCHAIN" // payoutDenominator == 0
+  | "BELOW_MIN_VALUE" // position value < minPositionUsd
+  | "TOO_MANY_FAILURES" // exceeded MAX_REDEMPTION_FAILURES
+  | "IN_COOLDOWN"; // still in retry cooldown
+
+/**
  * Result of a redemption attempt
  */
 export interface RedemptionResult {
@@ -50,6 +59,10 @@ export interface RedemptionResult {
   isRateLimited?: boolean;
   isNotResolvedYet?: boolean;
   isNonceError?: boolean;
+  /** Reason why redemption was skipped (only set when skipped) */
+  skippedReason?: RedemptionSkipReason;
+  /** Position value in USD (for reporting) */
+  positionValueUsd?: number;
 }
 
 /**
@@ -100,6 +113,13 @@ export class AutoRedeemStrategy {
   >();
   private static readonly REDEMPTION_RETRY_COOLDOWN_MS = 5 * 60 * 1000; // 5 min
   private static readonly MAX_REDEMPTION_FAILURES = 3;
+
+  // Cache for on-chain payoutDenominator checks to minimize RPC calls
+  private payoutDenominatorCache = new Map<
+    string,
+    { resolved: boolean; checkedAt: number }
+  >();
+  private static readonly PAYOUT_DENOM_CACHE_TTL_MS = 300_000; // 5 minutes
 
   constructor(options: AutoRedeemStrategyOptions) {
     this.client = options.client;
@@ -180,31 +200,227 @@ export class AutoRedeemStrategy {
 
   /**
    * Force redeem all positions (for CLI use)
+   * Includes on-chain preflight checks to avoid failed redemptions.
+   *
+   * @param includeLosses - If true, includes $0 positions (losses). Default is false.
+   * @returns Array of redemption results with detailed skip reasons
    */
-  async forceRedeemAll(): Promise<RedemptionResult[]> {
-    const redeemablePositions = this.getRedeemablePositions();
+  async forceRedeemAll(includeLosses = false): Promise<RedemptionResult[]> {
+    // Get all redeemable positions first (before min value filter)
+    const allRedeemable = this.positionTracker
+      .getPositions()
+      .filter((pos) => pos.redeemable === true);
 
-    if (redeemablePositions.length === 0) {
+    if (allRedeemable.length === 0) {
       this.logger.info("[AutoRedeem] No redeemable positions found");
       return [];
     }
 
+    this.logger.info(
+      `[AutoRedeem] Found ${allRedeemable.length} redeemable position(s), checking on-chain resolution...`,
+    );
+
     const results: RedemptionResult[] = [];
 
-    for (const position of redeemablePositions) {
+    for (const position of allRedeemable) {
+      const positionValue = position.size * position.currentPrice;
+
+      // Check min value filter:
+      // - If includeLosses is false (default): skip $0 positions (losers) AND positions below minPositionUsd
+      // - If includeLosses is true: only skip if below minPositionUsd (allows $0 losers to be redeemed for cleanup)
+      //
+      // A $0 loser is a position where currentPrice ≈ 0 (the outcome lost), so positionValue ≈ 0.
+      // Redeeming $0 losers costs gas but returns nothing - usually pointless.
+      const isZeroValueLoser = positionValue < 0.001; // Less than 0.1 cent is effectively $0
+      const isBelowMinValue = positionValue < this.config.minPositionUsd;
+
+      if (!includeLosses && isZeroValueLoser) {
+        this.logger.info(
+          `[AutoRedeem] ⏭️ SKIPPED ($0 loser): ${position.marketId.slice(0, 16)}... | Value: $${positionValue.toFixed(4)} (use --include-losses to redeem)`,
+        );
+        results.push({
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          skippedReason: "BELOW_MIN_VALUE",
+          positionValueUsd: positionValue,
+        });
+        continue;
+      }
+
+      if (isBelowMinValue && !isZeroValueLoser) {
+        this.logger.info(
+          `[AutoRedeem] ⏭️ SKIPPED (below min value): ${position.marketId.slice(0, 16)}... | Value: $${positionValue.toFixed(4)} < $${this.config.minPositionUsd}`,
+        );
+        results.push({
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          skippedReason: "BELOW_MIN_VALUE",
+          positionValueUsd: positionValue,
+        });
+        continue;
+      }
+
+      // On-chain preflight check: verify payoutDenominator > 0 before sending tx
+      const isOnChainResolved = await this.checkOnChainResolved(
+        position.marketId,
+      );
+
+      if (!isOnChainResolved) {
+        this.logger.info(
+          `[AutoRedeem] ⏭️ SKIPPED (not resolved on-chain): ${position.marketId.slice(0, 16)}... | Value: $${positionValue.toFixed(2)}`,
+        );
+        results.push({
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          skippedReason: "NOT_RESOLVED_ONCHAIN",
+          positionValueUsd: positionValue,
+          isNotResolvedYet: true,
+        });
+        continue;
+      }
+
+      // Position is on-chain resolved, proceed with redemption
       const result = await this.redeemPositionWithRetry(position);
+      result.positionValueUsd = positionValue;
       results.push(result);
 
       // Longer delay between redemptions
-      if (
-        redeemablePositions.indexOf(position) <
-        redeemablePositions.length - 1
-      ) {
+      if (allRedeemable.indexOf(position) < allRedeemable.length - 1) {
         await this.sleep(AutoRedeemStrategy.REDEMPTION_DELAY_MS);
       }
     }
 
+    // Log summary
+    this.logRedemptionSummary(results);
+
     return results;
+  }
+
+  /**
+   * Log a detailed redemption summary with categorized counts
+   */
+  private logRedemptionSummary(results: RedemptionResult[]): void {
+    const redeemed = results.filter((r) => r.success);
+    const failed = results.filter((r) => !r.success && !r.skippedReason);
+    const skippedNotResolved = results.filter(
+      (r) => r.skippedReason === "NOT_RESOLVED_ONCHAIN",
+    );
+    const skippedBelowMin = results.filter(
+      (r) => r.skippedReason === "BELOW_MIN_VALUE",
+    );
+
+    this.logger.info(`[AutoRedeem] 📊 Redemption Summary:`);
+    this.logger.info(`  ✅ Redeemed: ${redeemed.length}`);
+    this.logger.info(
+      `  ⏭️ Skipped (not resolved on-chain): ${skippedNotResolved.length}`,
+    );
+    this.logger.info(
+      `  ⏭️ Skipped (below min value): ${skippedBelowMin.length}`,
+    );
+    this.logger.info(`  ❌ Failed: ${failed.length}`);
+  }
+
+  /**
+   * Check on-chain payoutDenominator for a conditionId.
+   * Returns true if payoutDenominator > 0, indicating the market is resolved on-chain.
+   *
+   * Uses caching to minimize RPC calls.
+   *
+   * @param conditionId - The conditionId (same as marketId in Polymarket)
+   * @returns true if resolved on-chain (payoutDenominator > 0), false otherwise
+   */
+  private async checkOnChainResolved(conditionId: string): Promise<boolean> {
+    // Validate conditionId format (bytes32)
+    if (
+      !conditionId?.startsWith("0x") ||
+      conditionId.length !== AutoRedeemStrategy.BYTES32_HEX_LENGTH
+    ) {
+      this.logger.debug(
+        `[AutoRedeem] Invalid conditionId format: ${conditionId?.slice(0, 20)}...`,
+      );
+      return false;
+    }
+
+    // Check cache first
+    const cached = this.payoutDenominatorCache.get(conditionId);
+    const now = Date.now();
+    if (
+      cached &&
+      now - cached.checkedAt < AutoRedeemStrategy.PAYOUT_DENOM_CACHE_TTL_MS
+    ) {
+      return cached.resolved;
+    }
+
+    try {
+      const wallet = (this.client as { wallet?: Wallet }).wallet;
+      if (!wallet?.provider) {
+        this.logger.debug(
+          "[AutoRedeem] No wallet/provider available for on-chain check",
+        );
+        return false;
+      }
+
+      const contracts = resolvePolymarketContracts();
+      const ctfAddress = contracts.ctfAddress;
+      if (!ctfAddress) {
+        this.logger.debug("[AutoRedeem] CTF contract address not configured");
+        return false;
+      }
+
+      // Create CTF contract instance (read-only, using provider)
+      const ctfContract = new Contract(ctfAddress, CTF_ABI, wallet.provider);
+
+      // Call payoutDenominator view function
+      const denominator = (await ctfContract.payoutDenominator(
+        conditionId,
+      )) as bigint;
+
+      const isResolved = denominator > 0n;
+
+      // Cache the result
+      this.payoutDenominatorCache.set(conditionId, {
+        resolved: isResolved,
+        checkedAt: now,
+      });
+
+      // Clean up old cache entries if needed (prevent unbounded growth)
+      if (this.payoutDenominatorCache.size > 1000) {
+        const entriesToDelete: string[] = [];
+        for (const [key, entry] of this.payoutDenominatorCache) {
+          if (
+            now - entry.checkedAt >
+            AutoRedeemStrategy.PAYOUT_DENOM_CACHE_TTL_MS * 2
+          ) {
+            entriesToDelete.push(key);
+          }
+        }
+        for (const key of entriesToDelete) {
+          this.payoutDenominatorCache.delete(key);
+        }
+      }
+
+      if (isResolved) {
+        this.logger.debug(
+          `[AutoRedeem] 🔗 ON-CHAIN RESOLVED: conditionId=${conditionId.slice(0, 16)}... payoutDenominator=${denominator}`,
+        );
+      } else {
+        this.logger.debug(
+          `[AutoRedeem] ⏳ NOT RESOLVED ON-CHAIN: conditionId=${conditionId.slice(0, 16)}... payoutDenominator=0`,
+        );
+      }
+
+      return isResolved;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(
+        `[AutoRedeem] checkOnChainResolved failed for ${conditionId.slice(0, 16)}...: ${errMsg}`,
+      );
+      // On error, don't cache - return false to be safe (don't send tx)
+      return false;
+    }
   }
 
   /**

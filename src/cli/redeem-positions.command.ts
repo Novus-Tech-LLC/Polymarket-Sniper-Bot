@@ -2,7 +2,11 @@
  * CLI command to manually redeem resolved (winning/losing) positions
  *
  * Usage:
- *   npx ts-node src/cli/redeem-positions.command.ts
+ *   npx ts-node src/cli/redeem-positions.command.ts [--include-losses] [--min-value=X]
+ *
+ * Options:
+ *   --include-losses  Include $0 positions (losers) in redemption. Default: false
+ *   --min-value=X     Minimum position value in USD to redeem. Default: 0.01
  *
  * Environment variables:
  *   PRIVATE_KEY - Required: Your wallet private key
@@ -11,7 +15,13 @@
  * This command:
  *   1. Fetches all your positions from Polymarket
  *   2. Identifies positions marked as redeemable (resolved markets)
- *   3. Calls the CTF contract to redeem them for USDC
+ *   3. Performs on-chain preflight check (payoutDenominator > 0)
+ *   4. Calls the CTF contract to redeem them for USDC
+ *
+ * By default:
+ *   - $0 losers are SKIPPED (costs gas, returns nothing)
+ *   - Positions not yet resolved on-chain are SKIPPED
+ *   - Use --include-losses to redeem $0 positions for cleanup
  */
 
 import "dotenv/config";
@@ -20,9 +30,54 @@ import { ConsoleLogger } from "../utils/logger.util";
 import { PositionTracker } from "../strategies/position-tracker";
 import { AutoRedeemStrategy } from "../strategies/auto-redeem";
 
+// Parse CLI arguments
+function parseArgs(): { includeLosses: boolean; minValueUsd: number } {
+  const args = process.argv.slice(2);
+  let includeLosses = false;
+  let minValueUsd = 0.01; // Default: skip positions worth less than 1 cent
+
+  for (const arg of args) {
+    if (arg === "--include-losses") {
+      includeLosses = true;
+    } else if (arg.startsWith("--min-value=")) {
+      const value = parseFloat(arg.split("=")[1]);
+      if (!isNaN(value) && value >= 0) {
+        minValueUsd = value;
+      }
+    } else if (arg === "--help" || arg === "-h") {
+      console.log(`
+Usage: npx ts-node src/cli/redeem-positions.command.ts [options]
+
+Options:
+  --include-losses    Include $0 positions (losers) in redemption
+  --min-value=X       Minimum position value in USD to redeem (default: 0.01)
+  --help, -h          Show this help message
+
+Examples:
+  # Redeem only winning positions worth at least $0.01
+  npx ts-node src/cli/redeem-positions.command.ts
+
+  # Include $0 losers (cleanup mode)
+  npx ts-node src/cli/redeem-positions.command.ts --include-losses
+
+  # Only redeem positions worth at least $1
+  npx ts-node src/cli/redeem-positions.command.ts --min-value=1
+`);
+      process.exit(0);
+    }
+  }
+
+  return { includeLosses, minValueUsd };
+}
+
 async function run(): Promise<void> {
+  const { includeLosses, minValueUsd } = parseArgs();
+
   const logger = new ConsoleLogger();
   logger.info("🔄 Starting position redemption...\n");
+  logger.info(
+    `📋 Options: includeLosses=${includeLosses}, minValueUsd=$${minValueUsd}\n`,
+  );
 
   // Authenticate
   logger.info("🔐 Authenticating with Polymarket...");
@@ -65,13 +120,24 @@ async function run(): Promise<void> {
     process.exit(0);
   }
 
-  // Display redeemable positions
+  // Display redeemable positions with win/loss categorization
+  const winners = redeemablePositions.filter((p) => p.currentPrice >= 0.5);
+  const losers = redeemablePositions.filter((p) => p.currentPrice < 0.5);
+
   logger.info("📋 Redeemable positions found:");
+  logger.info(`   Winners: ${winners.length}, Losers: ${losers.length}\n`);
+
   for (const pos of redeemablePositions) {
     const value = pos.size * pos.currentPrice;
     const winLoss = pos.currentPrice >= 0.5 ? "WIN" : "LOSS";
+    const willSkip =
+      !includeLosses && value < 0.001
+        ? " [WILL SKIP - $0 loser]"
+        : value < minValueUsd
+          ? " [WILL SKIP - below min]"
+          : "";
     logger.info(
-      `  - Market: ${pos.marketId.substring(0, 16)}... | Side: ${pos.side} | Size: ${pos.size.toFixed(2)} | Value: $${value.toFixed(2)} (${winLoss})`,
+      `  - Market: ${pos.marketId.substring(0, 16)}... | Side: ${pos.side} | Size: ${pos.size.toFixed(2)} | Value: $${value.toFixed(4)} (${winLoss})${willSkip}`,
     );
   }
   logger.info("");
@@ -83,28 +149,49 @@ async function run(): Promise<void> {
     positionTracker,
     config: {
       enabled: true,
-      minPositionUsd: 0, // Redeem all positions (no minimum)
+      minPositionUsd: minValueUsd,
       checkIntervalMs: 30000, // Not used in CLI, but required by type
     },
   });
 
-  // Execute redemptions
-  logger.info("🔄 Executing redemptions...\n");
-  const results = await autoRedeemStrategy.forceRedeemAll();
+  // Execute redemptions with on-chain preflight checks
+  logger.info("🔄 Executing redemptions (with on-chain preflight checks)...\n");
+  const results = await autoRedeemStrategy.forceRedeemAll(includeLosses);
 
-  // Summary
+  // Categorized summary
   const successful = results.filter((r) => r.success);
-  const failed = results.filter((r) => !r.success);
+  const skippedNotResolved = results.filter(
+    (r) => r.skippedReason === "NOT_RESOLVED_ONCHAIN",
+  );
+  const skippedBelowMin = results.filter(
+    (r) => r.skippedReason === "BELOW_MIN_VALUE",
+  );
+  const failed = results.filter((r) => !r.success && !r.skippedReason);
 
-  logger.info("\n📊 Redemption Summary:");
-  logger.info(`  ✅ Successful: ${successful.length}`);
-  logger.info(`  ❌ Failed: ${failed.length}`);
-
+  // Detailed results
   if (successful.length > 0) {
     logger.info("\n✅ Successfully redeemed:");
     for (const result of successful) {
       logger.info(
-        `  - Market: ${result.marketId.substring(0, 16)}... | Amount: $${result.amountRedeemed ?? "?"} | TX: ${result.transactionHash}`,
+        `  - Market: ${result.marketId.substring(0, 16)}... | Value: $${result.positionValueUsd?.toFixed(2) ?? "?"} | TX: ${result.transactionHash}`,
+      );
+    }
+  }
+
+  if (skippedNotResolved.length > 0) {
+    logger.info("\n⏭️ Skipped (not resolved on-chain yet):");
+    for (const result of skippedNotResolved) {
+      logger.info(
+        `  - Market: ${result.marketId.substring(0, 16)}... | Value: $${result.positionValueUsd?.toFixed(2) ?? "?"}`,
+      );
+    }
+  }
+
+  if (skippedBelowMin.length > 0) {
+    logger.info("\n⏭️ Skipped ($0 losers / below min value):");
+    for (const result of skippedBelowMin) {
+      logger.info(
+        `  - Market: ${result.marketId.substring(0, 16)}... | Value: $${result.positionValueUsd?.toFixed(4) ?? "?"}`,
       );
     }
   }
@@ -119,7 +206,14 @@ async function run(): Promise<void> {
   }
 
   logger.info("\n✅ Done!");
-  process.exit(successful.length > 0 ? 0 : 1);
+  // Exit with success if any were redeemed, or if everything was intentionally skipped
+  const exitCode =
+    successful.length > 0 ||
+    (failed.length === 0 &&
+      skippedNotResolved.length + skippedBelowMin.length > 0)
+      ? 0
+      : 1;
+  process.exit(exitCode);
 }
 
 run().catch((err) => {

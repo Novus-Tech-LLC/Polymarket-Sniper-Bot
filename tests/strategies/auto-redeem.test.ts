@@ -471,3 +471,298 @@ describe("Auto-Redeem On-Chain Resolution Check", () => {
     });
   });
 });
+
+/**
+ * Tests for the new preflight check and skip reason logic
+ */
+describe("Auto-Redeem Preflight Check and Skip Reasons", () => {
+  // Skip reason types matching the actual implementation
+  type RedemptionSkipReason =
+    | "NOT_RESOLVED_ONCHAIN"
+    | "BELOW_MIN_VALUE"
+    | "TOO_MANY_FAILURES"
+    | "IN_COOLDOWN";
+
+  interface MockPosition {
+    tokenId: string;
+    marketId: string;
+    size: number;
+    currentPrice: number;
+    redeemable: boolean;
+  }
+
+  interface MockRedemptionResultWithSkip {
+    tokenId: string;
+    marketId: string;
+    success: boolean;
+    skippedReason?: RedemptionSkipReason;
+    positionValueUsd?: number;
+    isNotResolvedYet?: boolean;
+  }
+
+  // Helper to simulate the $0 loser check
+  function isZeroValueLoser(position: MockPosition): boolean {
+    const positionValue = position.size * position.currentPrice;
+    return positionValue < 0.001; // Less than 0.1 cent is effectively $0
+  }
+
+  // Helper to simulate the min value check
+  function isBelowMinValue(
+    position: MockPosition,
+    minValueUsd: number,
+  ): boolean {
+    const positionValue = position.size * position.currentPrice;
+    return positionValue < minValueUsd;
+  }
+
+  // Simulate the filtering logic from forceRedeemAll
+  function shouldSkipPosition(
+    position: MockPosition,
+    minValueUsd: number,
+    includeLosses: boolean,
+  ): { skip: boolean; reason?: RedemptionSkipReason } {
+    const positionValue = position.size * position.currentPrice;
+    const isZero = isZeroValueLoser(position);
+    const isBelowMin = isBelowMinValue(position, minValueUsd);
+
+    if (!includeLosses && isZero) {
+      return { skip: true, reason: "BELOW_MIN_VALUE" };
+    }
+
+    if (isBelowMin && !isZero) {
+      return { skip: true, reason: "BELOW_MIN_VALUE" };
+    }
+
+    return { skip: false };
+  }
+
+  describe("$0 Loser Detection", () => {
+    test("should detect $0 loser (currentPrice = 0)", () => {
+      const losingPosition: MockPosition = {
+        tokenId: "token-loser",
+        marketId: "0x" + "1".repeat(64),
+        size: 100, // 100 shares
+        currentPrice: 0, // Lost - worth $0
+        redeemable: true,
+      };
+
+      assert.strictEqual(
+        isZeroValueLoser(losingPosition),
+        true,
+        "Position with currentPrice=0 should be detected as $0 loser",
+      );
+    });
+
+    test("should detect near-zero loser (currentPrice = 0.00001)", () => {
+      const nearZeroPosition: MockPosition = {
+        tokenId: "token-nearzero",
+        marketId: "0x" + "2".repeat(64),
+        size: 10,
+        currentPrice: 0.00001,
+        redeemable: true,
+      };
+
+      assert.strictEqual(
+        isZeroValueLoser(nearZeroPosition),
+        true,
+        "Position with near-zero value should be detected as $0 loser",
+      );
+    });
+
+    test("should NOT detect winner as $0 loser", () => {
+      const winningPosition: MockPosition = {
+        tokenId: "token-winner",
+        marketId: "0x" + "3".repeat(64),
+        size: 100,
+        currentPrice: 1.0, // Won - worth $100
+        redeemable: true,
+      };
+
+      assert.strictEqual(
+        isZeroValueLoser(winningPosition),
+        false,
+        "Winning position should NOT be detected as $0 loser",
+      );
+    });
+  });
+
+  describe("Skip Logic with includeLosses Flag", () => {
+    test("should skip $0 losers by default (includeLosses=false)", () => {
+      const losingPosition: MockPosition = {
+        tokenId: "token-loser",
+        marketId: "0x" + "1".repeat(64),
+        size: 100,
+        currentPrice: 0,
+        redeemable: true,
+      };
+
+      const result = shouldSkipPosition(losingPosition, 0.01, false);
+
+      assert.strictEqual(result.skip, true, "Should skip $0 loser by default");
+      assert.strictEqual(
+        result.reason,
+        "BELOW_MIN_VALUE",
+        "Skip reason should be BELOW_MIN_VALUE",
+      );
+    });
+
+    test("should NOT skip $0 losers when includeLosses=true", () => {
+      const losingPosition: MockPosition = {
+        tokenId: "token-loser",
+        marketId: "0x" + "1".repeat(64),
+        size: 100,
+        currentPrice: 0,
+        redeemable: true,
+      };
+
+      const result = shouldSkipPosition(losingPosition, 0.01, true);
+
+      assert.strictEqual(
+        result.skip,
+        false,
+        "Should NOT skip $0 loser when includeLosses=true",
+      );
+    });
+
+    test("should NOT skip winning position", () => {
+      const winningPosition: MockPosition = {
+        tokenId: "token-winner",
+        marketId: "0x" + "3".repeat(64),
+        size: 100,
+        currentPrice: 1.0,
+        redeemable: true,
+      };
+
+      const result = shouldSkipPosition(winningPosition, 0.01, false);
+
+      assert.strictEqual(
+        result.skip,
+        false,
+        "Should NOT skip winning position",
+      );
+    });
+
+    test("should skip position below minValueUsd (non-zero value)", () => {
+      const smallPosition: MockPosition = {
+        tokenId: "token-small",
+        marketId: "0x" + "4".repeat(64),
+        size: 1,
+        currentPrice: 0.005, // $0.005 value
+        redeemable: true,
+      };
+
+      const result = shouldSkipPosition(smallPosition, 0.01, false);
+
+      assert.strictEqual(
+        result.skip,
+        true,
+        "Should skip position below minValueUsd",
+      );
+      assert.strictEqual(
+        result.reason,
+        "BELOW_MIN_VALUE",
+        "Skip reason should be BELOW_MIN_VALUE",
+      );
+    });
+  });
+
+  describe("On-Chain Resolution Check", () => {
+    test("payoutDenominator = 0 means not resolved on-chain", () => {
+      const payoutDenominator = 0n;
+
+      assert.strictEqual(
+        payoutDenominator > 0n,
+        false,
+        "Zero payoutDenominator means not resolved",
+      );
+    });
+
+    test("payoutDenominator > 0 means resolved on-chain", () => {
+      const payoutDenominator = 1n;
+
+      assert.strictEqual(
+        payoutDenominator > 0n,
+        true,
+        "Non-zero payoutDenominator means resolved",
+      );
+    });
+
+    test("NOT_RESOLVED_ONCHAIN skip reason when preflight fails", () => {
+      // Simulate a result where preflight check found position not resolved on-chain
+      const result: MockRedemptionResultWithSkip = {
+        tokenId: "token-pending",
+        marketId: "0x" + "5".repeat(64),
+        success: false,
+        skippedReason: "NOT_RESOLVED_ONCHAIN",
+        positionValueUsd: 50.0,
+        isNotResolvedYet: true,
+      };
+
+      assert.strictEqual(
+        result.skippedReason,
+        "NOT_RESOLVED_ONCHAIN",
+        "Skip reason should indicate not resolved on-chain",
+      );
+      assert.strictEqual(
+        result.isNotResolvedYet,
+        true,
+        "isNotResolvedYet should be true",
+      );
+    });
+  });
+
+  describe("Redemption Summary Categorization", () => {
+    test("should correctly categorize results", () => {
+      const results: MockRedemptionResultWithSkip[] = [
+        {
+          tokenId: "token-1",
+          marketId: "0x" + "1".repeat(64),
+          success: true,
+          positionValueUsd: 100,
+        },
+        {
+          tokenId: "token-2",
+          marketId: "0x" + "2".repeat(64),
+          success: false,
+          skippedReason: "NOT_RESOLVED_ONCHAIN",
+          positionValueUsd: 50,
+        },
+        {
+          tokenId: "token-3",
+          marketId: "0x" + "3".repeat(64),
+          success: false,
+          skippedReason: "BELOW_MIN_VALUE",
+          positionValueUsd: 0,
+        },
+        {
+          tokenId: "token-4",
+          marketId: "0x" + "4".repeat(64),
+          success: false,
+          positionValueUsd: 25,
+        }, // Failed without skip reason
+      ];
+
+      const successful = results.filter((r) => r.success);
+      const skippedNotResolved = results.filter(
+        (r) => r.skippedReason === "NOT_RESOLVED_ONCHAIN",
+      );
+      const skippedBelowMin = results.filter(
+        (r) => r.skippedReason === "BELOW_MIN_VALUE",
+      );
+      const failed = results.filter((r) => !r.success && !r.skippedReason);
+
+      assert.strictEqual(successful.length, 1, "Should have 1 successful");
+      assert.strictEqual(
+        skippedNotResolved.length,
+        1,
+        "Should have 1 skipped (not resolved)",
+      );
+      assert.strictEqual(
+        skippedBelowMin.length,
+        1,
+        "Should have 1 skipped (below min)",
+      );
+      assert.strictEqual(failed.length, 1, "Should have 1 failed");
+    });
+  });
+});
