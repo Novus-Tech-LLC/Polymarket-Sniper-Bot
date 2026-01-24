@@ -556,7 +556,7 @@ describe("PositionTracker Redeemable Positions with Unknown Outcome", () => {
 const RESOLVED_PRICE_HIGH_THRESHOLD = 0.99;
 const RESOLVED_PRICE_LOW_THRESHOLD = 0.01;
 
-describe("PositionTracker Strict State Machine (Jan 2025 Refactor)", () => {
+describe("PositionTracker Strict State Machine", () => {
   /**
    * CRITICAL REGRESSION TEST: This is the exact bug that was fixed.
    * Previously, positions with price ~1.0 were incorrectly marked REDEEMABLE
@@ -687,7 +687,7 @@ describe("PositionTracker Strict State Machine (Jan 2025 Refactor)", () => {
   });
 });
 
-describe("PositionTracker Fallback Price Behavior (Diagnostic Only)", () => {
+describe("PositionTracker Price Threshold Detection (Diagnostic Only)", () => {
   test("High price detection threshold is 99¢", () => {
     // Price threshold for DIAGNOSTIC logging (not state change)
     assert.strictEqual(

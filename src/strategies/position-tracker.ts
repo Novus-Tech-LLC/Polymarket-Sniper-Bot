@@ -1847,7 +1847,12 @@ export class PositionTracker {
               //
               // ONLY mark REDEEMABLE if:
               // (a) Data-API explicitly returned redeemable=true, OR
-              // (b) On-chain payoutDenominator > 0 (not implemented here, requires on-chain call)
+              // (b) On-chain payoutDenominator > 0
+              //
+              // TODO: Implement on-chain ConditionalTokens.payoutDenominator check
+              // for positions where Data-API is stale but on-chain resolution exists.
+              // This would require: tokenId -> conditionId mapping, then calling
+              // ConditionalTokens contract on Polygon.
               //
               // REMOVED: The old "FALLBACK REDEMPTION DETECTION" that incorrectly inferred
               // redeemable status from prices at 99¢+ or 1¢-. This caused the bug where
@@ -2239,8 +2244,9 @@ export class PositionTracker {
           }
 
           // INTERNAL BUG CHECK: Redeemable without valid proof source is a BUG
+          // Use positionState instead of redeemable field to align with strict state machine
           const redeemableWithoutProof = positions.filter(
-            (p) => p.redeemable && p.redeemableProofSource === "NONE"
+            (p) => p.positionState === "REDEEMABLE" && p.redeemableProofSource === "NONE"
           );
           if (redeemableWithoutProof.length > 0) {
             this.logger.error(
