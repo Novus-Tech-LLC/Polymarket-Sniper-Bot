@@ -909,15 +909,88 @@ export class PositionTracker {
               let bestAskPrice: number | undefined;
               let positionStatus: PositionStatus = "ACTIVE";
               let cacheAgeMs: number | undefined;
+              const apiRedeemable = apiPos.redeemable === true;
+
+              // GATED REDEEMABLE DETECTION: Don't blindly trust apiPos.redeemable
+              // Verify with Gamma API that market is truly resolved/closed
+              // This fixes the bug where active markets were incorrectly marked as redeemable
+              let isRedeemable = false;
+              let verifiedWinningOutcome: string | null = null;
+
+              if (apiRedeemable) {
+                // API claims position is redeemable - verify with Gamma
+                const resolutionStatus =
+                  await this.verifyMarketResolutionStatus(tokenId, marketId);
+
+                if (resolutionStatus.isResolved) {
+                  // Gamma confirms market is resolved - trust redeemable flag
+                  isRedeemable = true;
+                  verifiedWinningOutcome = resolutionStatus.winningOutcome;
+                } else if (!resolutionStatus.hasOrderbook) {
+                  // No orderbook exists and market might be in limbo state
+                  // Keep as redeemable since there's no trading activity
+                  isRedeemable = true;
+                  this.logger.debug(
+                    `[PositionTracker] apiPos.redeemable=true, Gamma not resolved, but no orderbook - treating as redeemable: tokenId=${tokenId.slice(0, 16)}...`,
+                  );
+                } else {
+                  // IMPORTANT: API says redeemable but Gamma says NOT resolved AND orderbook EXISTS
+                  // This is the bug case - keep as ACTIVE position
+                  isRedeemable = false;
+                  this.logger.warn(
+                    `[PositionTracker] ⚠️ REDEEMABLE_OVERRIDE: apiPos.redeemable=true but market is STILL ACTIVE (orderbook exists, Gamma not resolved). ` +
+                      `Keeping as ACTIVE position. tokenId=${tokenId.slice(0, 16)}..., marketId=${marketId.slice(0, 16)}...`,
+                  );
+                }
+              }
 
               if (isRedeemable) {
-                // Market is resolved - set status to REDEEMABLE
+                // Market is verified resolved - set status to REDEEMABLE
                 positionStatus = "REDEEMABLE";
 
-                // Get the market outcome - first check batched results, then legacy cache
-                let winningOutcome: string | null | undefined = 
-                  batchedOutcomes.get(tokenId) ?? this.marketOutcomeCache.get(marketId);
-                const wasCached = winningOutcome !== undefined;
+                // Use verified winning outcome or fetch from cache/API
+                let winningOutcome: string | null | undefined =
+                  verifiedWinningOutcome ??
+                  this.marketOutcomeCache.get(marketId);
+                const wasCached =
+                  winningOutcome !== undefined && winningOutcome !== null;
+
+                if (!wasCached && !verifiedWinningOutcome) {
+                  winningOutcome = await this.fetchMarketOutcome(tokenId);
+                  // Only cache definite outcomes; avoid caching null/undefined that may come from transient API errors
+                  if (winningOutcome !== null && winningOutcome !== undefined) {
+                    // Enforce maximum cache size to prevent unbounded memory growth
+                    if (
+                      this.marketOutcomeCache.size >=
+                      PositionTracker.MAX_OUTCOME_CACHE_SIZE
+                    ) {
+                      // Remove oldest entry (first key in Map iteration order)
+                      const firstKey = this.marketOutcomeCache
+                        .keys()
+                        .next().value;
+                      if (firstKey) {
+                        this.marketOutcomeCache.delete(firstKey);
+                      }
+                    }
+                    this.marketOutcomeCache.set(marketId, winningOutcome);
+                    newlyCachedMarkets++;
+                  }
+                } else if (
+                  verifiedWinningOutcome &&
+                  !this.marketOutcomeCache.has(marketId)
+                ) {
+                  // Cache the verified outcome from resolution check
+                  if (
+                    this.marketOutcomeCache.size <
+                    PositionTracker.MAX_OUTCOME_CACHE_SIZE
+                  ) {
+                    this.marketOutcomeCache.set(
+                      marketId,
+                      verifiedWinningOutcome,
+                    );
+                    newlyCachedMarkets++;
+                  }
+                }
 
                 if (!winningOutcome) {
                   // Cannot determine outcome from Gamma API, but position is marked redeemable
@@ -1834,6 +1907,181 @@ export class PositionTracker {
   }
 
   /**
+   * Check if a market is truly resolved via Gamma API.
+   * Returns an object with:
+   * - isResolved: true if Gamma confirms market is closed or resolved
+   * - hasOrderbook: true if orderbook exists with valid bids/asks
+   * - winningOutcome: the winning outcome if available
+   *
+   * This is used to gate redeemable detection - we only trust apiPos.redeemable === true
+   * if Gamma confirms the market is resolved/closed OR no orderbook exists.
+   */
+  private async verifyMarketResolutionStatus(
+    tokenId: string,
+    marketId: string,
+  ): Promise<{
+    isResolved: boolean;
+    hasOrderbook: boolean;
+    winningOutcome: string | null;
+  }> {
+    // Default result - assume not resolved and no orderbook
+    const result = {
+      isResolved: false,
+      hasOrderbook: false,
+      winningOutcome: null as string | null,
+    };
+
+    try {
+      // Check if orderbook exists (indicates active market)
+      if (!this.missingOrderbooks.has(tokenId)) {
+        try {
+          const orderbook = await this.client.getOrderBook(tokenId);
+          if (orderbook.bids?.[0] && orderbook.asks?.[0]) {
+            result.hasOrderbook = true;
+          }
+        } catch (orderbookErr) {
+          const errMsg =
+            orderbookErr instanceof Error
+              ? orderbookErr.message
+              : String(orderbookErr);
+          // 404 or not found means no orderbook
+          if (
+            !errMsg.includes("404") &&
+            !errMsg.includes("not found") &&
+            !errMsg.includes("No orderbook exists")
+          ) {
+            // Log unexpected errors at debug level
+            this.logger.debug(
+              `[PositionTracker] verifyMarketResolutionStatus: Unexpected orderbook error for tokenId=${tokenId}: ${errMsg}`,
+            );
+          }
+        }
+      }
+
+      // Check if market outcome is cached
+      const cachedOutcome = this.marketOutcomeCache.get(marketId);
+      if (cachedOutcome !== undefined) {
+        result.winningOutcome = cachedOutcome;
+        result.isResolved = true;
+        return result;
+      }
+
+      // Fetch market details from Gamma API to check resolved/closed flags
+      const { httpGet } = await import("../utils/fetch-data.util");
+      const { POLYMARKET_API } =
+        await import("../constants/polymarket.constants");
+
+      interface GammaMarketResponse {
+        outcomes?: string;
+        outcomePrices?: string;
+        tokens?: Array<{
+          outcome?: string;
+          winner?: boolean;
+        }>;
+        resolvedOutcome?: string;
+        resolved_outcome?: string;
+        winningOutcome?: string;
+        winning_outcome?: string;
+        closed?: boolean;
+        resolved?: boolean;
+      }
+
+      const encodedTokenId = encodeURIComponent(tokenId.trim());
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets?clob_token_ids=${encodedTokenId}`;
+
+      const markets = await httpGet<GammaMarketResponse[]>(url, {
+        timeout: PositionTracker.API_TIMEOUT_MS,
+      });
+
+      if (!markets || !Array.isArray(markets) || markets.length === 0) {
+        return result;
+      }
+
+      const market = markets[0];
+
+      // Check explicit closed/resolved flags from Gamma
+      if (market.closed === true || market.resolved === true) {
+        result.isResolved = true;
+      }
+
+      // Try to determine winning outcome
+      // Method 1: Parse outcomePrices
+      if (market.outcomes && market.outcomePrices) {
+        try {
+          const outcomes: string[] = JSON.parse(market.outcomes);
+          const prices: string[] = JSON.parse(market.outcomePrices);
+
+          if (outcomes.length > 0 && outcomes.length === prices.length) {
+            let winnerIndex = -1;
+            let highestPrice = 0;
+
+            for (let i = 0; i < prices.length; i++) {
+              const price = parseFloat(prices[i]);
+              if (Number.isFinite(price) && price > highestPrice) {
+                highestPrice = price;
+                winnerIndex = i;
+              }
+            }
+
+            if (
+              winnerIndex >= 0 &&
+              highestPrice > PositionTracker.WINNER_THRESHOLD
+            ) {
+              result.winningOutcome = outcomes[winnerIndex].trim();
+              result.isResolved = true;
+            }
+          }
+        } catch (_parseErr) {
+          // Parse error, continue to other methods
+          // Don't log here as this is an expected case for malformed API data
+        }
+      }
+
+      // Method 2: Check explicit winning outcome fields
+      if (!result.winningOutcome) {
+        const winningOutcome =
+          market.resolvedOutcome ??
+          market.resolved_outcome ??
+          market.winningOutcome ??
+          market.winning_outcome;
+
+        if (winningOutcome && typeof winningOutcome === "string") {
+          const trimmed = winningOutcome.trim();
+          if (trimmed) {
+            result.winningOutcome = trimmed;
+            result.isResolved = true;
+          }
+        }
+      }
+
+      // Method 3: Check tokens for winner flag
+      if (
+        !result.winningOutcome &&
+        market.tokens &&
+        Array.isArray(market.tokens)
+      ) {
+        for (const token of market.tokens) {
+          if (token.winner === true && token.outcome) {
+            const trimmed = token.outcome.trim();
+            if (trimmed) {
+              result.winningOutcome = trimmed;
+              result.isResolved = true;
+              break;
+            }
+          }
+        }
+      }
+
+      return result;
+    } catch (err) {
+      this.logger.debug(
+        `[PositionTracker] verifyMarketResolutionStatus: Error for tokenId=${tokenId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return result;
+    }
+  }
+
+  /**
    * Fetch market end time from Gamma API
    * Returns Unix timestamp in milliseconds, or undefined if not available
    * Uses cache to avoid redundant API calls
@@ -2176,7 +2424,8 @@ export class PositionTracker {
    * @returns Array of ACTIVE positions with entry metadata fields populated
    */
   async enrichPositionsWithEntryMeta(): Promise<Position[]> {
-    const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
+    const { resolveSignerAddress } =
+      await import("../utils/funds-allowance.util");
     const walletAddress = resolveSignerAddress(this.client);
 
     // Validate wallet address
@@ -2254,7 +2503,8 @@ export class PositionTracker {
    * Call this after a trade fill to ensure fresh entry data on next lookup.
    */
   async invalidateEntryMetaCache(tokenId: string): Promise<void> {
-    const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
+    const { resolveSignerAddress } =
+      await import("../utils/funds-allowance.util");
     const walletAddress = resolveSignerAddress(this.client);
     this.entryMetaResolver.invalidateCache(walletAddress, tokenId);
   }
