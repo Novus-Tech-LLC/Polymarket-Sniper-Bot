@@ -2,6 +2,7 @@ import type { ClobClient } from "@polymarket/clob-client";
 import type { ConsoleLogger } from "../utils/logger.util";
 import { httpGet } from "../utils/fetch-data.util";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
+import { EntryMetaResolver, type EntryMeta } from "./entry-meta-resolver";
 
 /**
  * Position status indicating tradability
@@ -44,6 +45,46 @@ export interface Position {
    * Used for debugging stale data issues
    */
   cacheAgeMs?: number;
+
+  // === ENTRY METADATA (from EntryMetaResolver) ===
+  // These fields are derived from trade history API, NOT from container uptime.
+  // See entry-meta-resolver.ts for details on why uptime-based tracking is wrong.
+
+  /**
+   * Weighted average entry price in cents (e.g., 65.5 for 65.5¢)
+   * Computed from trade history using weighted average method.
+   * undefined if entry metadata could not be resolved from trade history.
+   */
+  avgEntryPriceCents?: number;
+
+  /**
+   * Timestamp (ms) when the position was first acquired.
+   * This is the timestamp of the oldest BUY that contributes to the current position.
+   * Derived from trade history API - survives container restarts.
+   * undefined if entry metadata could not be resolved from trade history.
+   */
+  firstAcquiredAt?: number;
+
+  /**
+   * Timestamp (ms) when the position was last increased (most recent BUY).
+   * Derived from trade history API - survives container restarts.
+   * undefined if entry metadata could not be resolved from trade history.
+   */
+  lastAcquiredAt?: number;
+
+  /**
+   * Time held in seconds, computed as now - firstAcquiredAt (or lastAcquiredAt if configured).
+   * CRITICAL: This is derived from trade history timestamps, NOT from container uptime.
+   * This value is stable across container restarts because it uses actual trade timestamps.
+   * undefined if entry metadata could not be resolved from trade history.
+   */
+  timeHeldSec?: number;
+
+  /**
+   * Cache age of the entry metadata in milliseconds.
+   * Used for debugging to prove the data is not stale.
+   */
+  entryMetaCacheAgeMs?: number;
 }
 
 // Price display constants
@@ -151,10 +192,25 @@ export class PositionTracker {
   private lastLoggedPnlCounts = { profitable: 0, losing: 0, redeemable: 0 };
   private static readonly PNL_SUMMARY_LOG_INTERVAL_MS = 60_000; // Log at most once per minute
 
+  // EntryMetaResolver for stateless entry metadata from trade history
+  // WHY THIS EXISTS: Container restarts used to reset the "time held" clock.
+  // Now we derive entry timestamps from the trade history API, which survives restarts.
+  private entryMetaResolver: EntryMetaResolver;
+
   constructor(config: PositionTrackerConfig) {
     this.client = config.client;
     this.logger = config.logger;
     this.refreshIntervalMs = config.refreshIntervalMs ?? 30000; // 30 seconds default
+
+    // Initialize EntryMetaResolver for stateless entry metadata computation
+    this.entryMetaResolver = new EntryMetaResolver({
+      logger: config.logger,
+      cacheTtlMs: 90_000, // 90 second cache TTL
+      apiTimeoutMs: 10_000,
+      maxPagesPerToken: 10,
+      tradesPerPage: 500,
+      useLastAcquiredForTimeHeld: false, // Use firstAcquiredAt by default
+    });
   }
 
   /**
@@ -1636,5 +1692,112 @@ export class PositionTracker {
         `Failed to fetch fallback price for tokenId ${tokenId}: ${errMsg}`,
       );
     }
+  }
+
+  /**
+   * Enrich ACTIVE positions with entry metadata from trade history.
+   *
+   * WHY THIS EXISTS:
+   * ScalpTakeProfit previously calculated "time held" based on container uptime.
+   * After container restarts, the clock reset and the scalper missed valid
+   * take-profit opportunities on positions already in the green.
+   *
+   * This method derives entry metadata (cost basis, timestamps) from the
+   * Polymarket trade history API - data that survives container restarts.
+   *
+   * WHAT IT PROVIDES:
+   * - avgEntryPriceCents: Weighted average entry price from trade history
+   * - firstAcquiredAt: Timestamp of first BUY that contributes to position
+   * - lastAcquiredAt: Timestamp of most recent BUY that increased position
+   * - timeHeldSec: now - firstAcquiredAt (stable across restarts!)
+   *
+   * TOKENID-BASED:
+   * All calculations use tokenId as primary key. This works for any binary
+   * outcome type (YES/NO, Over/Under, TeamA/TeamB, etc.).
+   *
+   * @returns Array of ACTIVE positions with entry metadata fields populated
+   */
+  async enrichPositionsWithEntryMeta(): Promise<Position[]> {
+    const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
+    const walletAddress = resolveSignerAddress(this.client);
+
+    // Validate wallet address
+    const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(walletAddress);
+    if (!isValidAddress) {
+      this.logger.warn(
+        `[PositionTracker] Cannot enrich positions - invalid wallet address: ${walletAddress}`,
+      );
+      return this.getActivePositions();
+    }
+
+    // Get only ACTIVE positions (exclude redeemable/resolved)
+    const activePositions = this.getActivePositions();
+
+    if (activePositions.length === 0) {
+      return [];
+    }
+
+    // Build list of positions to resolve
+    const positionsToResolve = activePositions.map((p) => ({
+      tokenId: p.tokenId,
+      marketId: p.marketId,
+    }));
+
+    // Resolve entry metadata for all positions in batch
+    const entryMetaMap = await this.entryMetaResolver.resolveEntryMetaBatch(
+      walletAddress,
+      positionsToResolve,
+    );
+
+    // Enrich positions with entry metadata
+    const enrichedPositions: Position[] = [];
+    let enrichedCount = 0;
+    let skippedCount = 0;
+
+    for (const position of activePositions) {
+      const entryMeta = entryMetaMap.get(position.tokenId);
+
+      if (entryMeta) {
+        enrichedPositions.push({
+          ...position,
+          avgEntryPriceCents: entryMeta.avgEntryPriceCents,
+          firstAcquiredAt: entryMeta.firstAcquiredAt,
+          lastAcquiredAt: entryMeta.lastAcquiredAt,
+          timeHeldSec: entryMeta.timeHeldSec,
+          entryMetaCacheAgeMs: entryMeta.cacheAgeMs,
+        });
+        enrichedCount++;
+      } else {
+        // Entry metadata could not be resolved - include position without enrichment
+        // This can happen if trade history is unavailable or incomplete
+        enrichedPositions.push(position);
+        skippedCount++;
+      }
+    }
+
+    if (enrichedCount > 0 || skippedCount > 0) {
+      this.logger.debug(
+        `[PositionTracker] Enriched ${enrichedCount} positions with entry metadata, ${skippedCount} skipped (no trade history)`,
+      );
+    }
+
+    return enrichedPositions;
+  }
+
+  /**
+   * Get the EntryMetaResolver instance for direct access (e.g., for cache invalidation).
+   */
+  getEntryMetaResolver(): EntryMetaResolver {
+    return this.entryMetaResolver;
+  }
+
+  /**
+   * Invalidate entry metadata cache for a specific token.
+   * Call this after a trade fill to ensure fresh entry data on next lookup.
+   */
+  invalidateEntryMetaCache(tokenId: string): void {
+    const { resolveSignerAddress } = require("../utils/funds-allowance.util");
+    const walletAddress = resolveSignerAddress(this.client);
+    this.entryMetaResolver.invalidateCache(walletAddress, tokenId);
   }
 }
