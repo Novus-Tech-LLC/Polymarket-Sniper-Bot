@@ -338,11 +338,23 @@ export class Orchestrator {
       // Phase 1: Refresh positions (single-flight, shared by all strategies)
       // This ensures all strategies see consistent position data
       const refreshStart = Date.now();
+      // Set cycle ID before refresh so snapshot is tagged correctly
+      this.positionTracker.setCycleId(currentCycleId);
       await this.positionTracker.awaitCurrentRefresh();
       strategyTimings.push({
         name: "PositionRefresh",
         durationMs: Date.now() - refreshStart,
       });
+
+      // Get the immutable snapshot for this cycle
+      // All strategies MUST use this snapshot, not call PositionTracker methods directly
+      const snapshot = this.positionTracker.getSnapshot();
+      if (!snapshot) {
+        this.logger.error(
+          `[Orchestrator] cycle=${currentCycleId} ERROR: No snapshot available after refresh`,
+        );
+        return;
+      }
 
       // Phase 2: Capital efficiency and redemption
       // 1. SellEarly - CAPITAL EFFICIENCY - sell near-$1 ACTIVE positions before redemption
@@ -376,9 +388,10 @@ export class Orchestrator {
 
       // Phase 4: Trading strategies
       // 5. Scalp Take-Profit - time-based profit taking with momentum checks
+      // CRITICAL: Pass snapshot to ensure ScalpTakeProfit uses same data as PositionTracker
       await this.runStrategyTimed(
         "ScalpTakeProfit",
-        () => this.scalpStrategy.execute(),
+        () => this.scalpStrategy.execute(snapshot),
         strategyTimings,
       );
 

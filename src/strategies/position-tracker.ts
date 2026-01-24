@@ -118,6 +118,52 @@ export interface RefreshMetrics {
   resolvedCacheHits: number;
 }
 
+/**
+ * Summary of position counts for a portfolio snapshot.
+ * All strategies must use this for consistent reporting.
+ */
+export interface PortfolioSummary {
+  /** Total active (non-redeemable) positions */
+  activeTotal: number;
+  /** Active positions with pnlClassification === PROFITABLE */
+  prof: number;
+  /** Active positions with pnlClassification === LOSING */
+  lose: number;
+  /** Active positions with pnlClassification === NEUTRAL */
+  neutral: number;
+  /** Active positions with pnlClassification === UNKNOWN (pnlTrusted=false) */
+  unknown: number;
+  /** Total redeemable positions */
+  redeemableTotal: number;
+}
+
+/**
+ * IMMUTABLE PORTFOLIO SNAPSHOT
+ *
+ * This is the single source of truth for position data during one orchestrator cycle.
+ * Created by PositionTracker.refresh() and passed to all strategies.
+ *
+ * NON-NEGOTIABLE RULES:
+ * 1. Snapshot is created ONCE per orchestrator cycle
+ * 2. All strategies MUST use the same snapshot within a cycle
+ * 3. No strategy may independently refresh or fetch positions
+ * 4. Arrays are frozen to prevent mutation
+ */
+export interface PortfolioSnapshot {
+  /** Unique identifier for this snapshot's orchestrator cycle */
+  cycleId: number;
+  /** The address used to fetch positions (proxy or EOA) */
+  addressUsed: string;
+  /** Unix timestamp (ms) when this snapshot was created */
+  fetchedAtMs: number;
+  /** Active (non-redeemable) positions - FROZEN array */
+  activePositions: readonly Position[];
+  /** Redeemable positions - FROZEN array */
+  redeemablePositions: readonly Position[];
+  /** Summary counts for logging and diagnostics */
+  summary: PortfolioSummary;
+}
+
 export interface Position {
   marketId: string;
   tokenId: string;
@@ -396,6 +442,12 @@ export class PositionTracker {
   // Track last cycle ID for single-flight refresh within same cycle
   private lastRefreshCycleId: number = -1;
   private lastRefreshCyclePromise: Promise<void> | null = null;
+
+  // === IMMUTABLE PORTFOLIO SNAPSHOT ===
+  // Created after each refresh, consumed by strategies via getSnapshot()
+  // This ensures all strategies operate on the same position data within a cycle
+  private lastSnapshot: PortfolioSnapshot | null = null;
+  private lastSnapshotCycleId: number = -1;
 
   /**
    * Orderbook cache with TTL for accurate P&L calculation
@@ -848,6 +900,11 @@ export class PositionTracker {
       // provides resilience against temporary API glitches without treating
       // re-buys as long-held positions.
       // Note: Removed redundant "Refreshed X positions" log - the summary log in fetchPositionsFromAPI provides this info
+
+      // === CREATE IMMUTABLE PORTFOLIO SNAPSHOT ===
+      // This snapshot is consumed by all strategies via getSnapshot()
+      // Arrays are frozen to prevent mutation
+      this.createSnapshot();
     } catch (err) {
       this.logger.error(
         "[PositionTracker] Failed to refresh positions",
@@ -858,6 +915,73 @@ export class PositionTracker {
       this.isRefreshing = false;
       this.lastRefreshCompletedAt = Date.now();
     }
+  }
+
+  /**
+   * Create an immutable portfolio snapshot from current positions.
+   * Called after each refresh to ensure strategies see consistent data.
+   *
+   * @param cycleId Optional orchestrator cycle ID to tag the snapshot
+   */
+  private createSnapshot(cycleId?: number): void {
+    const allPositions = this.getPositions();
+    const activePositions = allPositions.filter((p) => !p.redeemable);
+    const redeemablePositions = allPositions.filter((p) => p.redeemable);
+
+    // Calculate summary using pnlClassification for proper categorization
+    const prof = activePositions.filter(
+      (p) => p.pnlClassification === "PROFITABLE",
+    ).length;
+    const lose = activePositions.filter(
+      (p) => p.pnlClassification === "LOSING",
+    ).length;
+    const neutral = activePositions.filter(
+      (p) => p.pnlClassification === "NEUTRAL",
+    ).length;
+    const unknown = activePositions.filter(
+      (p) => p.pnlClassification === "UNKNOWN",
+    ).length;
+
+    // Create immutable snapshot with frozen arrays
+    this.lastSnapshot = {
+      cycleId: cycleId ?? this.lastSnapshotCycleId + 1,
+      addressUsed: this.cachedHoldingAddress ?? "unknown",
+      fetchedAtMs: Date.now(),
+      activePositions: Object.freeze([...activePositions]),
+      redeemablePositions: Object.freeze([...redeemablePositions]),
+      summary: {
+        activeTotal: activePositions.length,
+        prof,
+        lose,
+        neutral,
+        unknown,
+        redeemableTotal: redeemablePositions.length,
+      },
+    };
+
+    this.lastSnapshotCycleId = this.lastSnapshot.cycleId;
+  }
+
+  /**
+   * Get the current portfolio snapshot.
+   *
+   * This is the ONLY way strategies should access position data during a cycle.
+   * The snapshot is immutable and consistent within a single orchestrator cycle.
+   *
+   * @returns The last created snapshot, or null if no refresh has completed
+   */
+  getSnapshot(): PortfolioSnapshot | null {
+    return this.lastSnapshot;
+  }
+
+  /**
+   * Set the current orchestrator cycle ID.
+   * Called by the orchestrator before refresh to tag the snapshot.
+   *
+   * @param cycleId The current orchestrator cycle ID
+   */
+  setCycleId(cycleId: number): void {
+    this.lastSnapshotCycleId = cycleId;
   }
 
   /**
