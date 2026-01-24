@@ -269,8 +269,10 @@ export class PositionTracker {
   // === PROXY WALLET / HOLDING ADDRESS RESOLUTION ===
   // Positions are held by proxy wallet, not EOA. Cache the resolved holding address.
   private cachedHoldingAddress: string | null = null;
+  private cachedEOAAddress: string | null = null; // Track EOA for address probing
   private holdingAddressCacheMs = 0;
   private static readonly HOLDING_ADDRESS_CACHE_TTL_MS = 300_000; // 5 minutes TTL
+  private addressProbeCompleted = false; // Track if address probe has been done
 
   // Cache market end times (Unix timestamp ms). Market end times are fetched from Gamma API
   // and cached to avoid redundant API calls on every 30-second refresh cycle.
@@ -426,6 +428,9 @@ export class PositionTracker {
       await import("../utils/funds-allowance.util");
     const signerAddress = resolveSignerAddress(this.client);
 
+    // Always cache EOA for address probing
+    this.cachedEOAAddress = signerAddress;
+
     // Validate signer address
     const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(signerAddress);
     if (!isValidAddress) {
@@ -466,16 +471,10 @@ export class PositionTracker {
         this.cachedHoldingAddress = proxyWallet;
         this.holdingAddressCacheMs = now;
 
-        // Log only on first resolution or change
-        if (
-          this.logDeduper.shouldLog(
-            "Tracker:holding_address",
-            HEARTBEAT_INTERVAL_MS,
-            proxyWallet,
-          )
-        ) {
+        // Log once per refresh in required format
+        if (this.logDeduper.shouldLog("Tracker:holding_address", HEARTBEAT_INTERVAL_MS, proxyWallet)) {
           this.logger.info(
-            `[PositionTracker] Resolved holding address: proxy=${proxyWallet.slice(0, 10)}... (EOA=${signerAddress.slice(0, 10)}...)`,
+            `[PositionTracker] wallet=${signerAddress} proxy=${proxyWallet} using=${proxyWallet}`,
           );
         }
         return proxyWallet;
@@ -485,14 +484,9 @@ export class PositionTracker {
       this.cachedHoldingAddress = signerAddress;
       this.holdingAddressCacheMs = now;
 
-      if (
-        this.logDeduper.shouldLog(
-          "Tracker:holding_address_eoa",
-          HEARTBEAT_INTERVAL_MS,
-        )
-      ) {
-        this.logger.debug(
-          `[PositionTracker] No proxy wallet found, using EOA: ${signerAddress.slice(0, 10)}...`,
+      if (this.logDeduper.shouldLog("Tracker:holding_address_eoa", HEARTBEAT_INTERVAL_MS)) {
+        this.logger.info(
+          `[PositionTracker] wallet=${signerAddress} proxy=none using=${signerAddress}`,
         );
       }
       return signerAddress;
@@ -1171,10 +1165,102 @@ export class PositionTracker {
         initial_average_price?: string | number;
       }
 
-      const apiPositions = await httpGet<ApiPosition[]>(
-        POLYMARKET_API.POSITIONS_ENDPOINT(holdingAddress),
+      // Build positions URL and log it once per refresh
+      const positionsUrl = POLYMARKET_API.POSITIONS_ENDPOINT(holdingAddress);
+      if (this.logDeduper.shouldLog("Tracker:positions_url", HEARTBEAT_INTERVAL_MS, positionsUrl)) {
+        this.logger.info(`[PositionTracker] positions_url=${positionsUrl}`);
+      }
+
+      let apiPositions = await httpGet<ApiPosition[]>(
+        positionsUrl,
         { timeout: PositionTracker.API_TIMEOUT_MS },
       );
+
+      // ADDRESS PROBE: If we got 0-2 positions and address probe hasn't been done,
+      // try both EOA and proxy separately and pick whichever returns more positions.
+      // This handles the case where we're using the wrong address.
+      const initialPositionCount = apiPositions?.length ?? 0;
+      if (initialPositionCount <= 2 && !this.addressProbeCompleted && this.cachedEOAAddress && this.cachedHoldingAddress) {
+        const eoaAddress = this.cachedEOAAddress;
+        const proxyAddress = this.cachedHoldingAddress;
+        
+        // Only probe if EOA and proxy are different
+        if (eoaAddress !== proxyAddress) {
+          this.logger.info(
+            `[PositionTracker] Low position count (${initialPositionCount}), running address probe...`,
+          );
+          
+          try {
+            // Fetch from both addresses
+            const [eoaPositions, proxyPositions] = await Promise.all([
+              httpGet<ApiPosition[]>(
+                POLYMARKET_API.POSITIONS_ENDPOINT(eoaAddress),
+                { timeout: PositionTracker.API_TIMEOUT_MS },
+              ).catch(() => [] as ApiPosition[]),
+              httpGet<ApiPosition[]>(
+                POLYMARKET_API.POSITIONS_ENDPOINT(proxyAddress),
+                { timeout: PositionTracker.API_TIMEOUT_MS },
+              ).catch(() => [] as ApiPosition[]),
+            ]);
+            
+            const eoaCount = eoaPositions?.length ?? 0;
+            const proxyCount = proxyPositions?.length ?? 0;
+            
+            // Determine which address to use (pick whichever returned more positions)
+            const selectedAddress = eoaCount >= proxyCount ? "eoa" : "proxy";
+            
+            // Log the probe results with the actual selection
+            this.logger.info(
+              `[PositionTracker] address_probe: eoa_positions=${eoaCount} proxy_positions=${proxyCount} selected=${selectedAddress}`,
+            );
+            
+            // Use whichever returned more positions
+            if (eoaCount >= proxyCount && eoaCount > initialPositionCount) {
+              apiPositions = eoaPositions;
+              this.cachedHoldingAddress = eoaAddress;
+              this.holdingAddressCacheMs = Date.now();
+              this.logger.info(
+                `[PositionTracker] Address probe selected EOA (${eoaCount} positions vs ${proxyCount} proxy)`,
+              );
+            } else if (proxyCount > initialPositionCount) {
+              apiPositions = proxyPositions;
+              // cachedHoldingAddress was already set to proxyAddress
+              this.logger.info(
+                `[PositionTracker] Address probe confirmed proxy (${proxyCount} positions vs ${eoaCount} EOA)`,
+              );
+            }
+            
+            this.addressProbeCompleted = true;
+          } catch (probeErr) {
+            this.logger.warn(
+              `[PositionTracker] Address probe failed: ${probeErr instanceof Error ? probeErr.message : String(probeErr)}`,
+            );
+          }
+        } else {
+          this.addressProbeCompleted = true; // No point probing if both addresses are same
+        }
+      }
+
+      // === RAW COUNTS BEFORE ANY FILTERING ===
+      // Log raw counts to diagnose where positions are being lost
+      const rawTotal = apiPositions?.length ?? 0;
+      const rawActiveCandidates = apiPositions?.filter(
+        (p) => {
+          const size = typeof p.size === "string" ? parseFloat(p.size) : (p.size ?? 0);
+          return size > 0;
+        }
+      ).length ?? 0;
+      const rawRedeemableCandidates = apiPositions?.filter(
+        (p) => p.redeemable === true
+      ).length ?? 0;
+      
+      // Log raw counts once per refresh or when counts change
+      const rawCountsFingerprint = `${rawTotal}-${rawActiveCandidates}-${rawRedeemableCandidates}`;
+      if (this.logDeduper.shouldLog("Tracker:raw_counts", HEARTBEAT_INTERVAL_MS, rawCountsFingerprint)) {
+        this.logger.info(
+          `[PositionTracker] raw_total=${rawTotal} raw_active_candidates=${rawActiveCandidates} raw_redeemable_candidates=${rawRedeemableCandidates}`,
+        );
+      }
 
       if (!apiPositions || apiPositions.length === 0) {
         // Rate-limit "no positions" log
@@ -1389,6 +1475,8 @@ export class PositionTracker {
 
               // P&L source tracking: where did the P&L values come from?
               let pnlSource: PnLSource = "FALLBACK";
+              // Track if pricing fetch completely failed (for pnlUntrustedReason)
+              let pricingFetchFailed = false;
               const apiRedeemable = apiPos.redeemable === true;
 
               // GATED REDEEMABLE DETECTION: Don't blindly trust apiPos.redeemable
@@ -1662,13 +1750,18 @@ export class PositionTracker {
                     }
                   }
                 } catch (err) {
-                  // If all pricing methods fail, skip this position
+                  // CRITICAL FIX: If all pricing methods fail, DO NOT drop the position.
+                  // Keep it as ACTIVE with unknown P&L instead of removing it.
+                  // This prevents positions from disappearing just because orderbook is missing.
                   const errMsg =
                     err instanceof Error ? err.message : String(err);
-                  const reason = `Failed to fetch price data: ${errMsg}`;
-                  skippedPositions.push({ reason, data: apiPos });
-                  this.logger.debug(`[PositionTracker] ${reason}`);
-                  return null;
+                  this.logger.debug(
+                    `[PositionTracker] Failed to fetch price data for ${tokenId.slice(0, 16)}...: ${errMsg} - keeping as ACTIVE with unknown P&L`,
+                  );
+                  // Use entry price as current price (will show 0% P&L but position is preserved)
+                  currentPrice = entryPrice;
+                  positionStatus = "NO_BOOK";
+                  pricingFetchFailed = true;
                 }
                 // Increment activeCount only after successful pricing
                 activeCount++;
@@ -1852,7 +1945,10 @@ export class PositionTracker {
                   pnlTrusted = true; // Data-API provided pricing info
                 } else {
                   pnlTrusted = false;
-                  pnlUntrustedReason = "NO_ORDERBOOK_BIDS";
+                  // Use more descriptive reason based on what actually failed
+                  pnlUntrustedReason = pricingFetchFailed 
+                    ? "PRICING_FETCH_FAILED" 
+                    : "NO_ORDERBOOK_BIDS";
                 }
               }
 
