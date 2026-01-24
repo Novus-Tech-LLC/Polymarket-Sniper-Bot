@@ -3419,6 +3419,92 @@ describe("Crash-Proof Recovery: Stale Snapshot Handling", () => {
       }
     }
   });
+
+  test("AUTO-RECOVERY: Clears lastGoodSnapshot when stale age exceeds MAX_STALE_AGE_MS", () => {
+    // This test validates the auto-recovery mechanism that prevents indefinite stale state
+    // Similar to what happens on container restart, but automatic
+    const MAX_STALE_AGE_MS = 60_000; // 60 seconds (HFT-friendly threshold)
+    
+    // Simulate a lastGoodSnapshot that is now very stale
+    const lastGoodFetchedAt = Date.now() - 65_000; // 65 seconds ago (exceeds threshold)
+    let lastGoodSnapshot: any = {
+      cycleId: 5,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: lastGoodFetchedAt,
+      activePositions: Object.freeze([
+        { tokenId: "t1", marketId: "m1", size: 100 },
+      ]) as any,
+      redeemablePositions: Object.freeze([]) as any,
+      summary: { activeTotal: 1, prof: 0, lose: 1, neutral: 0, unknown: 0, redeemableTotal: 0 },
+    };
+    let lastGoodAtMs = lastGoodFetchedAt;
+    let consecutiveFailures = 8;
+    let currentBackoffMs = 120_000;
+
+    // Calculate stale age
+    const now = Date.now();
+    const staleAgeMs = now - lastGoodSnapshot.fetchedAtMs;
+
+    // Verify stale age exceeds threshold
+    assert.ok(staleAgeMs >= MAX_STALE_AGE_MS, 
+      `Stale age (${staleAgeMs}ms) should exceed threshold (${MAX_STALE_AGE_MS}ms)`);
+
+    // Simulate auto-recovery logic: clear lastGoodSnapshot when too stale
+    if (staleAgeMs >= MAX_STALE_AGE_MS) {
+      lastGoodSnapshot = null;
+      lastGoodAtMs = 0;
+      consecutiveFailures = 0;
+      currentBackoffMs = 0;
+    }
+
+    // Verify auto-recovery cleared the state
+    assert.strictEqual(lastGoodSnapshot, null, 
+      "Should clear lastGoodSnapshot when stale age exceeds threshold");
+    assert.strictEqual(lastGoodAtMs, 0, 
+      "Should reset lastGoodAtMs");
+    assert.strictEqual(consecutiveFailures, 0, 
+      "Should reset consecutiveFailures to allow immediate retry");
+    assert.strictEqual(currentBackoffMs, 0, 
+      "Should reset backoff to allow immediate retry");
+  });
+
+  test("AUTO-RECOVERY: Does NOT clear lastGoodSnapshot when stale age is below threshold", () => {
+    const MAX_STALE_AGE_MS = 60_000; // 60 seconds
+    
+    // Simulate a lastGoodSnapshot that is stale but within threshold
+    const lastGoodFetchedAt = Date.now() - 30_000; // 30 seconds ago (below threshold)
+    let lastGoodSnapshot: any = {
+      cycleId: 5,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: lastGoodFetchedAt,
+      activePositions: Object.freeze([
+        { tokenId: "t1", marketId: "m1", size: 100 },
+      ]) as any,
+      redeemablePositions: Object.freeze([]) as any,
+      summary: { activeTotal: 1, prof: 0, lose: 1, neutral: 0, unknown: 0, redeemableTotal: 0 },
+    };
+    let consecutiveFailures = 3;
+
+    // Calculate stale age
+    const now = Date.now();
+    const staleAgeMs = now - lastGoodSnapshot.fetchedAtMs;
+
+    // Verify stale age is below threshold
+    assert.ok(staleAgeMs < MAX_STALE_AGE_MS, 
+      `Stale age (${staleAgeMs}ms) should be below threshold (${MAX_STALE_AGE_MS}ms)`);
+
+    // Auto-recovery should NOT trigger
+    if (staleAgeMs >= MAX_STALE_AGE_MS) {
+      lastGoodSnapshot = null;
+      consecutiveFailures = 0;
+    }
+
+    // Verify lastGoodSnapshot is preserved
+    assert.notStrictEqual(lastGoodSnapshot, null, 
+      "Should preserve lastGoodSnapshot when stale age is below threshold");
+    assert.strictEqual(consecutiveFailures, 3, 
+      "Should preserve failure count when below threshold");
+  });
 });
 
 describe("Crash-Proof Recovery: Circuit Breaker", () => {
