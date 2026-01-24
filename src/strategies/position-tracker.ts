@@ -1008,9 +1008,17 @@ export class PositionTracker {
         }
         const reasonsStr = reasonCounts.join(", ") || "none";
 
+        // Helper to safely truncate tokenId
+        const truncateTokenId = (tokenId: string): string => {
+          if (tokenId.length > 16) {
+            return tokenId.slice(0, 16) + "...";
+          }
+          return tokenId;
+        };
+
         // Get first 3 positions for diagnostic dump (sanitized)
         const firstThreePositions = allPositions.slice(0, 3).map((p) => ({
-          tokenId: p.tokenId.slice(0, 16) + "...",
+          tokenId: truncateTokenId(p.tokenId),
           side: p.side,
           size: p.size.toFixed(2),
           pnlPct: p.pnlPct.toFixed(2),

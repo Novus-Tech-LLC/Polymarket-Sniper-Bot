@@ -102,6 +102,9 @@ function createMockSnapshot(
     activePositions: Object.freeze([...activePositions]),
     redeemablePositions: Object.freeze([...redeemablePositions]),
     summary,
+    // Include optional diagnostic fields
+    rawCounts: overrides.rawCounts,
+    classificationReasons: overrides.classificationReasons,
   };
 }
 
@@ -560,13 +563,12 @@ describe("REGRESSION: ACTIVE_COLLAPSE_BUG Detection", () => {
     classificationReasons.set("MISSING_FIELDS", 3);
     classificationReasons.set("INVALID_SIZE_PRICE", 5);
 
-    // Create snapshot with 0 active but raw counts > 0
-    const buggySnapshot: PortfolioSnapshot = {
+    // Create snapshot with 0 active but raw counts > 0 using createMockSnapshot
+    const buggySnapshot = createMockSnapshot({
       cycleId: 42,
       addressUsed: "0x123abc",
-      fetchedAtMs: Date.now(),
-      activePositions: Object.freeze([]), // Empty!
-      redeemablePositions: Object.freeze([]),
+      activePositions: [], // Empty!
+      redeemablePositions: [],
       summary: {
         activeTotal: 0, // Zero active
         prof: 0,
@@ -577,7 +579,7 @@ describe("REGRESSION: ACTIVE_COLLAPSE_BUG Detection", () => {
       },
       rawCounts,
       classificationReasons,
-    };
+    });
 
     // Simulate ACTIVE_COLLAPSE_BUG detection logic
     if (
@@ -775,21 +777,21 @@ describe("REGRESSION: ScalpTakeProfit Snapshot Consistency", () => {
     const logger = createMockLogger();
 
     // Create an intentionally inconsistent snapshot (simulating a bug)
-    const buggySnapshot: PortfolioSnapshot = {
+    // We need to manually create this because createMockSnapshot would auto-calculate summary
+    const buggySnapshot = createMockSnapshot({
       cycleId: 1,
       addressUsed: "0x123",
-      fetchedAtMs: Date.now(),
-      activePositions: Object.freeze([createMockPosition()]), // Has 1 position
-      redeemablePositions: Object.freeze([]),
+      activePositions: [createMockPosition()], // Has 1 position
+      redeemablePositions: [],
       summary: {
-        activeTotal: 10, // Claims 10 positions!
+        activeTotal: 10, // Claims 10 positions! (inconsistent with actual 1)
         prof: 5,
         lose: 3,
         neutral: 2,
         unknown: 0,
         redeemableTotal: 0,
       },
-    };
+    });
 
     // Simulate SNAPSHOT_MISMATCH detection
     if (
