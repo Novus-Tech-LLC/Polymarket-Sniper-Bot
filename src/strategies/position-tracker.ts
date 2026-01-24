@@ -20,6 +20,51 @@ export type PositionStatus =
   | "NO_BOOK";
 
 /**
+ * STRICT POSITION STATE MACHINE (Jan 2025 Refactor)
+ *
+ * NON-NEGOTIABLE STATE DEFINITIONS:
+ *
+ * ACTIVE:
+ *   - Default state for all positions with shares > 0
+ *   - Position remains ACTIVE unless we have EXPLICIT PROOF it's REDEEMABLE
+ *   - Price near 1.0 does NOT imply resolved
+ *   - Empty orderbook does NOT imply resolved
+ *   - Gamma "winner" metadata does NOT imply redeemable (only market closed)
+ *
+ * REDEEMABLE:
+ *   - Only if EITHER:
+ *     (a) Data-API positions payload explicitly flags redeemable=true, OR
+ *     (b) On-chain ConditionalTokens.payoutDenominator(conditionId) > 0
+ *   - DO NOT infer from price ≈ 1.0
+ *   - DO NOT infer from empty orderbook
+ *   - DO NOT infer from Gamma "winner" field alone
+ *
+ * CLOSED_NOT_REDEEMABLE:
+ *   - Market is closed/ended (Gamma says closed=true or end_date passed)
+ *   - BUT on-chain resolution not yet posted (payoutDenominator == 0)
+ *   - Trading strategies should STOP acting, but NOT treat as redeemable
+ *
+ * UNKNOWN:
+ *   - Cannot map tokenId -> conditionId
+ *   - Cannot fetch required metadata
+ *   - Keep as ACTIVE for safety but mark pnlTrusted=false
+ */
+export type PositionState =
+  | "ACTIVE"
+  | "REDEEMABLE"
+  | "CLOSED_NOT_REDEEMABLE"
+  | "UNKNOWN";
+
+/**
+ * Source of REDEEMABLE determination.
+ * Used for auditing and debugging incorrect classifications.
+ */
+export type RedeemableProofSource =
+  | "DATA_API_FLAG" // Data-API positions endpoint returned redeemable=true
+  | "ONCHAIN_DENOM" // On-chain payoutDenominator > 0
+  | "NONE"; // Not redeemable - for auditing
+
+/**
  * P&L Classification for strategy decision-making.
  *
  * CRITICAL: Strategies MUST NOT act on positions with UNKNOWN classification.
@@ -218,6 +263,33 @@ export interface Position {
    * Distinct from marketId which may be the same but tracked separately.
    */
   conditionId?: string;
+
+  // === STRICT STATE MACHINE FIELDS (Jan 2025 Refactor) ===
+  // These fields implement the non-negotiable state definitions.
+
+  /**
+   * Strict position state using authoritative sources only.
+   * See PositionState type definition for state meanings.
+   *
+   * CRITICAL: Only REDEEMABLE if proven via DATA_API_FLAG or ONCHAIN_DENOM.
+   * NEVER infer REDEEMABLE from price, orderbook, or Gamma winner.
+   */
+  positionState?: PositionState;
+
+  /**
+   * Source of REDEEMABLE proof (only set when positionState === "REDEEMABLE").
+   * Used for auditing and debugging incorrect classifications.
+   */
+  redeemableProofSource?: RedeemableProofSource;
+
+  /**
+   * Whether the market is closed (ended) but not yet redeemable on-chain.
+   * Set to true when Gamma says closed=true or market end_date passed,
+   * but on-chain payoutDenominator is 0 or unknown.
+   *
+   * Trading strategies should STOP acting on these positions.
+   */
+  marketClosed?: boolean;
 }
 
 // Price display constants
@@ -1767,73 +1839,77 @@ export class PositionTracker {
                 activeCount++;
               }
 
-              // FALLBACK REDEMPTION DETECTION: Check if position appears resolved based on price
-              // This handles cases where the API doesn't mark positions as redeemable but the market has actually resolved
-              // Positions at 99¢+ or 1¢- are likely resolved markets that should be redeemable
-              let finalRedeemable = isRedeemable;
-              if (
-                !isRedeemable &&
-                (currentPrice >=
-                  PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
-                  currentPrice <= PositionTracker.RESOLVED_PRICE_LOW_THRESHOLD)
-              ) {
-                // Check if we already have this tokenId marked as resolved in outcomeCache
-                // This prevents re-running fallback logic on every refresh
-                const existingCacheEntry = this.outcomeCache.get(tokenId);
-                if (existingCacheEntry?.status === "RESOLVED") {
-                  // Already resolved, use cached outcome
-                  finalRedeemable = true;
-                  const normalizedSide = side.toLowerCase().trim();
-                  const normalizedWinner = (existingCacheEntry.winner ?? "")
-                    .toLowerCase()
-                    .trim();
-                  currentPrice =
-                    normalizedSide === normalizedWinner ? 1.0 : 0.0;
-                  resolvedCount++;
-                  activeCount--;
-                  this.currentRefreshMetrics.resolvedCacheHits++;
-                } else {
-                  // Price suggests market is resolved - verify with Gamma API
-                  // This is a one-time detection; once resolved, we cache it
-                  const winningOutcome = await this.fetchMarketOutcome(tokenId);
-                  if (winningOutcome !== null) {
-                    // Market is confirmed resolved - mark as redeemable
-                    finalRedeemable = true;
-                    // Adjust current price to exact settlement price based on outcome
-                    const normalizedSide = side.toLowerCase().trim();
-                    const normalizedWinner = winningOutcome
-                      .toLowerCase()
-                      .trim();
-                    currentPrice =
-                      normalizedSide === normalizedWinner ? 1.0 : 0.0;
-                    resolvedCount++;
-                    activeCount--; // Was counted as active, now resolved
+              // === STRICT STATE MACHINE: REDEEMABLE DETERMINATION ===
+              // NON-NEGOTIABLE: Do NOT infer REDEEMABLE from:
+              // - Price near 1.0 or 0.0
+              // - Empty orderbook
+              // - Gamma winner metadata alone
+              //
+              // ONLY mark REDEEMABLE if:
+              // (a) Data-API explicitly returned redeemable=true, OR
+              // (b) On-chain payoutDenominator > 0
+              //
+              // TODO: Implement on-chain ConditionalTokens.payoutDenominator check
+              // for positions where Data-API is stale but on-chain resolution exists.
+              // This would require: tokenId -> conditionId mapping, then calling
+              // ConditionalTokens contract on Polygon.
+              //
+              // REMOVED: The old "FALLBACK REDEMPTION DETECTION" that incorrectly inferred
+              // redeemable status from prices at 99¢+ or 1¢-. This caused the bug where
+              // raw_redeemable_candidates=10 but final output showed 33 resolved positions.
 
-                    // Log only on state change (prevents repeated logs)
-                    this.logResolvedPositionIfChanged(
-                      tokenId,
-                      side,
-                      winningOutcome,
-                      currentPrice,
-                      "RESOLVED",
+              let finalRedeemable = isRedeemable; // Trust ONLY Data-API flag
+              let redeemableProofSource: RedeemableProofSource = "NONE";
+              let positionState: PositionState = "ACTIVE";
+              let marketClosed = false;
+
+              if (isRedeemable) {
+                // Data-API explicitly flagged this position as redeemable
+                positionState = "REDEEMABLE";
+                redeemableProofSource = "DATA_API_FLAG";
+                finalRedeemable = true;
+
+                // Log the promotion with proof source
+                this.logger.debug(
+                  `[PositionTracker] promote->REDEEMABLE tokenId=${tokenId.slice(0, 16)}... reason=DATA_API_FLAG`,
+                );
+              } else {
+                // Position is NOT redeemable per Data-API
+                // Check if market might be CLOSED_NOT_REDEEMABLE (Gamma says closed but not on-chain yet)
+                //
+                // NOTE: We do NOT use price or Gamma winner to infer REDEEMABLE.
+                // If Gamma says market is closed but Data-API doesn't say redeemable,
+                // it's CLOSED_NOT_REDEEMABLE (waiting for on-chain resolution).
+
+                // For diagnostic purposes, check if price suggests the market might be near resolution
+                // This is used for logging/diagnostics only, NOT to change state
+                const priceNearResolution =
+                  currentPrice >= PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
+                  currentPrice <= PositionTracker.RESOLVED_PRICE_LOW_THRESHOLD;
+
+                if (priceNearResolution) {
+                  // Log diagnostic: price suggests resolved but Data-API says NOT redeemable
+                  // This is EXPECTED behavior - we keep it ACTIVE until Data-API confirms
+                  this.logger.debug(
+                    `[PositionTracker] price_near_resolution tokenId=${tokenId.slice(0, 16)}... price=${(currentPrice * 100).toFixed(2)}¢ but redeemable=false, keeping ACTIVE`,
+                  );
+
+                  // Check Gamma for market closed status (NOT redeemable)
+                  // This helps strategies know to stop trading, but position is NOT redeemable yet
+                  const cached = this.outcomeCache.get(tokenId);
+                  if (cached?.status === "RESOLVED") {
+                    // Gamma previously said this market is resolved
+                    // Mark as CLOSED_NOT_REDEEMABLE (trading should stop, but NOT redeemable)
+                    positionState = "CLOSED_NOT_REDEEMABLE";
+                    marketClosed = true;
+                    this.logger.debug(
+                      `[PositionTracker] state=CLOSED_NOT_REDEEMABLE tokenId=${tokenId.slice(0, 16)}... (Gamma cached resolved, Data-API not redeemable yet)`,
                     );
-
-                    // Cache the outcome for future refreshes (both new and legacy caches)
-                    this.setOutcomeCacheEntry(tokenId, {
-                      winner: winningOutcome,
-                      resolvedPrice: currentPrice,
-                      resolvedAtMs: Date.now(),
-                      lastCheckedMs: Date.now(),
-                      status: "RESOLVED",
-                    });
-                    if (
-                      this.marketOutcomeCache.size <
-                      PositionTracker.MAX_OUTCOME_CACHE_SIZE
-                    ) {
-                      this.marketOutcomeCache.set(marketId, winningOutcome);
-                    }
                   }
                 }
+
+                // Position stays ACTIVE (or CLOSED_NOT_REDEEMABLE if Gamma says closed)
+                // It is NEVER promoted to REDEEMABLE without Data-API flag
               }
 
               // === MULTI-SOURCE P&L PIPELINE ===
@@ -2020,6 +2096,10 @@ export class PositionTracker {
                 executablePnlUsd,
                 executableMarkCents,
                 conditionId,
+                // Strict state machine fields (Jan 2025)
+                positionState,
+                redeemableProofSource,
+                marketClosed,
               };
             } catch (err) {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;
@@ -2139,6 +2219,40 @@ export class PositionTracker {
           this.logger.info(
             `[PositionTracker] 📊 P&L Summary: ACTIVE: total=${activePositions.length} (prof=${activeProfitable.length} lose=${activeLosing.length} neutral=${activeNeutral.length} unknown=${activeUnknown.length}) | REDEEMABLE: ${redeemablePositions.length}`,
           );
+
+          // === STRICT STATE MACHINE DIAGNOSTIC ===
+          // Log detailed state breakdown using positionState field
+          const stateActive = positions.filter((p) => p.positionState === "ACTIVE").length;
+          const stateRedeemable = positions.filter((p) => p.positionState === "REDEEMABLE").length;
+          const stateClosedNotRedeemable = positions.filter((p) => p.positionState === "CLOSED_NOT_REDEEMABLE").length;
+          const stateUnknown = positions.filter((p) => p.positionState === "UNKNOWN").length;
+
+          // Count redeemable by proof source
+          const redeemableByDataApi = positions.filter((p) => p.redeemableProofSource === "DATA_API_FLAG").length;
+          const redeemableByOnchain = positions.filter((p) => p.redeemableProofSource === "ONCHAIN_DENOM").length;
+
+          // Final diagnostic: raw vs final counts
+          this.logger.info(
+            `[PositionTracker] 📈 State Diagnostic: raw_total=${rawTotal} raw_redeemable=${rawRedeemableCandidates} | final_active=${stateActive} final_redeemable=${stateRedeemable} final_closed_not_redeemable=${stateClosedNotRedeemable}`,
+          );
+
+          // Log redeemable proof sources (helps audit correct classification)
+          if (stateRedeemable > 0) {
+            this.logger.info(
+              `[PositionTracker] 🔍 Redeemable Proof: DATA_API_FLAG=${redeemableByDataApi} ONCHAIN_DENOM=${redeemableByOnchain}`,
+            );
+          }
+
+          // INTERNAL BUG CHECK: Redeemable without valid proof source is a BUG
+          // Use positionState instead of redeemable field to align with strict state machine
+          const redeemableWithoutProof = positions.filter(
+            (p) => p.positionState === "REDEEMABLE" && p.redeemableProofSource === "NONE"
+          );
+          if (redeemableWithoutProof.length > 0) {
+            this.logger.error(
+              `[PositionTracker] 🐛 INTERNAL BUG: ${redeemableWithoutProof.length} positions marked redeemable without valid proof source! tokenIds: ${redeemableWithoutProof.map((p) => p.tokenId.slice(0, 8)).join(", ")}`,
+            );
+          }
 
           // Log active profitable positions at DEBUG level (scalping candidates)
           if (activeProfitable.length > 0) {

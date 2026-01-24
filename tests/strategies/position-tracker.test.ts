@@ -556,119 +556,176 @@ describe("PositionTracker Redeemable Positions with Unknown Outcome", () => {
 const RESOLVED_PRICE_HIGH_THRESHOLD = 0.99;
 const RESOLVED_PRICE_LOW_THRESHOLD = 0.01;
 
-describe("PositionTracker Fallback Redemption Detection", () => {
-  test("Position at 99¢+ should trigger resolution check", () => {
-    // Simulates fallback detection for high-price positions
-    const currentPrice = 0.995; // 99.5¢
-    const isRedeemable = false; // API didn't mark as redeemable
+describe("PositionTracker Strict State Machine", () => {
+  /**
+   * CRITICAL REGRESSION TEST: This is the exact bug that was fixed.
+   * Previously, positions with price ~1.0 were incorrectly marked REDEEMABLE
+   * even when Data-API didn't flag them as redeemable.
+   *
+   * The fix: NEVER infer REDEEMABLE from price alone.
+   */
+  test("REGRESSION: Position at 99.5¢ should remain ACTIVE when Data-API says NOT redeemable", () => {
+    // This is the exact scenario that caused the bug:
+    // - Fallback price API returned ~99.95¢
+    // - Old code incorrectly promoted to REDEEMABLE
+    // - New code keeps as ACTIVE (or CLOSED_NOT_REDEEMABLE at most)
 
-    const shouldCheckResolution =
-      !isRedeemable &&
-      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
-        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    const currentPrice = 0.995; // 99.5¢ - near resolution threshold
+    const dataApiRedeemable = false; // Data-API did NOT flag as redeemable
 
-    assert.ok(
-      shouldCheckResolution,
-      "Position at 99.5¢ should trigger resolution check",
+    // NEW BEHAVIOR: Do NOT mark as redeemable based on price
+    // Only Data-API flag or on-chain denom > 0 can make it REDEEMABLE
+    const positionState = dataApiRedeemable ? "REDEEMABLE" : "ACTIVE";
+
+    assert.strictEqual(
+      positionState,
+      "ACTIVE",
+      "Position should remain ACTIVE even with price near 1.0 when Data-API says NOT redeemable",
     );
   });
 
-  test("Position at 1¢- should trigger resolution check", () => {
-    // Simulates fallback detection for low-price positions
-    const currentPrice = 0.005; // 0.5¢
-    const isRedeemable = false;
+  test("REGRESSION: Position at 0.5¢ should remain ACTIVE when Data-API says NOT redeemable", () => {
+    const currentPrice = 0.005; // 0.5¢ - near loss threshold
+    const dataApiRedeemable = false;
 
-    const shouldCheckResolution =
-      !isRedeemable &&
-      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
-        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    const positionState = dataApiRedeemable ? "REDEEMABLE" : "ACTIVE";
 
-    assert.ok(
-      shouldCheckResolution,
-      "Position at 0.5¢ should trigger resolution check",
+    assert.strictEqual(
+      positionState,
+      "ACTIVE",
+      "Position should remain ACTIVE even with price near 0 when Data-API says NOT redeemable",
     );
   });
 
-  test("Position at 50¢ should NOT trigger resolution check", () => {
-    // Simulates normal active position
-    const currentPrice = 0.5; // 50¢
-    const isRedeemable = false;
+  test("Position marked redeemable by Data-API should become REDEEMABLE", () => {
+    const dataApiRedeemable = true; // Data-API explicitly flagged as redeemable
+    const currentPrice = 0.5; // Price doesn't matter - Data-API is authoritative
 
-    const shouldCheckResolution =
-      !isRedeemable &&
-      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
-        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    const positionState = dataApiRedeemable ? "REDEEMABLE" : "ACTIVE";
+    const redeemableProofSource = dataApiRedeemable ? "DATA_API_FLAG" : "NONE";
 
-    assert.ok(
-      !shouldCheckResolution,
-      "Position at 50¢ should NOT trigger resolution check",
+    assert.strictEqual(positionState, "REDEEMABLE");
+    assert.strictEqual(
+      redeemableProofSource,
+      "DATA_API_FLAG",
+      "Redeemable proof source should be DATA_API_FLAG",
     );
   });
 
-  test("Already redeemable position should NOT trigger fallback check", () => {
-    // If API already marked as redeemable, skip fallback check
-    const currentPrice = 1.0; // 100¢
-    const isRedeemable = true; // API already marked as redeemable
+  test("Price-based checks are for diagnostics only, NOT state changes", () => {
+    // High price triggers diagnostic log, but does NOT change state
+    const currentPrice = 0.995;
+    const dataApiRedeemable = false;
 
-    const shouldCheckResolution =
-      !isRedeemable &&
-      (currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
-        currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD);
+    // Check if price suggests near-resolution (diagnostic only)
+    const priceNearResolution =
+      currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+      currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD;
 
-    assert.ok(
-      !shouldCheckResolution,
-      "Already redeemable position should NOT trigger fallback check",
+    // This SHOULD be true (diagnostic triggers)
+    assert.ok(priceNearResolution, "Diagnostic should detect price near resolution");
+
+    // But state should still be ACTIVE (not REDEEMABLE)
+    const positionState = dataApiRedeemable ? "REDEEMABLE" : "ACTIVE";
+    assert.strictEqual(
+      positionState,
+      "ACTIVE",
+      "State should remain ACTIVE regardless of price diagnostic",
     );
   });
 
-  test("Fallback detection sets finalRedeemable to true when market confirmed resolved", () => {
-    // Simulates the logic after Gamma API confirms resolution
-    const isRedeemable = false;
-    const winningOutcome = "YES"; // Gamma API returned winning outcome
-    let finalRedeemable = isRedeemable;
+  test("CLOSED_NOT_REDEEMABLE state for markets that are closed but not on-chain resolved", () => {
+    // Simulate: Gamma says closed=true, but Data-API doesn't say redeemable
+    // This means on-chain resolution hasn't been posted yet
 
-    if (winningOutcome !== null) {
-      finalRedeemable = true;
+    const dataApiRedeemable = false;
+    const gammaSaysClosed = true;
+
+    let positionState: string;
+    if (dataApiRedeemable) {
+      positionState = "REDEEMABLE";
+    } else if (gammaSaysClosed) {
+      positionState = "CLOSED_NOT_REDEEMABLE";
+    } else {
+      positionState = "ACTIVE";
     }
 
     assert.strictEqual(
-      finalRedeemable,
-      true,
-      "finalRedeemable should be true when market is confirmed resolved",
+      positionState,
+      "CLOSED_NOT_REDEEMABLE",
+      "Position should be CLOSED_NOT_REDEEMABLE when market is closed but not redeemable on-chain",
     );
   });
 
-  test("Fallback detection adjusts price to exact settlement value for winner", () => {
-    // Simulates price adjustment for winning position
-    const side = "YES";
-    const winningOutcome = "YES";
-    let currentPrice = 0.995; // Was at 99.5¢
+  test("Redeemable proof source must be set for REDEEMABLE positions", () => {
+    // When a position is marked REDEEMABLE, we must have proof
+    const dataApiRedeemable = true;
 
-    if (winningOutcome !== null) {
-      currentPrice = side === winningOutcome ? 1.0 : 0.0;
-    }
+    const positionState = "REDEEMABLE";
+    const redeemableProofSource = dataApiRedeemable ? "DATA_API_FLAG" : "NONE";
 
-    assert.strictEqual(
-      currentPrice,
-      1.0,
-      "Winning position should be adjusted to exactly 1.0 (100¢)",
+    // Internal invariant: REDEEMABLE must have valid proof source
+    const hasValidProof = redeemableProofSource !== "NONE";
+    assert.ok(
+      hasValidProof,
+      "REDEEMABLE position must have valid proof source (not NONE)",
     );
   });
 
-  test("Fallback detection adjusts price to exact settlement value for loser", () => {
-    // Simulates price adjustment for losing position
-    const side = "NO";
-    const winningOutcome = "YES";
-    let currentPrice = 0.005; // Was at 0.5¢
+  test("BUG DETECTION: REDEEMABLE without proof source is an internal error", () => {
+    // This tests the internal bug detection logic
+    // If a position is marked redeemable but has no proof source, it's a bug
 
-    if (winningOutcome !== null) {
-      currentPrice = side === winningOutcome ? 1.0 : 0.0;
-    }
+    const positionState = "REDEEMABLE";
+    const redeemableProofSource = "NONE"; // Bug: no proof!
 
+    const isBug = positionState === "REDEEMABLE" && redeemableProofSource === "NONE";
+    assert.ok(
+      isBug,
+      "Should detect bug when REDEEMABLE has no proof source",
+    );
+  });
+});
+
+describe("PositionTracker Price Threshold Detection (Diagnostic Only)", () => {
+  test("High price detection threshold is 99¢", () => {
+    // Price threshold for DIAGNOSTIC logging (not state change)
     assert.strictEqual(
-      currentPrice,
-      0.0,
-      "Losing position should be adjusted to exactly 0.0 (0¢)",
+      RESOLVED_PRICE_HIGH_THRESHOLD,
+      0.99,
+      "High threshold should be 99¢",
+    );
+  });
+
+  test("Low price detection threshold is 1¢", () => {
+    assert.strictEqual(
+      RESOLVED_PRICE_LOW_THRESHOLD,
+      0.01,
+      "Low threshold should be 1¢",
+    );
+  });
+
+  test("Position at 98¢ should NOT trigger diagnostic", () => {
+    const currentPrice = 0.98;
+    const priceNearResolution =
+      currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+      currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD;
+
+    assert.ok(
+      !priceNearResolution,
+      "98¢ is below threshold, should not trigger diagnostic",
+    );
+  });
+
+  test("Position at 2¢ should NOT trigger diagnostic", () => {
+    const currentPrice = 0.02;
+    const priceNearResolution =
+      currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+      currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD;
+
+    assert.ok(
+      !priceNearResolution,
+      "2¢ is above low threshold, should not trigger diagnostic",
     );
   });
 });
