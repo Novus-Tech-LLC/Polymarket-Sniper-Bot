@@ -118,6 +118,13 @@ export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
 const FAILED_LIQUIDATION_COOLDOWN_MS = 5 * 60 * 1000;
 
 /**
+ * Maximum number of entries to keep in the failedLiquidationCooldowns map.
+ * Prevents unbounded memory growth if positions are removed through other means
+ * (e.g., sold externally, redeemed, manually removed) before their cooldown expires.
+ */
+const MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES = 1000;
+
+/**
  * Threshold for detecting essentially resolved markets.
  * When the opposite side price >= this threshold, the market is
  * considered resolved and liquidation is skipped in favor of redemption.
@@ -172,6 +179,9 @@ export class SimpleSmartHedgingStrategy {
       return 0;
     }
 
+    // Clean up expired cooldown entries periodically to prevent memory leaks
+    this.cleanupExpiredCooldowns();
+
     const positions = this.positionTracker.getPositions();
     let actionsCount = 0;
     const now = Date.now();
@@ -193,7 +203,7 @@ export class SimpleSmartHedgingStrategy {
         );
         continue;
       }
-      // Clean up expired cooldown entries
+      // Clean up expired cooldown entries (for current position)
       if (cooldownUntil && now >= cooldownUntil) {
         this.failedLiquidationCooldowns.delete(key);
       }
@@ -617,6 +627,50 @@ export class SimpleSmartHedgingStrategy {
       };
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Clean up expired cooldown entries to prevent unbounded memory growth.
+   * 
+   * This handles cases where positions are removed through other means
+   * (e.g., sold externally, redeemed, manually removed) before their
+   * cooldown expires. Without cleanup, entries would accumulate indefinitely.
+   * 
+   * Strategy:
+   * 1. Remove all entries with expired timestamps
+   * 2. If still over max size, remove oldest entries
+   */
+  private cleanupExpiredCooldowns(): void {
+    const now = Date.now();
+    let expiredCount = 0;
+
+    // First pass: remove all expired entries
+    for (const [key, expiresAt] of this.failedLiquidationCooldowns) {
+      if (now >= expiresAt) {
+        this.failedLiquidationCooldowns.delete(key);
+        expiredCount++;
+      }
+    }
+
+    // Second pass: if still over max size, remove oldest entries
+    if (this.failedLiquidationCooldowns.size > MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES) {
+      const entries = Array.from(this.failedLiquidationCooldowns.entries());
+      // Sort by expiration time (oldest first)
+      entries.sort((a, b) => a[1] - b[1]);
+      
+      const toRemove = entries.length - MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES;
+      for (let i = 0; i < toRemove; i++) {
+        this.failedLiquidationCooldowns.delete(entries[i][0]);
+      }
+      
+      this.logger.debug(
+        `[SimpleHedging] Cleaned up ${expiredCount} expired + ${toRemove} oldest cooldown entries (max: ${MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES})`,
+      );
+    } else if (expiredCount > 0) {
+      this.logger.debug(
+        `[SimpleHedging] Cleaned up ${expiredCount} expired cooldown entries`,
+      );
     }
   }
 
