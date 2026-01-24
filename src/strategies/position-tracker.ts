@@ -3,17 +3,47 @@ import type { ConsoleLogger } from "../utils/logger.util";
 import { httpGet } from "../utils/fetch-data.util";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
 
+/**
+ * Position status indicating tradability
+ */
+export type PositionStatus = "ACTIVE" | "REDEEMABLE" | "RESOLVED" | "DUST" | "NO_BOOK";
+
 export interface Position {
   marketId: string;
   tokenId: string;
   side: string; // Outcome name (e.g., "YES", "NO" for binary markets, or "Medjedovic", "Under" for multi-outcome markets)
   size: number;
   entryPrice: number;
-  currentPrice: number;
+  currentPrice: number; // Mark price for P&L: uses BEST BID for active positions (what we can sell at)
   pnlPct: number;
   pnlUsd: number;
   redeemable?: boolean; // True if market is resolved/closed
   marketEndTime?: number; // Market close time (Unix timestamp ms) - used for near-close hedging behavior
+  /**
+   * Best bid price from CLOB orderbook (what we can sell at)
+   * This is the CANONICAL mark price for active positions.
+   * undefined if no orderbook available (NO_BOOK status)
+   */
+  currentBidPrice?: number;
+  /**
+   * Best ask price from CLOB orderbook (what we would pay to buy)
+   * Used for cost basis calculations and spread analysis.
+   * undefined if no orderbook available
+   */
+  currentAskPrice?: number;
+  /**
+   * Position status for strategy routing:
+   * - ACTIVE: Can be traded, has valid orderbook
+   * - NO_BOOK: Active market but no orderbook data available (use fallback pricing)
+   * - REDEEMABLE/RESOLVED: Market resolved, route to AutoRedeem
+   * - DUST: Position too small to trade profitably
+   */
+  status?: PositionStatus;
+  /**
+   * Age of the orderbook cache in milliseconds
+   * Used for debugging stale data issues
+   */
+  cacheAgeMs?: number;
 }
 
 // Price display constants
@@ -67,6 +97,29 @@ export class PositionTracker {
   private marketEndTimeCache: Map<string, number> = new Map();
   private static readonly MAX_END_TIME_CACHE_SIZE = 1000;
 
+  /**
+   * Orderbook cache with TTL for accurate P&L calculation
+   * Stores best bid/ask per tokenId with timestamp for staleness detection
+   * 
+   * WHY PREVIOUS P&L SHOWED 0.0% AND ALL LOSING:
+   * The old code used mid-price ((bestBid + bestAsk) / 2) for P&L calculations.
+   * For sell-to-realize-profit scenarios, we MUST use the BEST BID - what we can actually sell at.
+   * Using mid-price caused:
+   * 1. Overestimation of position value when spread is wide
+   * 2. 0.0% readings when mid-price happened to equal entry price
+   * 3. All positions appearing as losing when bid was significantly below mid
+   * 
+   * FIX: Now we use BEST BID as the mark price for active positions.
+   */
+  private orderbookCache: Map<string, {
+    bestBid: number;
+    bestAsk: number;
+    fetchedAt: number; // Unix timestamp ms
+  }> = new Map();
+  private static readonly ORDERBOOK_CACHE_TTL_MS = 2000; // 2 seconds for active trading
+  private static readonly POSITION_BALANCE_CACHE_TTL_MS = 5000; // 5 seconds for position balances
+  private static readonly MAX_ORDERBOOK_CACHE_SIZE = 500;
+
   // API timeout constant for external API calls
   private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
 
@@ -85,6 +138,13 @@ export class PositionTracker {
   // This helps detect redeemable positions even when API doesn't mark them as redeemable
   private static readonly RESOLVED_PRICE_HIGH_THRESHOLD = 0.99;
   private static readonly RESOLVED_PRICE_LOW_THRESHOLD = 0.01;
+
+  // P&L sanity check thresholds
+  // Used to detect TOKEN_MISMATCH_OR_BOOK_FETCH_BUG:
+  // If bid is near zero but market appears liquid (mid > threshold, spread < threshold)
+  private static readonly SANITY_CHECK_BID_NEAR_ZERO = 0.001;  // Bid below 0.1¢ considered "near zero"
+  private static readonly SANITY_CHECK_MID_PRICE_MIN = 0.10;   // Mid-price > 10¢ suggests active market
+  private static readonly SANITY_CHECK_MAX_SPREAD = 0.20;      // Spread < 20¢ suggests liquid market
 
   // Rate-limit P&L summary logging to avoid log spam (refreshes every 5s)
   private lastPnlSummaryLogAt = 0;
@@ -157,7 +217,27 @@ export class PositionTracker {
     this.marketOutcomeCache.clear();
     this.missingOrderbooks.clear();
     this.loggedFallbackPrices.clear();
+    this.orderbookCache.clear();
     this.logger.info("[PositionTracker] Stopped position tracking");
+  }
+
+  /**
+   * Invalidate orderbook cache for a specific token
+   * Call this after a trade fill to ensure fresh pricing on next lookup
+   */
+  invalidateOrderbookCache(tokenId: string): void {
+    this.orderbookCache.delete(tokenId);
+    this.logger.debug(`[PositionTracker] Invalidated orderbook cache for ${tokenId.slice(0, 16)}...`);
+  }
+
+  /**
+   * Invalidate all orderbook caches
+   * Call this when a significant market event occurs
+   */
+  invalidateAllOrderbookCaches(): void {
+    const count = this.orderbookCache.size;
+    this.orderbookCache.clear();
+    this.logger.debug(`[PositionTracker] Invalidated ${count} orderbook cache entries`);
   }
 
   /**
@@ -549,10 +629,17 @@ export class PositionTracker {
 
               // Skip orderbook fetch for resolved/closed markets (no orderbook available)
               let currentPrice: number;
+              let bestBidPrice: number | undefined;
+              let bestAskPrice: number | undefined;
+              let positionStatus: PositionStatus = "ACTIVE";
+              let cacheAgeMs: number | undefined;
               const isRedeemable = apiPos.redeemable === true;
 
               if (isRedeemable) {
-                // Market is resolved - fetch the actual market outcome to determine settlement price
+                // Market is resolved - set status to REDEEMABLE
+                positionStatus = "REDEEMABLE";
+                
+                // Fetch the actual market outcome to determine settlement price
                 // Use marketId as cache key since all tokens in the same market share the same outcome
                 // This avoids redundant Gamma API calls for multi-outcome markets
                 let winningOutcome: string | null | undefined =
@@ -648,9 +735,23 @@ export class PositionTracker {
                 }
               } else {
                 // Active market - fetch current orderbook with fallback to price API
+                // CRITICAL: Use BEST BID as mark price for P&L (what we can actually sell at)
+                // This fixes the previous bug where mid-price caused 0.0% P&L readings
+                
                 try {
-                  // Skip orderbook fetch if we know it's missing (cached)
-                  if (this.missingOrderbooks.has(tokenId)) {
+                  // Check TTL cache first
+                  const cached = this.orderbookCache.get(tokenId);
+                  const now = Date.now();
+                  
+                  if (cached && (now - cached.fetchedAt) < PositionTracker.ORDERBOOK_CACHE_TTL_MS) {
+                    // Use cached values
+                    bestBidPrice = cached.bestBid;
+                    bestAskPrice = cached.bestAsk;
+                    cacheAgeMs = now - cached.fetchedAt;
+                    currentPrice = bestBidPrice; // Use BEST BID as mark price
+                  } else if (this.missingOrderbooks.has(tokenId)) {
+                    // Skip orderbook fetch if we know it's missing (cached)
+                    positionStatus = "NO_BOOK";
                     currentPrice = await this.fetchPriceFallback(tokenId);
                   } else {
                     try {
@@ -659,14 +760,58 @@ export class PositionTracker {
                       if (!orderbook.bids?.[0] || !orderbook.asks?.[0]) {
                         // Orderbook is empty - cache and use fallback
                         this.missingOrderbooks.add(tokenId);
+                        positionStatus = "NO_BOOK";
                         this.logger.debug(
                           `[PositionTracker] Empty orderbook for tokenId: ${tokenId}, using fallback price API`,
                         );
                         currentPrice = await this.fetchPriceFallback(tokenId);
                       } else {
-                        const bestBid = parseFloat(orderbook.bids[0].price);
-                        const bestAsk = parseFloat(orderbook.asks[0].price);
-                        currentPrice = (bestBid + bestAsk) / 2;
+                        bestBidPrice = parseFloat(orderbook.bids[0].price);
+                        bestAskPrice = parseFloat(orderbook.asks[0].price);
+                        
+                        // CRITICAL FIX: Use BEST BID as mark price for P&L
+                        // This is what we can actually sell at, not the mid-price
+                        currentPrice = bestBidPrice;
+                        cacheAgeMs = 0; // Fresh fetch
+                        
+                        // Cache the orderbook data with proper eviction
+                        // Remove entries until we're under the limit before adding new one
+                        while (this.orderbookCache.size >= PositionTracker.MAX_ORDERBOOK_CACHE_SIZE) {
+                          // Remove oldest entry (first key in Map iteration order - FIFO)
+                          const firstKey = this.orderbookCache.keys().next().value;
+                          if (firstKey) {
+                            this.orderbookCache.delete(firstKey);
+                          } else {
+                            break; // Safety: exit if no keys found
+                          }
+                        }
+                        this.orderbookCache.set(tokenId, {
+                          bestBid: bestBidPrice,
+                          bestAsk: bestAskPrice,
+                          fetchedAt: Date.now(),
+                        });
+                        
+                        // P&L SANITY CHECK: Validate computed price against UI-like expectations
+                        // If computed bid is near 0 but market looks liquid, flag potential mismatch
+                        const spread = bestAskPrice - bestBidPrice;
+                        const midPrice = (bestBidPrice + bestAskPrice) / 2;
+                        if (bestBidPrice < PositionTracker.SANITY_CHECK_BID_NEAR_ZERO && 
+                            midPrice > PositionTracker.SANITY_CHECK_MID_PRICE_MIN && 
+                            spread < PositionTracker.SANITY_CHECK_MAX_SPREAD) {
+                          // Bid near zero but market appears liquid - likely a bug
+                          this.logger.error(
+                            `[PositionTracker] ⚠️ TOKEN_MISMATCH_OR_BOOK_FETCH_BUG: tokenId=${tokenId.slice(0, 16)}..., ` +
+                            `bid=${(bestBidPrice * 100).toFixed(2)}¢, ask=${(bestAskPrice * 100).toFixed(2)}¢, ` +
+                            `mid=${(midPrice * 100).toFixed(2)}¢, spread=${(spread * 100).toFixed(2)}¢ - ` +
+                            `Book appears liquid but bid near zero`
+                          );
+                          // Log first 3 levels for debugging
+                          this.logger.debug(
+                            `[PositionTracker] Book levels for ${tokenId.slice(0, 16)}...: ` +
+                            `bids=[${orderbook.bids.slice(0, 3).map(b => `${b.price}@${b.size}`).join(", ")}], ` +
+                            `asks=[${orderbook.asks.slice(0, 3).map(a => `${a.price}@${a.size}`).join(", ")}]`
+                          );
+                        }
                       }
                     } catch (orderbookErr) {
                       const orderbookErrMsg =
@@ -680,6 +825,7 @@ export class PositionTracker {
                       ) {
                         // 404 or not found - cache and use fallback
                         this.missingOrderbooks.add(tokenId);
+                        positionStatus = "NO_BOOK";
                         this.logger.debug(
                           `[PositionTracker] Orderbook not found for tokenId: ${tokenId}, using fallback price API`,
                         );
@@ -765,6 +911,11 @@ export class PositionTracker {
                 marketEndTime = await this.fetchMarketEndTime(tokenId);
               }
 
+              // Determine final position status
+              const finalStatus: PositionStatus = finalRedeemable 
+                ? "REDEEMABLE" 
+                : positionStatus;
+
               return {
                 marketId,
                 tokenId,
@@ -776,6 +927,10 @@ export class PositionTracker {
                 pnlUsd,
                 redeemable: finalRedeemable,
                 marketEndTime,
+                currentBidPrice: bestBidPrice,
+                currentAskPrice: bestAskPrice,
+                status: finalStatus,
+                cacheAgeMs,
               };
             } catch (err) {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;

@@ -304,6 +304,17 @@ export class ScalpTakeProfitStrategy {
   private lastSummaryLogAt = 0;
   private lastLoggedCounts = { profitable: 0, losing: 0, total: 0 };
 
+  /**
+   * Hysteresis tracking for skip log spam reduction
+   * Key: positionKey, Value: { lastLogAt: timestamp, lastPnlPct: number }
+   * Only log "Skip... Profit X%" if:
+   * 1. Haven't logged for this position in last SKIP_LOG_COOLDOWN_MS, OR
+   * 2. P&L has changed by more than SKIP_LOG_HYSTERESIS_PCT since last log
+   */
+  private skipLogTracker: Map<string, { lastLogAt: number; lastPnlPct: number }> = new Map();
+  private static readonly SKIP_LOG_COOLDOWN_MS = 30_000; // Only log skip reason once per 30 seconds per position
+  private static readonly SKIP_LOG_HYSTERESIS_PCT = 2.0; // Log again if P&L changes by more than 2%
+
   // Constants
   private static readonly SUMMARY_LOG_INTERVAL_MS = 60_000; // Log summary at most once per minute
   // Value used when no entry time is available - assumes position held long enough for all checks
@@ -452,6 +463,33 @@ export class ScalpTakeProfitStrategy {
         continue;
       }
 
+      // STRATEGY GATE: Skip positions with NO_BOOK status
+      // These positions have no orderbook data - P&L calculation uses fallback pricing
+      // which may be inaccurate. Better to skip than make bad decisions.
+      if (position.status === "NO_BOOK") {
+        // Rate-limited logging for NO_BOOK positions
+        if (this.shouldLogSkip(positionKey, position.pnlPct)) {
+          this.logger.debug(
+            `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: NO_BOOK - no orderbook available, cannot reliably assess P&L`,
+          );
+          this.recordSkipLog(positionKey, position.pnlPct);
+        }
+        continue;
+      }
+
+      // STRATEGY GATE: Verify we have bid price for accurate P&L
+      // If currentBidPrice is undefined, P&L may be based on fallback/stale data
+      if (position.currentBidPrice === undefined) {
+        if (this.shouldLogSkip(positionKey, position.pnlPct)) {
+          this.logger.debug(
+            `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: NO_BID - missing bid price, P&L unreliable ` +
+            `(entry=${(position.entryPrice * 100).toFixed(1)}¢, current=${(position.currentPrice * 100).toFixed(1)}¢)`,
+          );
+          this.recordSkipLog(positionKey, position.pnlPct);
+        }
+        continue;
+      }
+
       // Check if this is a low-price position that needs special handling
       // Low-price positions can intentionally exit at small losses after lowPriceMaxHoldMinutes
       const isLowPricePosition =
@@ -470,9 +508,13 @@ export class ScalpTakeProfitStrategy {
 
       if (!exitDecision.shouldExit) {
         if (exitDecision.reason) {
-          this.logger.debug(
-            `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: ${exitDecision.reason}`,
-          );
+          // Use hysteresis to reduce log spam
+          if (this.shouldLogSkip(positionKey, position.pnlPct)) {
+            this.logger.debug(
+              `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: ${exitDecision.reason}`,
+            );
+            this.recordSkipLog(positionKey, position.pnlPct);
+          }
         }
         continue;
       }
@@ -487,6 +529,12 @@ export class ScalpTakeProfitStrategy {
         scalpedCount++;
         this.exitedPositions.add(positionKey);
         this.updateStats(position);
+        
+        // Clear skip log tracker since position is now exited
+        this.skipLogTracker.delete(positionKey);
+        
+        // Invalidate orderbook cache for this token to ensure fresh data on next refresh
+        this.positionTracker.invalidateOrderbookCache(position.tokenId);
       }
     }
 
@@ -982,6 +1030,45 @@ export class ScalpTakeProfitStrategy {
   }
 
   /**
+   * Check if we should log a skip reason for this position
+   * Implements hysteresis to reduce log spam:
+   * 1. Must have been > SKIP_LOG_COOLDOWN_MS since last log for this position, OR
+   * 2. P&L must have changed by > SKIP_LOG_HYSTERESIS_PCT since last log
+   */
+  private shouldLogSkip(positionKey: string, currentPnlPct: number): boolean {
+    const tracker = this.skipLogTracker.get(positionKey);
+    const now = Date.now();
+    
+    if (!tracker) {
+      // Never logged for this position
+      return true;
+    }
+    
+    // Check cooldown
+    if (now - tracker.lastLogAt >= ScalpTakeProfitStrategy.SKIP_LOG_COOLDOWN_MS) {
+      return true;
+    }
+    
+    // Check P&L change threshold (hysteresis)
+    const pnlChange = Math.abs(currentPnlPct - tracker.lastPnlPct);
+    if (pnlChange >= ScalpTakeProfitStrategy.SKIP_LOG_HYSTERESIS_PCT) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Record that we logged a skip for this position
+   */
+  private recordSkipLog(positionKey: string, pnlPct: number): void {
+    this.skipLogTracker.set(positionKey, {
+      lastLogAt: Date.now(),
+      lastPnlPct: pnlPct,
+    });
+  }
+
+  /**
    * Clean up tracking data for positions that no longer exist
    */
   private cleanupStaleData(currentPositions: Position[]): void {
@@ -1008,6 +1095,13 @@ export class ScalpTakeProfitStrategy {
     for (const key of this.exitedPositions) {
       if (!currentKeys.has(key)) {
         this.exitedPositions.delete(key);
+      }
+    }
+
+    // Clean up skip log tracker for positions that are no longer tracked
+    for (const key of this.skipLogTracker.keys()) {
+      if (!currentKeys.has(key)) {
+        this.skipLogTracker.delete(key);
       }
     }
   }
