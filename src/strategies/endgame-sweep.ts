@@ -9,6 +9,10 @@
  * 3. Buy if we have capacity
  *
  * That's it. No complex quality scoring, no elaborate spread analysis.
+ *
+ * DYNAMIC RESERVES INTEGRATION:
+ * - If reservePlan is provided and mode is RISK_OFF, skip all BUY operations
+ * - This prevents overtrading when we lack hedge/exit reserves
  */
 
 import type { ClobClient } from "@polymarket/clob-client";
@@ -17,6 +21,7 @@ import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
+import type { ReservePlan } from "../risk";
 
 /**
  * Endgame Sweep Configuration
@@ -81,9 +86,19 @@ export class EndgameSweepStrategy {
    * Execute the strategy
    *
    * SINGLE-FLIGHT: Skips if already running (returns 0)
+   *
+   * @param reservePlan Optional reserve plan for RISK_OFF gating. If mode is RISK_OFF, BUYs are blocked.
    */
-  async execute(): Promise<number> {
+  async execute(reservePlan?: ReservePlan): Promise<number> {
     if (!this.config.enabled) {
+      return 0;
+    }
+
+    // RISK_OFF gate: block all BUYs when reserves are insufficient
+    if (reservePlan?.mode === "RISK_OFF") {
+      this.logger.debug(
+        `[EndgameSweep] RISK_OFF - skipping BUYs (shortfall=$${reservePlan.shortfall.toFixed(2)})`,
+      );
       return 0;
     }
 
