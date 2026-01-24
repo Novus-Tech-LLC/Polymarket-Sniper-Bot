@@ -196,8 +196,9 @@ export class EntryMetaResolver {
     tokenId: string,
     marketId: string,
   ): Promise<EntryMeta | null> {
-    // Fetch ALL trades (both BUY and SELL) for this address to reconstruct position
-    // We need both to calculate remaining shares and weighted average
+    // Fetch trades (BUY and SELL) for this specific tokenId to reconstruct position
+    // Filter by asset=tokenId so we only get trades for this outcome, not all user trades
+    // We need both BUY and SELL to calculate remaining shares and weighted average
     const trades: TradeItem[] = [];
     let offset = 0;
     let pageCount = 0;

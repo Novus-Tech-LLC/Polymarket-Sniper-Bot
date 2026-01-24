@@ -591,7 +591,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         conditionId: "market-1",
         asset: "token-1",
         side: "SELL",
-        size: 99.99999, // Near-complete sell (floating point) - sell more to trigger dust threshold
+        size: 99.99999, // Near-complete sell leaving dust-level remainder (~0.00001 shares)
         price: 0.70,
       },
     ];

@@ -1795,8 +1795,8 @@ export class PositionTracker {
    * Invalidate entry metadata cache for a specific token.
    * Call this after a trade fill to ensure fresh entry data on next lookup.
    */
-  invalidateEntryMetaCache(tokenId: string): void {
-    const { resolveSignerAddress } = require("../utils/funds-allowance.util");
+  async invalidateEntryMetaCache(tokenId: string): Promise<void> {
+    const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
     const walletAddress = resolveSignerAddress(this.client);
     this.entryMetaResolver.invalidateCache(walletAddress, tokenId);
   }
