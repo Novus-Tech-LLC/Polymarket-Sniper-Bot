@@ -16,6 +16,12 @@ import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker, Position } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
+import {
+  LogDeduper,
+  SkipReasonAggregator,
+  SKIP_LOG_TTL_MS,
+  TOKEN_ID_DISPLAY_LENGTH,
+} from "../utils/log-deduper.util";
 
 /**
  * Smart Hedging Configuration
@@ -158,6 +164,14 @@ export class SmartHedgingStrategy {
   // Key: position key (marketId-tokenId), Value: timestamp when cooldown expires
   private failedLiquidationCooldowns: Map<string, number> = new Map();
 
+  // === LOG DEDUPLICATION ===
+  // Prevents per-position skip log spam by tracking state changes
+  private logDeduper = new LogDeduper();
+  // Track last skip reason per tokenId to detect state changes
+  private lastSkipReasonByTokenId: Map<string, string> = new Map();
+  // Cycle counter for summary logging
+  private cycleCount = 0;
+
   constructor(config: {
     client: ClobClient;
     logger: ConsoleLogger;
@@ -209,22 +223,25 @@ export class SmartHedgingStrategy {
     const positions = this.positionTracker.getPositions();
     let actionsCount = 0;
     const now = Date.now();
+    this.cycleCount++;
+
+    // === LOG DEDUPLICATION: Aggregate skip reasons instead of per-position logs ===
+    const skipAggregator = new SkipReasonAggregator();
 
     for (const position of positions) {
       const key = `${position.marketId}-${position.tokenId}`;
+      const tokenIdShort = position.tokenId.slice(0, TOKEN_ID_DISPLAY_LENGTH);
 
       // Skip if already hedged
       if (this.hedgedPositions.has(key)) {
+        skipAggregator.add(tokenIdShort, "already_hedged");
         continue;
       }
 
       // Skip if in failed liquidation cooldown (prevents repeated attempts)
       const cooldownUntil = this.failedLiquidationCooldowns.get(key);
       if (cooldownUntil && now < cooldownUntil) {
-        const remainingSec = Math.ceil((cooldownUntil - now) / 1000);
-        this.logger.debug(
-          `[SmartHedging] ⏳ Skipping position in liquidation cooldown: ${key} (${remainingSec}s remaining)`,
-        );
+        skipAggregator.add(tokenIdShort, "cooldown");
         continue;
       }
       // Clean up expired cooldown entries (for current position)
@@ -234,37 +251,34 @@ export class SmartHedgingStrategy {
 
       // Skip if not losing enough
       if (position.pnlPct > -this.config.triggerLossPct) {
-        // Only log for positions with meaningful loss (>5%) to reduce noise
-        if (position.pnlPct < -5) {
-          this.logger.debug(
-            `[SmartHedging] 📋 Skip hedge (loss trigger): ${position.side} position pnlPct=${position.pnlPct.toFixed(1)}% > trigger=-${this.config.triggerLossPct}%`,
-          );
-        }
+        skipAggregator.add(tokenIdShort, "loss_below_trigger");
         continue;
       }
 
       // Skip if entry price too high (not risky tier)
       if (position.entryPrice >= this.config.maxEntryPrice) {
-        this.logger.debug(
-          `[SmartHedging] 📋 Skip hedge (entry price gate): ${position.side} entryPrice=${(position.entryPrice * 100).toFixed(0)}¢ >= maxEntryPrice=${(this.config.maxEntryPrice * 100).toFixed(0)}¢`,
-        );
+        skipAggregator.add(tokenIdShort, "entry_price_high");
         continue;
       }
 
       // Skip if no side defined (can't hedge without knowing the outcome)
       const side = position.side?.toUpperCase();
       if (!side || side.trim() === "") {
-        this.logger.debug(
-          `[SmartHedging] 📋 Skip hedge (no side): position tokenId=${position.tokenId.slice(0, 16)}... has no side defined`,
-        );
+        skipAggregator.add(tokenIdShort, "no_side");
         continue;
       }
 
-      // Skip resolved positions
+      // Skip resolved positions - log state change only
       if (position.redeemable) {
-        this.logger.debug(
-          `[SmartHedging] 📋 Skip hedge (redeemable): ${position.side} position already redeemable`,
-        );
+        const previousReason = this.lastSkipReasonByTokenId.get(key);
+        if (previousReason !== "redeemable") {
+          // State changed to redeemable - this is noteworthy
+          this.logger.info(
+            `[SmartHedging] 🔄 Position became redeemable: ${position.side} ${tokenIdShort}... (routing to AutoRedeem)`,
+          );
+          this.lastSkipReasonByTokenId.set(key, "redeemable");
+        }
+        skipAggregator.add(tokenIdShort, "redeemable");
         continue;
       }
 
@@ -276,17 +290,13 @@ export class SmartHedgingStrategy {
       );
       if (!entryTime) {
         // If we don't have an entry time, be conservative and skip this position
-        this.logger.debug(
-          `[SmartHedging] ⏳ Skipping position without entryTime for min-hold check (marketId=${position.marketId}, tokenId=${position.tokenId})`,
-        );
+        skipAggregator.add(tokenIdShort, "no_entry_time");
         continue;
       }
 
       const holdSeconds = (now - entryTime) / 1000;
       if (holdSeconds < this.config.minHoldSeconds) {
-        this.logger.debug(
-          `[SmartHedging] ⏳ Position losing ${Math.abs(position.pnlPct).toFixed(1)}% but held only ${holdSeconds.toFixed(0)}s (need ${this.config.minHoldSeconds}s) - waiting`,
-        );
+        skipAggregator.add(tokenIdShort, "hold_time_short");
         continue;
       }
 
@@ -319,9 +329,8 @@ export class SmartHedgingStrategy {
               );
             }
           } else {
-            this.logger.debug(
-              `[SmartHedging] ⏳ No-hedge window (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% - skipping (too late to hedge)`,
-            );
+            // Use aggregator for near-close skips (no per-position log spam)
+            skipAggregator.add(tokenIdShort, "no_hedge_window");
           }
           continue;
         }
@@ -336,9 +345,8 @@ export class SmartHedgingStrategy {
           const meetsLossThreshold = lossPct >= this.config.nearCloseLossPct;
 
           if (!meetsDropThreshold && !meetsLossThreshold) {
-            this.logger.debug(
-              `[SmartHedging] ⏳ Near-close (${minutesToClose.toFixed(1)}min to close), loss ${lossPct.toFixed(1)}% / drop ${priceDropCents.toFixed(1)}¢ - skipping (thresholds: ${this.config.nearCloseLossPct}% or ${this.config.nearClosePriceDropCents}¢)`,
-            );
+            // Use aggregator for near-close threshold skips
+            skipAggregator.add(tokenIdShort, "near_close_threshold");
             continue;
           }
 
@@ -483,6 +491,16 @@ export class SmartHedgingStrategy {
         );
         this.logger.warn(
           `[SmartHedging] ⏳ Hedge and liquidation both failed - position on cooldown for 5 minutes: ${key}`,
+        );
+      }
+    }
+
+    // === LOG DEDUPLICATION: Emit aggregated skip summary (rate-limited) ===
+    if (skipAggregator.hasSkips()) {
+      const fingerprint = skipAggregator.getFingerprint();
+      if (this.logDeduper.shouldLogSummary("Hedging", fingerprint)) {
+        this.logger.debug(
+          `[SmartHedging] Skipped ${skipAggregator.getTotalCount()} positions: ${skipAggregator.getSummary()} (cycle=${this.cycleCount})`,
         );
       }
     }

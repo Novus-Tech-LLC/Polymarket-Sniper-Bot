@@ -3,6 +3,7 @@ import type { ConsoleLogger } from "../utils/logger.util";
 import { httpGet } from "../utils/fetch-data.util";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
 import { EntryMetaResolver, type EntryMeta } from "./entry-meta-resolver";
+import { LogDeduper, SKIP_LOG_TTL_MS, HEARTBEAT_INTERVAL_MS } from "../utils/log-deduper.util";
 
 /**
  * Position status indicating tradability
@@ -206,6 +207,12 @@ export class PositionTracker {
 
   // Batch size for Gamma API requests (limit URL length)
   private static readonly GAMMA_BATCH_SIZE = 25; // Max tokenIds per Gamma request
+
+  // === LOG DEDUPLICATION ===
+  // Shared LogDeduper for rate-limiting and deduplicating logs
+  private logDeduper = new LogDeduper();
+  // Track last logged position counts for change detection
+  private lastLoggedPositionCount = -1;
 
   /**
    * Orderbook cache with TTL for accurate P&L calculation
@@ -434,10 +441,8 @@ export class PositionTracker {
   async refresh(): Promise<void> {
     // Prevent concurrent refreshes (race condition protection)
     if (this.isRefreshing) {
-      // Rate-limit the "refresh already in progress" log to avoid log spam
-      const now = Date.now();
-      if (now - this.lastSkipRefreshLogAt >= PositionTracker.SKIP_REFRESH_LOG_INTERVAL_MS) {
-        this.lastSkipRefreshLogAt = now;
+      // Rate-limit the "refresh already in progress" log using LogDeduper
+      if (this.logDeduper.shouldLog("Tracker:skip_refresh_in_progress", PositionTracker.SKIP_REFRESH_LOG_INTERVAL_MS)) {
         this.logger.debug(
           "[PositionTracker] Refresh already in progress, skipping",
         );
@@ -448,9 +453,12 @@ export class PositionTracker {
     // Enforce minimum refresh interval to prevent API hammering
     const timeSinceLastRefresh = Date.now() - this.lastRefreshCompletedAt;
     if (timeSinceLastRefresh < PositionTracker.MIN_REFRESH_INTERVAL_MS && this.lastRefreshCompletedAt > 0) {
-      this.logger.debug(
-        `[PositionTracker] Skipping refresh - only ${timeSinceLastRefresh}ms since last refresh (min: ${PositionTracker.MIN_REFRESH_INTERVAL_MS}ms)`,
-      );
+      // Rate-limit this log too - only log when skipping starts or periodically
+      if (this.logDeduper.shouldLog("Tracker:skip_refresh_interval", PositionTracker.SKIP_REFRESH_LOG_INTERVAL_MS)) {
+        this.logger.debug(
+          `[PositionTracker] Skipping refresh - throttled (min interval: ${PositionTracker.MIN_REFRESH_INTERVAL_MS}ms)`,
+        );
+      }
       return;
     }
 
@@ -827,13 +835,20 @@ export class PositionTracker {
       );
 
       if (!apiPositions || apiPositions.length === 0) {
-        this.logger.debug("[PositionTracker] No positions found");
+        // Rate-limit "no positions" log
+        if (this.logDeduper.shouldLog("Tracker:no_positions", HEARTBEAT_INTERVAL_MS)) {
+          this.logger.debug("[PositionTracker] No positions found");
+        }
         return [];
       }
 
-      this.logger.debug(
-        `[PositionTracker] Fetched ${apiPositions.length} positions from API`,
-      );
+      // Rate-limit "fetched N positions" log - log on count change or heartbeat
+      const countFingerprint = String(apiPositions.length);
+      if (this.logDeduper.shouldLog("Tracker:fetched_count", HEARTBEAT_INTERVAL_MS, countFingerprint)) {
+        this.logger.debug(
+          `[PositionTracker] Fetched ${apiPositions.length} positions from API`,
+        );
+      }
 
       // PHASE 1: Pre-process positions and collect tokenIds needing outcome fetch
       // This allows us to batch the Gamma API calls
