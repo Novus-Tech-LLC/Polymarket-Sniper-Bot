@@ -159,7 +159,9 @@ export interface RefreshMetrics {
 export type SnapshotValidationFailure =
   | "ACTIVE_COLLAPSE_BUG" // raw_total > 0 && raw_active > 0 but final active = 0
   | "FETCH_REGRESSION" // new total < 20% of previous (suspicious drop)
-  | "ADDRESS_FLIP_COLLAPSE"; // address changed AND position counts collapsed
+  | "ADDRESS_FLIP_COLLAPSE" // address changed AND position counts collapsed
+  | "SUSPICIOUS_SHRINK" // catastrophic drop: rawTotal < 25% of lastGood when lastGood >= 20
+  | "ACTIVE_WIPEOUT"; // lastGood.active >= 10 AND new.active == 0 AND new.rawTotal > 0
 
 /**
  * Result of snapshot validation check.
@@ -563,6 +565,21 @@ export class PositionTracker {
   private static readonly HOLDING_ADDRESS_CACHE_TTL_MS = 300_000; // 5 minutes TTL
   private addressProbeCompleted = false; // Track if address probe has been done
 
+  // === STICKY ADDRESS SELECTION (Jan 2025) ===
+  // Prevents address flip-flopping by keeping the selected address sticky for a minimum duration
+  // Address will only switch if:
+  //   1. Current address returns 0 positions for CONSECUTIVE_ZERO_THRESHOLD consecutive refreshes, OR
+  //   2. Alternate address returns >= (current * ADDRESS_SWITCH_RATIO_THRESHOLD) positions, OR
+  //   3. User explicitly forces proxy/EOA in config
+  private addressStickySince: number = 0; // Timestamp when current address became sticky
+  private consecutiveZeroRefreshes: number = 0; // Track consecutive refreshes with 0 positions
+  private static readonly ADDRESS_STICKY_DURATION_MS = 600_000; // 10 minutes sticky duration
+  private static readonly CONSECUTIVE_ZERO_THRESHOLD = 2; // 2 consecutive 0-position refreshes to switch
+  private static readonly ADDRESS_SWITCH_RATIO_THRESHOLD = 3; // Alternate must return 3x more positions
+  private static readonly SUSPICIOUS_SHRINK_THRESHOLD = 0.25; // 25% of lastGood is suspicious
+  private static readonly MIN_POSITIONS_FOR_SHRINK_CHECK = 20; // Only check shrink if lastGood >= 20
+  private static readonly MIN_ACTIVE_FOR_WIPEOUT_CHECK = 10; // Only check wipeout if lastGood.active >= 10
+
   // Cache market end times (Unix timestamp ms). Market end times are fetched from Gamma API
   // and cached to avoid redundant API calls on every 30-second refresh cycle.
   // End times can change, so callers should be prepared to refetch or invalidate entries as needed.
@@ -669,15 +686,15 @@ export class PositionTracker {
   /**
    * AUTO-RECOVERY BOOTSTRAP: When true, the next refresh will skip ACTIVE_COLLAPSE_BUG
    * validation to allow recovery similar to a container restart.
-   * 
+   *
    * Set when: Auto-recovery triggers because stale age >= MAX_STALE_AGE_MS (30 seconds for HFT).
    *           This clears lastGoodSnapshot and enables bootstrap mode.
    * Cleared when: A snapshot is successfully accepted (validation passes or bypassed).
-   * 
+   *
    * Why needed: After auto-recovery clears lastGoodSnapshot, the next snapshot may still
    * trigger ACTIVE_COLLAPSE_BUG. Without bootstrap mode, the service would be stuck in
    * a loop where every refresh fails with "NO lastGoodSnapshot available!"
-   * 
+   *
    * Safety: Bootstrap mode only allows ONE snapshot through before being cleared.
    * If that snapshot is later replaced by a valid one, normal validation resumes.
    */
@@ -950,16 +967,16 @@ export class PositionTracker {
       this.refreshAbortController.abort();
       this.refreshAbortController = null;
     }
-    
+
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
-    
+
     // Clear the single-flight promise to prevent deadlocks
     this.currentRefreshPromise = null;
     this.isRefreshing = false;
-    
+
     // Clear caches to release memory
     this.marketOutcomeCache.clear();
     this.missingOrderbooks.clear();
@@ -972,10 +989,10 @@ export class PositionTracker {
 
   /**
    * SELF-HEALING: Reset internal state to recover from stuck/degraded mode.
-   * 
+   *
    * This method implements the self-heal lifecycle for PositionTracker.
    * Call this when the tracker is stuck and needs recovery without container restart.
-   * 
+   *
    * @param level - Reset level:
    *   - SOFT_RESET: Clear transient caches, clear in-flight promise, reset throttling
    *   - HARD_RESET: Also clear all mapping caches, address probe cache, circuit breakers
@@ -984,7 +1001,7 @@ export class PositionTracker {
   resetState(level: ResetLevel, reason: string): void {
     const now = Date.now();
     const staleAge = this.lastGoodAtMs > 0 ? now - this.lastGoodAtMs : 0;
-    
+
     this.logger.warn(
       `[PositionTracker] 🔄 SELF_HEAL: level=${level} reason="${reason}" ` +
         `failures=${this.consecutiveFailures} staleAge=${Math.round(staleAge / 1000)}s ` +
@@ -1014,9 +1031,9 @@ export class PositionTracker {
     this.missingOrderbooks.clear();
     this.loggedFallbackPrices.clear();
     this.lastLoggedState.clear();
-    
+
     // Clear outcome cache TTLs (mark as stale so they refresh)
-    for (const [tokenId, entry] of this.outcomeCache) {
+    for (const [, entry] of this.outcomeCache) {
       if (entry.status === "ACTIVE") {
         entry.lastCheckedMs = 0; // Force refresh on next access
       }
@@ -1028,20 +1045,25 @@ export class PositionTracker {
     this.recoveryCycleCount = 0;
     this.allowBootstrapAfterAutoRecovery = true;
 
+    // E) Reset sticky address tracking on SOFT_RESET (force re-probe)
+    this.consecutiveZeroRefreshes = 0;
+    this.addressProbeCompleted = false;
+
     if (level === "HARD_RESET") {
-      // E) HARD_RESET: Clear all mapping caches
+      // F) HARD_RESET: Clear all mapping caches
       this.marketOutcomeCache.clear();
       this.outcomeCache.clear();
       this.marketEndTimeCache.clear();
       this.circuitBreaker.clear();
-      
-      // F) Reset address probe to force re-detection
+
+      // G) Reset address probe to force re-detection
       this.addressProbeCompleted = false;
       this.cachedHoldingAddress = null;
       this.cachedEOAAddress = null;
       this.holdingAddressCacheMs = 0;
-      
-      // G) Clear lastGoodSnapshot to accept fresh data
+      this.addressStickySince = 0; // Also reset sticky timestamp on HARD_RESET
+
+      // H) Clear lastGoodSnapshot to accept fresh data
       this.lastGoodSnapshot = null;
       this.lastGoodAtMs = 0;
       this.lastSnapshot = null;
@@ -1065,9 +1087,8 @@ export class PositionTracker {
   checkSelfHealNeeded(): { level: ResetLevel; reason: string } | null {
     const now = Date.now();
     const staleAge = this.lastGoodAtMs > 0 ? now - this.lastGoodAtMs : 0;
-    const degradedDuration = this.degradedModeEnteredAt > 0 
-      ? now - this.degradedModeEnteredAt 
-      : 0;
+    const degradedDuration =
+      this.degradedModeEnteredAt > 0 ? now - this.degradedModeEnteredAt : 0;
 
     // Rule 1: Too many consecutive failures -> SOFT_RESET
     if (this.consecutiveFailures >= PositionTracker.MAX_CONSECUTIVE_FAILURES) {
@@ -1111,9 +1132,8 @@ export class PositionTracker {
   } {
     const now = Date.now();
     const staleAgeMs = this.lastGoodAtMs > 0 ? now - this.lastGoodAtMs : 0;
-    const degradedDurationMs = this.degradedModeEnteredAt > 0 
-      ? now - this.degradedModeEnteredAt 
-      : 0;
+    const degradedDurationMs =
+      this.degradedModeEnteredAt > 0 ? now - this.degradedModeEnteredAt : 0;
 
     return {
       consecutiveFailures: this.consecutiveFailures,
@@ -1219,7 +1239,11 @@ export class PositionTracker {
         if (this.refreshAbortController) {
           this.refreshAbortController.abort();
         }
-        reject(new Error(`REFRESH_WATCHDOG_TIMEOUT: refresh exceeded ${PositionTracker.REFRESH_WATCHDOG_TIMEOUT_MS}ms`));
+        reject(
+          new Error(
+            `REFRESH_WATCHDOG_TIMEOUT: refresh exceeded ${PositionTracker.REFRESH_WATCHDOG_TIMEOUT_MS}ms`,
+          ),
+        );
       }, PositionTracker.REFRESH_WATCHDOG_TIMEOUT_MS);
     });
 
@@ -1365,7 +1389,7 @@ export class PositionTracker {
       const candidateSnapshot = this.buildCandidateSnapshot(newPositions);
 
       // === PHASE 4: VALIDATE CANDIDATE SNAPSHOT ===
-      // Check for ACTIVE_COLLAPSE_BUG, FETCH_REGRESSION, ADDRESS_FLIP_COLLAPSE
+      // Check for ACTIVE_COLLAPSE_BUG, FETCH_REGRESSION, ADDRESS_FLIP_COLLAPSE, SUSPICIOUS_SHRINK, ACTIVE_WIPEOUT
       const validationResult = this.validateSnapshot(
         candidateSnapshot,
         this.lastGoodSnapshot,
@@ -1386,7 +1410,10 @@ export class PositionTracker {
           // Build classification reasons string for diagnostics
           const reasonCounts: string[] = [];
           if (candidateSnapshot.classificationReasons) {
-            for (const [reason, count] of candidateSnapshot.classificationReasons) {
+            for (const [
+              reason,
+              count,
+            ] of candidateSnapshot.classificationReasons) {
               reasonCounts.push(`${reason}=${count}`);
             }
           }
@@ -1397,6 +1424,39 @@ export class PositionTracker {
               `${validationResult.diagnostics} ` +
               `reasons=[${reasonsStr}]`,
           );
+        }
+
+        // === RECOVERY BEHAVIOR (Jan 2025) ===
+        // On SUSPICIOUS_SHRINK or ACTIVE_WIPEOUT, trigger immediate recovery:
+        // 1. Clear mapping/outcome caches
+        // 2. Force address re-probe on next cycle
+        // 3. Log recovery message with lastGood info
+        if (
+          validationResult.reason === "SUSPICIOUS_SHRINK" ||
+          validationResult.reason === "ACTIVE_WIPEOUT"
+        ) {
+          const lastGoodAge =
+            this.lastGoodAtMs > 0
+              ? Math.round((Date.now() - this.lastGoodAtMs) / 1000)
+              : 0;
+          const lastGoodActive =
+            this.lastGoodSnapshot?.activePositions.length ?? 0;
+          const lastGoodRaw = this.lastGoodSnapshot?.rawCounts?.rawTotal ?? 0;
+
+          this.logger.warn(
+            `[PositionTracker] 🔄 RECOVERY: rejecting suspicious snapshot (${validationResult.reason}); ` +
+              `forcing address re-probe on next cycle; using lastGood age=${lastGoodAge}s ` +
+              `(active=${lastGoodActive} raw=${lastGoodRaw})`,
+          );
+
+          // Force address re-probe without doing a HARD_RESET (preserve lastGoodSnapshot)
+          this.addressProbeCompleted = false;
+          this.consecutiveZeroRefreshes = 0;
+          this.addressStickySince = 0; // Reset sticky to allow immediate switch
+
+          // Clear outcome caches that might be stale
+          this.marketOutcomeCache.clear();
+          this.outcomeCache.clear();
         }
 
         // Fall back to lastGoodSnapshot
@@ -1663,7 +1723,10 @@ export class PositionTracker {
 
     // Build classification reasons string for diagnostics
     const reasonCounts: string[] = [];
-    if (newSnap.classificationReasons && newSnap.classificationReasons.size > 0) {
+    if (
+      newSnap.classificationReasons &&
+      newSnap.classificationReasons.size > 0
+    ) {
       for (const [reason, count] of newSnap.classificationReasons) {
         reasonCounts.push(`${reason}=${count}`);
       }
@@ -1692,29 +1755,30 @@ export class PositionTracker {
       // If rawTotal==rawActiveCandidates (no redeemable) and both are small,
       // and no real skip reasons were logged, this is likely a classifier bug
       // Accept the snapshot but log a warning
-      const isMinimalAcceptanceCase = 
-        rawTotal === rawActiveCandidates && 
+      const isMinimalAcceptanceCase =
+        rawTotal === rawActiveCandidates &&
         rawTotal <= PositionTracker.MINIMAL_ACCEPTANCE_MAX_RAW_COUNT &&
-        (reasonsStr.includes("FILTERED_NO_REASON") || reasonsStr.includes("ALL_ACTIVE"));
+        (reasonsStr.includes("FILTERED_NO_REASON") ||
+          reasonsStr.includes("ALL_ACTIVE"));
 
       // NEW: Check if the collapse is due to orderbook failures (404, empty book, etc.)
       // If ALL filtered positions are due to enrichment/orderbook failures, this is NOT a bug
       // but rather a temporary network/API issue. Accept the snapshot with UNKNOWN pnl positions.
       // Check the actual classification reasons Map for more reliable detection.
       const classificationReasons = newSnap.classificationReasons;
-      const hasOrderbookFailureReasons = classificationReasons && (
-        classificationReasons.has("ENRICH_FAILED") ||
-        classificationReasons.has("NO_BOOK") ||
-        classificationReasons.has("BOOK_404") ||
-        classificationReasons.has("PRICING_FETCH_FAILED")
-      );
+      const hasOrderbookFailureReasons =
+        classificationReasons &&
+        (classificationReasons.has("ENRICH_FAILED") ||
+          classificationReasons.has("NO_BOOK") ||
+          classificationReasons.has("BOOK_404") ||
+          classificationReasons.has("PRICING_FETCH_FAILED"));
       // Fallback to string matching for backward compatibility (if Map not available)
-      const isOrderbookFailureCase = hasOrderbookFailureReasons || (
+      const isOrderbookFailureCase =
+        hasOrderbookFailureReasons ||
         reasonsStr.includes("ENRICH_FAILED=") ||
         reasonsStr.includes("NO_BOOK=") ||
         reasonsStr.includes("BOOK_404=") ||
-        reasonsStr.includes("PRICING_FETCH_FAILED=")
-      );
+        reasonsStr.includes("PRICING_FETCH_FAILED=");
 
       if (this.allowBootstrapAfterAutoRecovery) {
         // Bootstrap mode: log and accept the snapshot despite ACTIVE_COLLAPSE_BUG
@@ -1756,8 +1820,7 @@ export class PositionTracker {
         return {
           ok: false,
           reason: "ACTIVE_COLLAPSE_BUG",
-          diagnostics:
-            `rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} finalActive=${finalActiveCount} reasons=[${reasonsStr}]`,
+          diagnostics: `rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} finalActive=${finalActiveCount} reasons=[${reasonsStr}]`,
         };
       }
     }
@@ -1774,8 +1837,7 @@ export class PositionTracker {
         return {
           ok: false,
           reason: "FETCH_REGRESSION",
-          diagnostics:
-            `newRawTotal=${rawTotal} prevRawTotal=${prevRawTotal} threshold=${PositionTracker.FETCH_REGRESSION_THRESHOLD * 100}%`,
+          diagnostics: `newRawTotal=${rawTotal} prevRawTotal=${prevRawTotal} threshold=${PositionTracker.FETCH_REGRESSION_THRESHOLD * 100}%`,
         };
       }
     }
@@ -1795,8 +1857,56 @@ export class PositionTracker {
         return {
           ok: false,
           reason: "ADDRESS_FLIP_COLLAPSE",
+          diagnostics: `prevAddress=${prevSnap.addressUsed.slice(0, 10)}... newAddress=${newSnap.addressUsed.slice(0, 10)}... prevActive=${prevActiveCount} newActive=${finalActiveCount}`,
+        };
+      }
+    }
+
+    // Rule D: SUSPICIOUS_SHRINK (Jan 2025)
+    // If lastGood had >= MIN_POSITIONS_FOR_SHRINK_CHECK positions AND new rawTotal < 25% of lastGood,
+    // this is a catastrophic shrink that should NOT overwrite lastGood snapshot
+    // EXCEPTION: Skip in recovery mode or bootstrap mode
+    if (
+      prevSnap &&
+      !this.recoveryMode &&
+      !this.allowBootstrapAfterAutoRecovery
+    ) {
+      const prevRawTotal = prevSnap.rawCounts?.rawTotal ?? 0;
+      if (
+        prevRawTotal >= PositionTracker.MIN_POSITIONS_FOR_SHRINK_CHECK &&
+        rawTotal <= prevRawTotal * PositionTracker.SUSPICIOUS_SHRINK_THRESHOLD
+      ) {
+        return {
+          ok: false,
+          reason: "SUSPICIOUS_SHRINK",
           diagnostics:
-            `prevAddress=${prevSnap.addressUsed.slice(0, 10)}... newAddress=${newSnap.addressUsed.slice(0, 10)}... prevActive=${prevActiveCount} newActive=${finalActiveCount}`,
+            `newRawTotal=${rawTotal} prevRawTotal=${prevRawTotal} (shrink to ${((rawTotal / prevRawTotal) * 100).toFixed(1)}% < 25% threshold). ` +
+            `Proxy returning tiny snapshot must not overwrite healthy lastGood.`,
+        };
+      }
+    }
+
+    // Rule E: ACTIVE_WIPEOUT (Jan 2025)
+    // If lastGood had >= MIN_ACTIVE_FOR_WIPEOUT_CHECK active positions AND new.active == 0 AND new.rawTotal > 0,
+    // this is suspicious - all positions became inactive while raw data still exists
+    // EXCEPTION: Skip in recovery mode or bootstrap mode
+    if (
+      prevSnap &&
+      !this.recoveryMode &&
+      !this.allowBootstrapAfterAutoRecovery
+    ) {
+      const prevActiveCount = prevSnap.activePositions.length;
+      if (
+        prevActiveCount >= PositionTracker.MIN_ACTIVE_FOR_WIPEOUT_CHECK &&
+        finalActiveCount === 0 &&
+        rawTotal > 0
+      ) {
+        return {
+          ok: false,
+          reason: "ACTIVE_WIPEOUT",
+          diagnostics:
+            `prevActive=${prevActiveCount} newActive=${finalActiveCount} newRawTotal=${rawTotal}. ` +
+            `All positions went inactive while raw data exists - likely enrichment failure.`,
         };
       }
     }
@@ -1872,7 +1982,8 @@ export class PositionTracker {
 
     // Calculate exponential backoff: base * 2^failures, capped at max
     this.currentBackoffMs = Math.min(
-      PositionTracker.BASE_BACKOFF_MS * Math.pow(2, this.consecutiveFailures - 1),
+      PositionTracker.BASE_BACKOFF_MS *
+        Math.pow(2, this.consecutiveFailures - 1),
       PositionTracker.MAX_BACKOFF_MS,
     );
 
@@ -1899,7 +2010,10 @@ export class PositionTracker {
           `[PositionTracker] 🔄 AUTO-RECOVERY: Stale age exceeded (age=${staleAgeSec}s >= ${Math.round(PositionTracker.MAX_STALE_AGE_MS / 1000)}s threshold). ` +
             `Triggering SOFT_RESET. reason="${error.message}" active=${activeCount} redeemable=${redeemableCount}`,
         );
-        this.resetState("SOFT_RESET", `staleAge=${staleAgeSec}s exceeded threshold`);
+        this.resetState(
+          "SOFT_RESET",
+          `staleAge=${staleAgeSec}s exceeded threshold`,
+        );
         return;
       }
 
@@ -1923,7 +2037,10 @@ export class PositionTracker {
         `[PositionTracker] ❌ refresh_failed: reason="${error.message}" ` +
           `NO lastGoodSnapshot available! failures=${this.consecutiveFailures} - triggering HARD_RESET`,
       );
-      this.resetState("HARD_RESET", `no lastGoodSnapshot after ${this.consecutiveFailures} failures`);
+      this.resetState(
+        "HARD_RESET",
+        `no lastGoodSnapshot after ${this.consecutiveFailures} failures`,
+      );
     }
   }
 
@@ -1948,10 +2065,10 @@ export class PositionTracker {
     // Reset failure tracking
     this.consecutiveFailures = 0;
     this.currentBackoffMs = 0;
-    
+
     // Exit degraded mode
     this.degradedModeEnteredAt = 0;
-    
+
     // Clear bootstrap mode flag
     this.allowBootstrapAfterAutoRecovery = false;
 
@@ -1965,11 +2082,14 @@ export class PositionTracker {
     if (this.recoveryMode) {
       this.recoveryCycleCount++;
       const activeCount = this.lastSnapshot?.activePositions.length ?? 0;
-      
+
       // Exit recovery mode if:
       // 1. We have active positions (snapshot is useful), OR
       // 2. We've completed enough successful cycles
-      if (activeCount > 0 || this.recoveryCycleCount >= PositionTracker.RECOVERY_MODE_MAX_CYCLES) {
+      if (
+        activeCount > 0 ||
+        this.recoveryCycleCount >= PositionTracker.RECOVERY_MODE_MAX_CYCLES
+      ) {
         this.recoveryMode = false;
         this.recoveryCycleCount = 0;
         this.logger.info(
@@ -1980,7 +2100,10 @@ export class PositionTracker {
     }
 
     // Log recovery if we were in a failed state or bootstrap mode
-    if ((wasInFailedState || wasInBootstrapMode || wasInRecoveryMode) && this.lastSnapshot) {
+    if (
+      (wasInFailedState || wasInBootstrapMode || wasInRecoveryMode) &&
+      this.lastSnapshot
+    ) {
       const activeCount = this.lastSnapshot.activePositions.length;
       const redeemableCount = this.lastSnapshot.redeemablePositions.length;
 
@@ -1999,7 +2122,10 @@ export class PositionTracker {
 
     // Periodic health status logging (every 5 minutes)
     const now = Date.now();
-    if (now - this.lastHealthStatusLogAt >= PositionTracker.HEALTH_STATUS_LOG_INTERVAL_MS) {
+    if (
+      now - this.lastHealthStatusLogAt >=
+      PositionTracker.HEALTH_STATUS_LOG_INTERVAL_MS
+    ) {
       this.lastHealthStatusLogAt = now;
       const status = this.getSelfHealStatus();
       const snapshot = this.lastSnapshot;
@@ -2463,13 +2589,47 @@ export class PositionTracker {
         timeout: PositionTracker.API_TIMEOUT_MS,
       });
 
-      // ADDRESS PROBE: If we got 0-2 positions and address probe hasn't been done,
-      // try both EOA and proxy separately and pick whichever returns more positions.
-      // This handles the case where we're using the wrong address.
+      // === STICKY ADDRESS SELECTION WITH SANITY CHECKS (Jan 2025) ===
+      // Prevents address flip-flop by keeping address sticky for ADDRESS_STICKY_DURATION_MS
+      // unless specific conditions are met for switching
       const initialPositionCount = apiPositions?.length ?? 0;
+      const now = Date.now();
+
+      // Track consecutive zero refreshes for address switching logic
+      if (initialPositionCount === 0) {
+        this.consecutiveZeroRefreshes++;
+      } else {
+        this.consecutiveZeroRefreshes = 0;
+      }
+
+      // Determine if we should run an address probe based on:
+      // 1. Low position count (suspicious shrink)
+      // 2. Consecutive zero refreshes exceeded threshold
+      // 3. Address hasn't been sticky for minimum duration yet
+      const lastGoodRawTotal = this.lastGoodSnapshot?.rawCounts?.rawTotal ?? 0;
+      const isUnexpectedlyLow =
+        lastGoodRawTotal > 0 &&
+        initialPositionCount <
+          Math.min(
+            5,
+            lastGoodRawTotal * PositionTracker.SUSPICIOUS_SHRINK_THRESHOLD,
+          );
+      const shouldProbeForSwitch =
+        this.consecutiveZeroRefreshes >=
+          PositionTracker.CONSECUTIVE_ZERO_THRESHOLD || isUnexpectedlyLow;
+
+      // Check if address is still within sticky duration
+      const addressIsSticky =
+        this.addressStickySince > 0 &&
+        now - this.addressStickySince <
+          PositionTracker.ADDRESS_STICKY_DURATION_MS;
+
+      // ADDRESS PROBE: Run probe if:
+      // - Low count detected and probe hasn't been completed this cycle, OR
+      // - Conditions for switching are met (even if probe was done before)
       if (
-        initialPositionCount <= 2 &&
-        !this.addressProbeCompleted &&
+        (shouldProbeForSwitch ||
+          (initialPositionCount <= 2 && !this.addressProbeCompleted)) &&
         this.cachedEOAAddress &&
         this.cachedHoldingAddress
       ) {
@@ -2479,11 +2639,12 @@ export class PositionTracker {
         // Only probe if EOA and proxy are different
         if (eoaAddress !== proxyAddress) {
           this.logger.info(
-            `[PositionTracker] Low position count (${initialPositionCount}), running address probe...`,
+            `[PositionTracker] ADDRESS_PROBE: triggering probe. reason=${isUnexpectedlyLow ? "SUSPICIOUS_SHRINK" : shouldProbeForSwitch ? "CONSECUTIVE_ZERO" : "LOW_COUNT"} ` +
+              `currentCount=${initialPositionCount} lastGoodTotal=${lastGoodRawTotal} consecutiveZeros=${this.consecutiveZeroRefreshes}`,
           );
 
           try {
-            // Fetch from both addresses
+            // Fetch from both addresses in parallel
             const [eoaPositions, proxyPositions] = await Promise.all([
               httpGet<ApiPosition[]>(
                 POLYMARKET_API.POSITIONS_ENDPOINT(eoaAddress),
@@ -2498,30 +2659,80 @@ export class PositionTracker {
             const eoaCount = eoaPositions?.length ?? 0;
             const proxyCount = proxyPositions?.length ?? 0;
 
-            // Determine which address to use (pick whichever returned more positions)
-            const selectedAddress = eoaCount >= proxyCount ? "eoa" : "proxy";
-
-            // Log the probe results with the actual selection
+            // Log the probe results with both counts (always)
             this.logger.info(
-              `[PositionTracker] address_probe: eoa_positions=${eoaCount} proxy_positions=${proxyCount} selected=${selectedAddress}`,
+              `[PositionTracker] address_probe: eoa_positions=${eoaCount} proxy_positions=${proxyCount} ` +
+                `currentUsing=${holdingAddress === eoaAddress ? "EOA" : "PROXY"} addressSticky=${addressIsSticky}`,
             );
 
-            // Use whichever returned more positions
-            if (eoaCount >= proxyCount && eoaCount > initialPositionCount) {
-              apiPositions = eoaPositions;
-              this.cachedHoldingAddress = eoaAddress;
-              this.holdingAddressCacheMs = Date.now();
+            // Determine if we should switch addresses
+            // Switch if:
+            // 1. Not within sticky duration, OR
+            // 2. Alternate returns >= ADDRESS_SWITCH_RATIO_THRESHOLD times more positions
+            const currentCount =
+              holdingAddress === eoaAddress ? eoaCount : proxyCount;
+            const alternateCount =
+              holdingAddress === eoaAddress ? proxyCount : eoaCount;
+            const shouldSwitchDueToRatio =
+              alternateCount >=
+              currentCount * PositionTracker.ADDRESS_SWITCH_RATIO_THRESHOLD;
+            const shouldSwitchDueToZero =
+              currentCount === 0 &&
+              alternateCount > 0 &&
+              this.consecutiveZeroRefreshes >=
+                PositionTracker.CONSECUTIVE_ZERO_THRESHOLD;
+
+            if (
+              !addressIsSticky ||
+              shouldSwitchDueToRatio ||
+              shouldSwitchDueToZero
+            ) {
+              // Pick the address with more positions
+              if (eoaCount > proxyCount && eoaCount > initialPositionCount) {
+                apiPositions = eoaPositions;
+                const previousAddress = this.cachedHoldingAddress;
+                this.cachedHoldingAddress = eoaAddress;
+                this.holdingAddressCacheMs = now;
+                this.addressStickySince = now;
+                this.consecutiveZeroRefreshes = 0;
+                this.logger.warn(
+                  `[PositionTracker] ADDRESS_SWITCH: ${previousAddress?.slice(0, 10)}...->EOA (${eoaCount} positions vs ${proxyCount} proxy). ` +
+                    `reason=${shouldSwitchDueToRatio ? "RATIO_THRESHOLD" : shouldSwitchDueToZero ? "ZERO_THRESHOLD" : "BETTER_COUNT"}`,
+                );
+              } else if (
+                proxyCount > eoaCount &&
+                proxyCount > initialPositionCount
+              ) {
+                apiPositions = proxyPositions;
+                const previousAddress = this.cachedHoldingAddress;
+                this.cachedHoldingAddress = proxyAddress;
+                this.holdingAddressCacheMs = now;
+                this.addressStickySince = now;
+                this.consecutiveZeroRefreshes = 0;
+                this.logger.warn(
+                  `[PositionTracker] ADDRESS_SWITCH: ${previousAddress?.slice(0, 10)}...->PROXY (${proxyCount} positions vs ${eoaCount} EOA). ` +
+                    `reason=${shouldSwitchDueToRatio ? "RATIO_THRESHOLD" : shouldSwitchDueToZero ? "ZERO_THRESHOLD" : "BETTER_COUNT"}`,
+                );
+              } else if (
+                eoaCount === proxyCount &&
+                eoaCount > initialPositionCount
+              ) {
+                // Equal counts but better than initial - prefer current address
+                this.logger.info(
+                  `[PositionTracker] ADDRESS_PROBE: Equal counts (${eoaCount}), keeping current address`,
+                );
+              }
+            } else {
               this.logger.info(
-                `[PositionTracker] Address probe selected EOA (${eoaCount} positions vs ${proxyCount} proxy)`,
-              );
-            } else if (proxyCount > initialPositionCount) {
-              apiPositions = proxyPositions;
-              // cachedHoldingAddress was already set to proxyAddress
-              this.logger.info(
-                `[PositionTracker] Address probe confirmed proxy (${proxyCount} positions vs ${eoaCount} EOA)`,
+                `[PositionTracker] ADDRESS_PROBE: Address is sticky (${Math.round((now - this.addressStickySince) / 1000)}s < ${Math.round(PositionTracker.ADDRESS_STICKY_DURATION_MS / 1000)}s), not switching. ` +
+                  `current=${currentCount} alternate=${alternateCount}`,
               );
             }
 
+            // Set sticky timestamp if not already set
+            if (this.addressStickySince === 0) {
+              this.addressStickySince = now;
+            }
             this.addressProbeCompleted = true;
           } catch (probeErr) {
             this.logger.warn(
@@ -2910,9 +3121,17 @@ export class PositionTracker {
                         const orderbook =
                           await this.client.getOrderBook(tokenId);
                         // Use safe extraction to ensure bestBid = max(bids), bestAsk = min(asks)
-                        const priceExtraction = extractOrderbookPrices(orderbook);
-                        if (priceExtraction.bestBid !== null && priceExtraction.bestAsk !== null && !priceExtraction.hasAnomaly) {
-                          currentPrice = (priceExtraction.bestBid + priceExtraction.bestAsk) / 2;
+                        const priceExtraction =
+                          extractOrderbookPrices(orderbook);
+                        if (
+                          priceExtraction.bestBid !== null &&
+                          priceExtraction.bestAsk !== null &&
+                          !priceExtraction.hasAnomaly
+                        ) {
+                          currentPrice =
+                            (priceExtraction.bestBid +
+                              priceExtraction.bestAsk) /
+                            2;
                           this.logger.debug(
                             `[PositionTracker] Redeemable with unknown outcome: using orderbook price ${(currentPrice * 100).toFixed(1)}¢ for tokenId=${tokenId.slice(0, 16)}...`,
                           );
@@ -3011,7 +3230,10 @@ export class PositionTracker {
                       // Use safe extraction to ensure bestBid = max(bids), bestAsk = min(asks)
                       const priceExtraction = extractOrderbookPrices(orderbook);
 
-                      if (priceExtraction.bestBid === null || priceExtraction.bestAsk === null) {
+                      if (
+                        priceExtraction.bestBid === null ||
+                        priceExtraction.bestAsk === null
+                      ) {
                         // Orderbook is empty - cache and use fallback
                         this.missingOrderbooks.add(tokenId);
                         positionStatus = "NO_BOOK";
@@ -3882,6 +4104,11 @@ export class PositionTracker {
    * Uses comma-separated clob_token_ids parameter to reduce API calls.
    * Results are stored in outcomeCache.
    *
+   * RESILIENT BATCH FETCH (Jan 2025):
+   * - On 422/429/5xx errors, falls back to single-token requests
+   * - Failures are non-fatal: positions remain ACTIVE with pnlTrusted=false
+   * - Does NOT cause positions to be dropped or ACTIVE count to collapse
+   *
    * @param tokenIds - Array of tokenIds to fetch outcomes for
    * @returns Map of tokenId -> winner (or null if not resolved/error)
    */
@@ -3932,6 +4159,10 @@ export class PositionTracker {
       `[PositionTracker] Fetching outcomes for ${tokenIds.length} tokenIds in ${chunks.length} batch request(s)`,
     );
 
+    // Track if we need to fall back to single-token requests (after 422/429/5xx)
+    let fallbackToSingleRequests = false;
+    const failedTokenIds: string[] = [];
+
     for (const chunk of chunks) {
       try {
         // Build comma-separated tokenIds for URL
@@ -3948,7 +4179,7 @@ export class PositionTracker {
         });
 
         if (!markets || !Array.isArray(markets)) {
-          // Mark all as null (not found)
+          // Mark all as null (not found) - but DON'T drop positions
           for (const tokenId of chunk) {
             results.set(tokenId, null);
           }
@@ -3988,14 +4219,80 @@ export class PositionTracker {
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        this.logger.debug(
-          `[PositionTracker] Batch fetch failed for ${chunk.length} tokenIds: ${errMsg}`,
-        );
-        // Mark all tokenIds in this chunk as null (error)
-        for (const tokenId of chunk) {
-          results.set(tokenId, null);
+
+        // Check for 422/429/5xx errors that indicate batch request format issues
+        const is422 =
+          errMsg.includes("422") || errMsg.includes("Unprocessable");
+        const is429 = errMsg.includes("429") || errMsg.includes("Too Many");
+        const is5xx =
+          /\b5\d{2}\b/.test(errMsg) || errMsg.includes("Server Error");
+
+        if (is422 || is429 || is5xx) {
+          // Log at WARN level for batch failures that trigger fallback
+          this.logger.warn(
+            `[PositionTracker] ⚠️ GAMMA_BATCH_FAILURE: ${is422 ? "422" : is429 ? "429" : "5xx"} error for batch of ${chunk.length} tokenIds. ` +
+              `Falling back to single-token requests. error="${errMsg.slice(0, 100)}"`,
+          );
+          fallbackToSingleRequests = true;
+          failedTokenIds.push(...chunk);
+        } else {
+          // Other errors - log at debug level
+          this.logger.debug(
+            `[PositionTracker] Batch fetch failed for ${chunk.length} tokenIds: ${errMsg}`,
+          );
+          // Mark all tokenIds in this chunk as null (error) - but positions stay ACTIVE
+          for (const tokenId of chunk) {
+            results.set(tokenId, null);
+          }
         }
       }
+    }
+
+    // FALLBACK: If batch request failed with 422/429/5xx, try single-token requests
+    if (fallbackToSingleRequests && failedTokenIds.length > 0) {
+      this.logger.info(
+        `[PositionTracker] GAMMA_FALLBACK: Attempting single-token requests for ${failedTokenIds.length} tokenIds after batch failure`,
+      );
+
+      // Process failed tokenIds one at a time (with rate limiting)
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const tokenId of failedTokenIds) {
+        try {
+          // Use smaller batch size of 1 for fallback
+          const encodedId = encodeURIComponent(tokenId.trim());
+          const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets?clob_token_ids=${encodedId}`;
+
+          this.currentRefreshMetrics.gammaRequestsPerRefresh++;
+
+          const markets = await httpGet<GammaMarketResponse[]>(url, {
+            timeout: PositionTracker.API_TIMEOUT_MS,
+          });
+
+          if (markets && Array.isArray(markets) && markets.length > 0) {
+            const market = markets[0];
+            const winner = this.extractWinnerFromMarket(market);
+            results.set(tokenId, winner);
+            successCount++;
+          } else {
+            results.set(tokenId, null);
+            failCount++;
+          }
+        } catch (singleErr) {
+          // Single request also failed - log at debug and move on
+          // Position remains ACTIVE with pnlTrusted=false
+          this.logger.debug(
+            `[PositionTracker] Single-token fallback failed for ${tokenId.slice(0, 16)}...: ${singleErr instanceof Error ? singleErr.message : String(singleErr)}`,
+          );
+          results.set(tokenId, null);
+          failCount++;
+        }
+      }
+
+      this.logger.info(
+        `[PositionTracker] GAMMA_FALLBACK complete: ${successCount} succeeded, ${failCount} failed (positions remain ACTIVE with unknown outcome)`,
+      );
     }
 
     return results;

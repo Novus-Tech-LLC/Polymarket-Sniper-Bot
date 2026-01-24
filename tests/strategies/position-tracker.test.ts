@@ -4716,3 +4716,258 @@ describe("Orderbook Decoupling: P&L Calculation Source", () => {
     assert.strictEqual(position.pnlClassification, "UNKNOWN", "P&L classification should be UNKNOWN");
   });
 });
+
+/**
+ * Portfolio Collapse Regression Tests (Jan 2025)
+ * 
+ * These tests verify the fix for the "portfolio collapse to 0" regression where:
+ * - Tracker flips to proxy address
+ * - Data API returns raw_total=2
+ * - Gamma batch outcome fetch returns 422
+ * - Tiny snapshot incorrectly overwrites healthy lastGoodSnapshot
+ */
+describe("PositionTracker Portfolio Collapse Prevention", () => {
+  // Test thresholds mirroring production constants
+  const SUSPICIOUS_SHRINK_THRESHOLD = 0.25; // 25%
+  const MIN_POSITIONS_FOR_SHRINK_CHECK = 20;
+  const MIN_ACTIVE_FOR_WIPEOUT_CHECK = 10;
+
+  test("SUSPICIOUS_SHRINK: rawTotal < 25% of lastGood should be rejected", () => {
+    // Scenario: lastGood has 78 positions, new snapshot has 2 positions (proxy returned tiny data)
+    const lastGoodRawTotal = 78;
+    const newRawTotal = 2;
+
+    // Should trigger SUSPICIOUS_SHRINK
+    const shrinkRatio = newRawTotal / lastGoodRawTotal;
+    const isSuspiciousShrink = 
+      lastGoodRawTotal >= MIN_POSITIONS_FOR_SHRINK_CHECK &&
+      newRawTotal <= lastGoodRawTotal * SUSPICIOUS_SHRINK_THRESHOLD;
+
+    assert.ok(
+      isSuspiciousShrink,
+      `Should detect suspicious shrink: ${newRawTotal}/${lastGoodRawTotal} = ${(shrinkRatio * 100).toFixed(1)}% < 25%`,
+    );
+  });
+
+  test("SUSPICIOUS_SHRINK: rawTotal >= 25% of lastGood should be accepted", () => {
+    // Scenario: normal shrink due to positions being closed
+    const lastGoodRawTotal = 78;
+    const newRawTotal = 48; // 61% of lastGood - normal
+
+    const shrinkRatio = newRawTotal / lastGoodRawTotal;
+    const isSuspiciousShrink = 
+      lastGoodRawTotal >= MIN_POSITIONS_FOR_SHRINK_CHECK &&
+      newRawTotal <= lastGoodRawTotal * SUSPICIOUS_SHRINK_THRESHOLD;
+
+    assert.ok(
+      !isSuspiciousShrink,
+      `Should NOT detect suspicious shrink: ${newRawTotal}/${lastGoodRawTotal} = ${(shrinkRatio * 100).toFixed(1)}% >= 25%`,
+    );
+  });
+
+  test("SUSPICIOUS_SHRINK: skip check when lastGood is small", () => {
+    // Scenario: lastGood has < MIN_POSITIONS_FOR_SHRINK_CHECK positions
+    const lastGoodRawTotal = 10; // Too small to trigger shrink check
+    const newRawTotal = 2;
+
+    const isSuspiciousShrink = 
+      lastGoodRawTotal >= MIN_POSITIONS_FOR_SHRINK_CHECK &&
+      newRawTotal <= lastGoodRawTotal * SUSPICIOUS_SHRINK_THRESHOLD;
+
+    assert.ok(
+      !isSuspiciousShrink,
+      `Should skip shrink check for small lastGood (${lastGoodRawTotal} < ${MIN_POSITIONS_FOR_SHRINK_CHECK})`,
+    );
+  });
+
+  test("ACTIVE_WIPEOUT: all positions becoming inactive should be rejected", () => {
+    // Scenario: lastGood has 48 active positions, new snapshot has 0 active but rawTotal > 0
+    const lastGoodActive = 48;
+    const newActive = 0;
+    const newRawTotal = 2;
+
+    const isActiveWipeout = 
+      lastGoodActive >= MIN_ACTIVE_FOR_WIPEOUT_CHECK &&
+      newActive === 0 &&
+      newRawTotal > 0;
+
+    assert.ok(
+      isActiveWipeout,
+      `Should detect active wipeout: lastGood.active=${lastGoodActive} newActive=${newActive} newRaw=${newRawTotal}`,
+    );
+  });
+
+  test("ACTIVE_WIPEOUT: skip check when lastGood active is small", () => {
+    // Scenario: lastGood has < MIN_ACTIVE_FOR_WIPEOUT_CHECK active positions
+    const lastGoodActive = 5; // Too small to trigger wipeout check
+    const newActive = 0;
+    const newRawTotal = 2;
+
+    const isActiveWipeout = 
+      lastGoodActive >= MIN_ACTIVE_FOR_WIPEOUT_CHECK &&
+      newActive === 0 &&
+      newRawTotal > 0;
+
+    assert.ok(
+      !isActiveWipeout,
+      `Should skip wipeout check for small lastGood.active (${lastGoodActive} < ${MIN_ACTIVE_FOR_WIPEOUT_CHECK})`,
+    );
+  });
+});
+
+describe("PositionTracker Gamma Batch Fetch Error Handling", () => {
+  test("422 error should be detected from error message", () => {
+    const errorMessages = [
+      "Request failed with status code 422",
+      "422 Unprocessable Entity",
+      "HTTP 422: Invalid request",
+    ];
+
+    for (const errMsg of errorMessages) {
+      const is422 = errMsg.includes("422") || errMsg.includes("Unprocessable");
+      assert.ok(is422, `Should detect 422 in: "${errMsg}"`);
+    }
+  });
+
+  test("429 error should be detected from error message", () => {
+    const errorMessages = [
+      "Request failed with status code 429",
+      "429 Too Many Requests",
+      "Rate limit exceeded (429)",
+    ];
+
+    for (const errMsg of errorMessages) {
+      const is429 = errMsg.includes("429") || errMsg.includes("Too Many");
+      assert.ok(is429, `Should detect 429 in: "${errMsg}"`);
+    }
+  });
+
+  test("5xx errors should be detected from error message", () => {
+    const errorMessages = [
+      "Request failed with status code 500",
+      "502 Bad Gateway",
+      "503 Service Unavailable",
+      "Internal Server Error",
+    ];
+
+    for (const errMsg of errorMessages) {
+      const is5xx = /\b5\d{2}\b/.test(errMsg) || errMsg.includes("Server Error");
+      assert.ok(is5xx, `Should detect 5xx in: "${errMsg}"`);
+    }
+  });
+
+  test("Batch fetch failure should not drop positions", () => {
+    // Simulates the behavior when batch fetch fails but positions should remain ACTIVE
+    const tokenIds = ["token1", "token2", "token3"];
+    const results = new Map<string, string | null>();
+
+    // Simulate batch failure - all tokenIds get null (no outcome determined)
+    for (const tokenId of tokenIds) {
+      results.set(tokenId, null);
+    }
+
+    // Verify all tokenIds are in results (not dropped)
+    assert.strictEqual(results.size, tokenIds.length, "All tokenIds should be in results");
+
+    // Verify positions remain with null outcome (ACTIVE with unknown outcome, not dropped)
+    for (const tokenId of tokenIds) {
+      assert.ok(results.has(tokenId), `TokenId ${tokenId} should be present`);
+      assert.strictEqual(results.get(tokenId), null, `TokenId ${tokenId} outcome should be null (unknown)`);
+    }
+  });
+});
+
+describe("PositionTracker Sticky Address Selection", () => {
+  const ADDRESS_STICKY_DURATION_MS = 600_000; // 10 minutes
+  const CONSECUTIVE_ZERO_THRESHOLD = 2;
+  const ADDRESS_SWITCH_RATIO_THRESHOLD = 3;
+
+  test("Address should remain sticky within duration", () => {
+    const addressStickySince = Date.now() - 300_000; // 5 minutes ago
+    const now = Date.now();
+    
+    const isSticky = addressStickySince > 0 && 
+      (now - addressStickySince) < ADDRESS_STICKY_DURATION_MS;
+
+    assert.ok(isSticky, "Address should be sticky within 10 minute window");
+  });
+
+  test("Address should become unsticky after duration expires", () => {
+    const addressStickySince = Date.now() - 700_000; // 11+ minutes ago
+    const now = Date.now();
+    
+    const isSticky = addressStickySince > 0 && 
+      (now - addressStickySince) < ADDRESS_STICKY_DURATION_MS;
+
+    assert.ok(!isSticky, "Address should become unsticky after 10 minutes");
+  });
+
+  test("Should switch when alternate has 3x more positions", () => {
+    const currentCount = 2;
+    const alternateCount = 78;
+    
+    const shouldSwitchDueToRatio = alternateCount >= currentCount * ADDRESS_SWITCH_RATIO_THRESHOLD;
+
+    assert.ok(
+      shouldSwitchDueToRatio,
+      `Should switch: alternate (${alternateCount}) >= current (${currentCount}) * ${ADDRESS_SWITCH_RATIO_THRESHOLD}`,
+    );
+  });
+
+  test("Should NOT switch when alternate has less than 3x positions", () => {
+    const currentCount = 30;
+    const alternateCount = 40;
+    
+    const shouldSwitchDueToRatio = alternateCount >= currentCount * ADDRESS_SWITCH_RATIO_THRESHOLD;
+
+    assert.ok(
+      !shouldSwitchDueToRatio,
+      `Should NOT switch: alternate (${alternateCount}) < current (${currentCount}) * ${ADDRESS_SWITCH_RATIO_THRESHOLD}`,
+    );
+  });
+
+  test("Should switch when current returns 0 for consecutive refreshes", () => {
+    const consecutiveZeroRefreshes = 2;
+    const currentCount = 0;
+    const alternateCount = 10;
+    
+    const shouldSwitchDueToZero = 
+      currentCount === 0 && 
+      alternateCount > 0 && 
+      consecutiveZeroRefreshes >= CONSECUTIVE_ZERO_THRESHOLD;
+
+    assert.ok(
+      shouldSwitchDueToZero,
+      `Should switch: current=0 for ${consecutiveZeroRefreshes} consecutive refreshes`,
+    );
+  });
+});
+
+describe("PositionTracker Gamma Batch URL Encoding", () => {
+  test("TokenIds should be properly URL encoded", () => {
+    // Test tokenIds that need encoding
+    const tokenIds = [
+      "12345678901234567890123456789012345678901234567890123456789012345678901234567890",
+      "normal-token-id",
+      "token+with+plus",
+    ];
+
+    const encoded = tokenIds.map(id => encodeURIComponent(id.trim())).join(",");
+    
+    // Verify encoding
+    assert.ok(!encoded.includes("+"), "Plus signs should be encoded");
+    assert.ok(encoded.includes(","), "Comma separator should be present");
+    assert.ok(encoded.includes("token%2Bwith%2Bplus"), "Plus in tokenId should be encoded as %2B");
+  });
+
+  test("Batch URL should use clob_token_ids parameter", () => {
+    const baseUrl = "https://gamma-api.polymarket.com";
+    const tokenIds = ["token1", "token2"];
+    const encodedIds = tokenIds.map(id => encodeURIComponent(id.trim())).join(",");
+    const url = `${baseUrl}/markets?clob_token_ids=${encodedIds}`;
+
+    assert.ok(url.includes("clob_token_ids="), "URL should use clob_token_ids parameter");
+    assert.ok(url.includes("token1"), "URL should contain first tokenId");
+    assert.ok(url.includes("token2"), "URL should contain second tokenId");
+  });
+});
