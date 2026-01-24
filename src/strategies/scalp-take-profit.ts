@@ -1,5 +1,5 @@
 /**
- * Scalp Take-Profit Strategy
+ * Scalp Take-Profit Strategy with Exit Ladder
  *
  * A time-and-momentum-based profit-taking strategy that:
  * 1. Takes profits on positions held 30-120 minutes (configurable per preset)
@@ -13,6 +13,27 @@
  *    - Entry price ≤ 60¢ (speculative tier)
  *    - AND current price ≥ 90¢ (near resolution)
  *    These are $1.00 winners - let them ride to resolution!
+ *
+ * EXIT LADDER (Jan 2025 Refactor):
+ * When a scalp is triggered (sudden spike, target profit reached, etc.), the
+ * position enters an ExitPlan state machine that guarantees eventual exit:
+ *
+ * Stage A - PROFIT (first SCALP_EXIT_WINDOW_SEC * 0.6):
+ *   - Attempt SELL at target profit price (or bestBid if higher)
+ *   - Retry every SCALP_PROFIT_RETRY_SEC with slightly lower limit
+ *
+ * Stage B - BREAKEVEN (remaining time in window):
+ *   - If bestBid >= avgEntryPrice, sell at avgEntry (or bestBid if higher)
+ *   - Still avoids loss, just releases capital
+ *
+ * Stage C - FORCE (when window expires):
+ *   - Sell at bestBid immediately, even at loss
+ *   - Frees capital, prevents stuck positions
+ *
+ * NON-NEGOTIABLES:
+ * - Sell sizing uses position notional (sharesHeld * limitPrice), NOT profitUsd
+ * - If notional < MIN_ORDER_USD, treat as DUST and skip
+ * - If no bestBid (NO_BOOK), mark as BLOCKED and retry with backoff
  *
  * This strategy is designed to churn out consistent winners by
  * taking profits when momentum is fading, rather than waiting
@@ -151,6 +172,31 @@ export interface ScalpTakeProfitConfig {
    * Set to 0 to disable (hold indefinitely). Default: 3 minutes (quick scalps!)
    */
   lowPriceMaxHoldMinutes: number;
+
+  // === EXIT LADDER CONFIGURATION (Jan 2025) ===
+  // When a scalp is triggered, these settings control the exit ladder behavior
+
+  /**
+   * Exit window duration in seconds for the exit ladder
+   * After a position is flagged for scalp, it enters an exit window.
+   * The ladder progresses: PROFIT -> BREAKEVEN -> FORCE
+   * Default: 120 seconds (2 minutes)
+   */
+  exitWindowSec: number;
+
+  /**
+   * Retry cadence in seconds during the PROFIT stage of exit ladder
+   * How often to retry the profitable exit attempt
+   * Default: 15 seconds
+   */
+  profitRetrySec: number;
+
+  /**
+   * Minimum order size in USD
+   * Used to check if position notional is tradeable (not dust)
+   * Default: 5 (from MIN_ORDER_USD or config)
+   */
+  minOrderUsd: number;
 }
 
 /**
@@ -162,6 +208,63 @@ interface PriceHistoryEntry {
   bidDepth: number;
   askDepth: number;
   spread: number;
+}
+
+/**
+ * Exit Ladder Stage
+ *
+ * The exit ladder progresses through these stages when trying to exit a position:
+ * - PROFIT: Try to exit at target profit price (most aggressive)
+ * - BREAKEVEN: If PROFIT fails, try to exit at average entry price (no loss)
+ * - FORCE: If window expires, exit at best bid even at loss (capital recovery)
+ */
+export type ExitLadderStage = "PROFIT" | "BREAKEVEN" | "FORCE";
+
+/**
+ * Exit Plan State
+ *
+ * Tracks the state of an in-progress exit attempt for a position.
+ * This state machine persists across execution cycles (in-memory).
+ */
+export interface ExitPlan {
+  /** The tokenId this plan applies to */
+  tokenId: string;
+  /** Unix timestamp (ms) when the exit plan started */
+  startedAtMs: number;
+  /** Current stage in the exit ladder */
+  stage: ExitLadderStage;
+  /** Last time an exit attempt was made (ms) */
+  lastAttemptAtMs: number;
+  /** Number of exit attempts made */
+  attempts: number;
+  /** Average entry price in cents (for breakeven calculation) */
+  avgEntryCents: number;
+  /** Target profit price in cents (initial target) */
+  targetPriceCents: number;
+  /** Position shares at plan creation (for notional calc) */
+  sharesHeld: number;
+  /** P&L % when plan started (for logging) */
+  initialPnlPct: number;
+  /** P&L USD when plan started (for logging) */
+  initialPnlUsd: number;
+  /** If blocked due to NO_BID, track for backoff */
+  blockedReason?: "NO_BID" | "DUST";
+  /** When blocked, timestamp of last block occurrence */
+  blockedAtMs?: number;
+}
+
+/**
+ * Exit Plan Result from attempting to execute a plan
+ */
+export interface ExitPlanResult {
+  /** Whether the position was successfully exited */
+  filled: boolean;
+  /** If not filled, reason for failure */
+  reason?: string;
+  /** Price at which exit was attempted */
+  attemptedPriceCents?: number;
+  /** Whether the plan should continue (false = cancel) */
+  shouldContinue: boolean;
 }
 
 /**
@@ -232,6 +335,10 @@ export const DEFAULT_SCALP_TAKE_PROFIT_CONFIG: ScalpTakeProfitConfig = {
   // Low-price instant profit mode (disabled by default)
   lowPriceThreshold: 0, // Set via SCALP_LOW_PRICE_THRESHOLD to enable (e.g., 0.20 for ≤20¢)
   lowPriceMaxHoldMinutes: 3, // Quick scalps - don't hold volatile positions long
+  // Exit ladder configuration
+  exitWindowSec: 120, // 2 minute exit window
+  profitRetrySec: 15, // Retry every 15 seconds during PROFIT stage
+  minOrderUsd: 5, // Minimum order size (positions below this are DUST)
 };
 
 /**
@@ -324,6 +431,11 @@ export class ScalpTakeProfitStrategy {
     totalProfitUsd: 0,
     avgHoldMinutes: 0,
   };
+
+  // === EXIT LADDER STATE MACHINE ===
+  // Tracks active exit plans per tokenId
+  // Key: tokenId, Value: ExitPlan state
+  private exitPlans: Map<string, ExitPlan> = new Map();
 
   // === LOG DEDUPLICATION ===
   // Shared LogDeduper for rate-limiting and deduplicating logs
@@ -654,6 +766,29 @@ export class ScalpTakeProfitStrategy {
         continue;
       }
 
+      // === EXIT PLAN STATE MACHINE ===
+      // Check if there's already an exit plan for this position
+      const existingPlan = this.exitPlans.get(position.tokenId);
+
+      if (existingPlan) {
+        // Already in an exit plan - execute it
+        const result = await this.executeExitPlan(existingPlan, position, now);
+
+        if (result.filled) {
+          scalpedCount++;
+          this.exitedPositions.add(positionKey);
+          this.updateStats(position);
+          this.exitPlans.delete(position.tokenId);
+          this.skipLogTracker.delete(positionKey);
+          this.positionTracker.invalidateOrderbookCache(position.tokenId);
+        } else if (!result.shouldContinue) {
+          // Plan exhausted (DUST, MAX_ATTEMPTS, etc.)
+          this.exitPlans.delete(position.tokenId);
+        }
+        // Continue to next position - don't re-evaluate
+        continue;
+      }
+
       // Check if position qualifies for scalp exit
       const exitDecision = await this.evaluateScalpExit(position, now);
 
@@ -683,23 +818,30 @@ export class ScalpTakeProfitStrategy {
         continue;
       }
 
-      // Execute the scalp exit
+      // === NEW SCALP TRIGGER - Create Exit Plan ===
       this.logger.info(
         `[ScalpTakeProfit] 💰 Scalping position at +${position.pnlPct.toFixed(1)}% (+$${position.pnlUsd.toFixed(2)}): ${exitDecision.reason}`,
       );
 
-      const sold = await this.sellPosition(position);
-      if (sold) {
+      // Create and start the exit plan
+      const plan = this.createExitPlan(position, now);
+      this.exitPlans.set(position.tokenId, plan);
+
+      // Execute immediately on creation
+      const result = await this.executeExitPlan(plan, position, now);
+
+      if (result.filled) {
         scalpedCount++;
         this.exitedPositions.add(positionKey);
         this.updateStats(position);
-
-        // Clear skip log tracker since position is now exited
+        this.exitPlans.delete(position.tokenId);
         this.skipLogTracker.delete(positionKey);
-
-        // Invalidate orderbook cache for this token to ensure fresh data on next refresh
         this.positionTracker.invalidateOrderbookCache(position.tokenId);
+      } else if (!result.shouldContinue) {
+        // Plan exhausted (DUST, MAX_ATTEMPTS, etc.)
+        this.exitPlans.delete(position.tokenId);
       }
+      // If shouldContinue is true, plan stays for next cycle
     }
 
     // === LOG DEDUPLICATION: Emit aggregated skip summary (rate-limited) ===
@@ -1166,8 +1308,17 @@ export class ScalpTakeProfitStrategy {
 
   /**
    * Sell a position to take profit
+   *
+   * CRITICAL FIX: Sell sizing uses position notional (sharesHeld * limitPrice),
+   * NOT profitUsd which causes SKIP_MIN_ORDER_SIZE errors.
+   *
+   * @param position The position to sell
+   * @param limitPriceCents Optional limit price in cents (defaults to currentBidPrice * 100)
    */
-  private async sellPosition(position: Position): Promise<boolean> {
+  private async sellPosition(
+    position: Position,
+    limitPriceCents?: number,
+  ): Promise<boolean> {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
       this.logger.error(`[ScalpTakeProfit] No wallet`);
@@ -1175,7 +1326,23 @@ export class ScalpTakeProfitStrategy {
     }
 
     try {
-      const sizeUsd = position.size * position.currentPrice;
+      // Use provided limit price or fall back to current bid
+      const effectiveLimitCents =
+        limitPriceCents ?? (position.currentBidPrice ?? position.currentPrice) * 100;
+      const effectiveLimitPrice = effectiveLimitCents / 100;
+
+      // CRITICAL: Compute notional as sharesHeld * limitPrice (what we'll receive)
+      // NOT profitUsd which would cause SKIP_MIN_ORDER_SIZE
+      const notionalUsd = position.size * effectiveLimitPrice;
+
+      // Preflight check: is notional >= minOrderUsd?
+      if (notionalUsd < this.config.minOrderUsd) {
+        this.logger.debug(
+          `[ScalpTakeProfit] DUST_EXIT: notional=${notionalUsd.toFixed(2)} < minOrder=${this.config.minOrderUsd}. ` +
+            `shares=${position.size.toFixed(4)} limitPrice=${effectiveLimitPrice.toFixed(4)} tokenId=${position.tokenId.slice(0, 12)}...`,
+        );
+        return false;
+      }
 
       const result = await postOrder({
         client: this.client,
@@ -1184,14 +1351,26 @@ export class ScalpTakeProfitStrategy {
         tokenId: position.tokenId,
         outcome: (position.side?.toUpperCase() as "YES" | "NO") || "YES",
         side: "SELL",
-        sizeUsd,
+        sizeUsd: notionalUsd,
+        maxAcceptablePrice: effectiveLimitPrice,
         logger: this.logger,
         skipDuplicatePrevention: true,
       });
 
       if (result.status === "submitted") {
-        this.logger.info(`[ScalpTakeProfit] ✅ Scalp sell executed`);
+        this.logger.info(
+          `[ScalpTakeProfit] ✅ Scalp sell executed: notional=$${notionalUsd.toFixed(2)} ` +
+            `limit=${effectiveLimitCents.toFixed(1)}¢`,
+        );
         return true;
+      }
+
+      // Check for SKIP_MIN_ORDER_SIZE despite our preflight
+      if (result.reason === "SKIP_MIN_ORDER_SIZE") {
+        this.logger.error(
+          `[ScalpTakeProfit] BUG: SKIP_MIN_ORDER_SIZE despite notional=$${notionalUsd.toFixed(2)} >= min=$${this.config.minOrderUsd}. ` +
+            `shares=${position.size.toFixed(4)} limit=${effectiveLimitCents.toFixed(1)}¢ tokenId=${position.tokenId.slice(0, 12)}...`,
+        );
       }
 
       this.logger.warn(
@@ -1204,6 +1383,232 @@ export class ScalpTakeProfitStrategy {
       );
       return false;
     }
+  }
+
+  // === EXIT LADDER METHODS ===
+
+  /**
+   * Create a new ExitPlan for a position
+   */
+  private createExitPlan(position: Position, now: number): ExitPlan {
+    // Calculate target price: entry + target profit %
+    const avgEntryCents = position.avgEntryPriceCents ?? position.entryPrice * 100;
+    const targetPriceCents = avgEntryCents * (1 + this.config.targetProfitPct / 100);
+
+    const plan: ExitPlan = {
+      tokenId: position.tokenId,
+      startedAtMs: now,
+      stage: "PROFIT",
+      lastAttemptAtMs: 0,
+      attempts: 0,
+      avgEntryCents,
+      targetPriceCents,
+      sharesHeld: position.size,
+      initialPnlPct: position.pnlPct,
+      initialPnlUsd: position.pnlUsd,
+    };
+
+    this.logger.info(
+      `[ScalpExit] START tokenId=${position.tokenId.slice(0, 12)}... ` +
+        `pnl=+${position.pnlPct.toFixed(1)}% profit=$${position.pnlUsd.toFixed(2)} ` +
+        `window=${this.config.exitWindowSec}s shares=${position.size.toFixed(4)} ` +
+        `entry=${avgEntryCents.toFixed(1)}¢ target=${targetPriceCents.toFixed(1)}¢`,
+    );
+
+    return plan;
+  }
+
+  /**
+   * Check if an existing exit plan should escalate to the next stage
+   */
+  private updateExitPlanStage(plan: ExitPlan, now: number): void {
+    const elapsedSec = (now - plan.startedAtMs) / 1000;
+    const profitWindowSec = this.config.exitWindowSec * 0.6; // 60% of window for PROFIT stage
+
+    const previousStage = plan.stage;
+
+    if (plan.stage === "PROFIT" && elapsedSec >= profitWindowSec) {
+      plan.stage = "BREAKEVEN";
+      this.logger.info(
+        `[ScalpExit] ESCALATE tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `PROFIT->BREAKEVEN reason=WINDOW_PROGRESS (${elapsedSec.toFixed(0)}s elapsed)`,
+      );
+    } else if (plan.stage === "BREAKEVEN" && elapsedSec >= this.config.exitWindowSec) {
+      plan.stage = "FORCE";
+      this.logger.info(
+        `[ScalpExit] ESCALATE tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `BREAKEVEN->FORCE reason=WINDOW_EXPIRED (${elapsedSec.toFixed(0)}s elapsed)`,
+      );
+    }
+
+    // Log stage transition
+    if (previousStage !== plan.stage) {
+      plan.attempts = 0; // Reset attempts on stage change
+    }
+  }
+
+  /**
+   * Calculate the limit price for the current exit plan stage
+   *
+   * PROFIT: max(targetPriceCents, bestBidCents) but must remain > avgEntryCents
+   * BREAKEVEN: max(avgEntryCents, bestBidCents) but only if bestBid >= avgEntry
+   * FORCE: bestBidCents (even if < avgEntry)
+   */
+  private calculateExitLimitPrice(
+    plan: ExitPlan,
+    bestBidCents: number,
+  ): { limitCents: number; reason: string } {
+    switch (plan.stage) {
+      case "PROFIT": {
+        // Try to get target profit, but at least beat best bid if it's above entry
+        const limitCents = Math.max(plan.targetPriceCents, bestBidCents);
+        // Ensure we're still profitable (above entry)
+        if (limitCents <= plan.avgEntryCents) {
+          return {
+            limitCents: plan.avgEntryCents + 0.1, // Just above entry
+            reason: "PROFIT_MIN_ABOVE_ENTRY",
+          };
+        }
+        return { limitCents, reason: "PROFIT_TARGET" };
+      }
+
+      case "BREAKEVEN": {
+        // Exit at entry price or better
+        if (bestBidCents >= plan.avgEntryCents) {
+          return {
+            limitCents: Math.max(plan.avgEntryCents, bestBidCents),
+            reason: "BREAKEVEN_AT_ENTRY_OR_BETTER",
+          };
+        }
+        // bestBid is below entry - can't break even yet
+        return {
+          limitCents: plan.avgEntryCents,
+          reason: "BREAKEVEN_WAITING_FOR_BID",
+        };
+      }
+
+      case "FORCE": {
+        // Exit at best bid, even at loss
+        return { limitCents: bestBidCents, reason: "FORCE_AT_BID" };
+      }
+
+      default:
+        return { limitCents: bestBidCents, reason: "UNKNOWN_STAGE" };
+    }
+  }
+
+  /**
+   * Execute an exit plan for a position
+   *
+   * Returns whether the plan should continue (false = remove plan)
+   */
+  private async executeExitPlan(
+    plan: ExitPlan,
+    position: Position,
+    now: number,
+  ): Promise<ExitPlanResult> {
+    // Check for NO_BID condition
+    if (position.currentBidPrice === undefined || position.status === "NO_BOOK") {
+      // Mark as blocked
+      plan.blockedReason = "NO_BID";
+      plan.blockedAtMs = now;
+      this.logger.warn(
+        `[ScalpExit] BLOCKED tokenId=${plan.tokenId.slice(0, 12)}... reason=NO_BID`,
+      );
+      return { filled: false, reason: "NO_BID", shouldContinue: true };
+    }
+
+    // Clear blocked state if we now have a bid
+    if (plan.blockedReason === "NO_BID") {
+      plan.blockedReason = undefined;
+      plan.blockedAtMs = undefined;
+    }
+
+    const bestBidCents = position.currentBidPrice * 100;
+
+    // Update plan stage based on elapsed time
+    this.updateExitPlanStage(plan, now);
+
+    // Calculate limit price for current stage
+    const { limitCents, reason } = this.calculateExitLimitPrice(plan, bestBidCents);
+
+    // Check retry cadence
+    const timeSinceLastAttempt = now - plan.lastAttemptAtMs;
+    if (timeSinceLastAttempt < this.config.profitRetrySec * 1000 && plan.attempts > 0) {
+      return { filled: false, reason: "RETRY_COOLDOWN", shouldContinue: true };
+    }
+
+    // Compute notional for preflight
+    const notionalUsd = plan.sharesHeld * (limitCents / 100);
+
+    // DUST check
+    if (notionalUsd < this.config.minOrderUsd) {
+      plan.blockedReason = "DUST";
+      this.logger.debug(
+        `[ScalpExit] DUST_EXIT tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `notional=$${notionalUsd.toFixed(2)} < min=$${this.config.minOrderUsd}`,
+      );
+      // Don't continue - remove plan for dust positions
+      return { filled: false, reason: "DUST", shouldContinue: false };
+    }
+
+    // Log attempt
+    plan.attempts++;
+    plan.lastAttemptAtMs = now;
+
+    // Rate-limited attempt logging
+    if (this.logDeduper.shouldLog(`ScalpExit:TRY:${plan.tokenId}`, 5000, plan.stage)) {
+      this.logger.info(
+        `[ScalpExit] TRY stage=${plan.stage} tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `price=${limitCents.toFixed(1)}¢ notional=$${notionalUsd.toFixed(2)} ` +
+          `attempt=${plan.attempts} reason=${reason}`,
+      );
+    }
+
+    // Execute the sell
+    const filled = await this.sellPosition(position, limitCents);
+
+    if (filled) {
+      this.logger.info(
+        `[ScalpExit] FILLED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `stage=${plan.stage} price=${limitCents.toFixed(1)}¢`,
+      );
+      return { filled: true, attemptedPriceCents: limitCents, shouldContinue: false };
+    }
+
+    // Check if FORCE stage and window expired - should still try
+    if (plan.stage === "FORCE") {
+      const elapsedSec = (now - plan.startedAtMs) / 1000;
+      // Give FORCE stage extra time (double the window) before giving up
+      if (elapsedSec > this.config.exitWindowSec * 2) {
+        this.logger.warn(
+          `[ScalpExit] ABANDONED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+            `elapsed=${elapsedSec.toFixed(0)}s - exceeded max attempts`,
+        );
+        return { filled: false, reason: "MAX_ATTEMPTS", shouldContinue: false };
+      }
+    }
+
+    return {
+      filled: false,
+      reason: "NOT_FILLED",
+      attemptedPriceCents: limitCents,
+      shouldContinue: true,
+    };
+  }
+
+  /**
+   * Check if a position has an active exit plan
+   */
+  hasExitPlan(tokenId: string): boolean {
+    return this.exitPlans.has(tokenId);
+  }
+
+  /**
+   * Get all active exit plans (for testing/debugging)
+   */
+  getExitPlans(): Map<string, ExitPlan> {
+    return new Map(this.exitPlans);
   }
 
   /**
@@ -1318,6 +1723,13 @@ export class ScalpTakeProfitStrategy {
         this.skipLogTracker.delete(key);
       }
     }
+
+    // Clean up exit plans for positions that no longer exist
+    for (const tokenId of this.exitPlans.keys()) {
+      if (!currentTokenIds.has(tokenId)) {
+        this.exitPlans.delete(tokenId);
+      }
+    }
   }
 
   /**
@@ -1342,6 +1754,8 @@ export class ScalpTakeProfitStrategy {
     this.priceHistory.clear();
     this.entryMetrics.clear();
     this.exitedPositions.clear();
+    this.exitPlans.clear();
+    this.skipLogTracker.clear();
     this.stats = {
       scalpCount: 0,
       totalProfitUsd: 0,
