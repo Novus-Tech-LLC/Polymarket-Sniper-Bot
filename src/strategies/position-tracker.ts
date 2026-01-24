@@ -8,6 +8,11 @@ import {
   HEARTBEAT_INTERVAL_MS,
   TRACKER_HEARTBEAT_MS,
 } from "../utils/log-deduper.util";
+import {
+  formatCents,
+  isNearResolution,
+  NEAR_RESOLUTION_THRESHOLD_DOLLARS,
+} from "../utils/price.util";
 
 /**
  * Position status indicating tradability
@@ -406,6 +411,25 @@ export interface Position {
    * Trading strategies should STOP acting on these positions.
    */
   marketClosed?: boolean;
+
+  // === NEAR-RESOLUTION CANDIDATE (Jan 2025 Fix) ===
+  // Used to prevent hedging/liquidation of near-resolution winners.
+
+  /**
+   * Whether this position is a near-resolution candidate.
+   *
+   * Set to true when:
+   * - currentPrice >= 99.5¢ (NEAR_RESOLUTION_THRESHOLD_DOLLARS)
+   * - currentPrice >= 50¢ (safety guard - NEAR_RESOLUTION_MIN_PRICE_DOLLARS)
+   * - redeemable is false
+   *
+   * SmartHedging MUST NOT hedge or liquidate positions where this is true.
+   * Instead, wait for resolution or use sell-early module if configured.
+   *
+   * CRITICAL SAFETY GUARD: Prices < 50¢ are NEVER classified as near-resolution.
+   * This prevents false positives from broken/stale orderbook data.
+   */
+  nearResolutionCandidate?: boolean;
 }
 
 // Price display constants
@@ -599,10 +623,13 @@ export class PositionTracker {
   private static readonly WINNER_THRESHOLD = 0.5;
 
   // Threshold for detecting resolved positions by price
-  // Prices >= 0.99 (99¢) or <= 0.01 (1¢) indicate likely resolved markets
+  // UPDATED: Use centralized NEAR_RESOLUTION_THRESHOLD_DOLLARS (0.995 = 99.5¢)
+  // Prices >= 99.5¢ (high) or <= 0.5¢ (low) indicate likely resolved markets
   // This helps detect redeemable positions even when API doesn't mark them as redeemable
-  private static readonly RESOLVED_PRICE_HIGH_THRESHOLD = 0.99;
-  private static readonly RESOLVED_PRICE_LOW_THRESHOLD = 0.01;
+  // NOTE: We use the centralized threshold constant for consistency across modules
+  private static readonly RESOLVED_PRICE_HIGH_THRESHOLD =
+    NEAR_RESOLUTION_THRESHOLD_DOLLARS; // 0.995 (99.5¢)
+  private static readonly RESOLVED_PRICE_LOW_THRESHOLD = 0.005; // 0.5¢ (inverse of 99.5¢)
 
   // P&L sanity check thresholds
   // Used to detect TOKEN_MISMATCH_OR_BOOK_FETCH_BUG:
@@ -2629,16 +2656,17 @@ export class PositionTracker {
 
                 // For diagnostic purposes, check if price suggests the market might be near resolution
                 // This is used for logging/diagnostics only, NOT to change state
-                const priceNearResolution =
-                  currentPrice >=
-                    PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
-                  currentPrice <= PositionTracker.RESOLVED_PRICE_LOW_THRESHOLD;
+                // UPDATED: Use centralized isNearResolution() with safety guard (price >= 50¢)
+                const priceNearResolution = isNearResolution(currentPrice);
 
+                // Safety guard: NEVER classify prices < 50¢ as near-resolution
+                // This prevents false positives from broken/stale orderbook data
                 if (priceNearResolution) {
                   // Log diagnostic: price suggests resolved but Data-API says NOT redeemable
                   // This is EXPECTED behavior - we keep it ACTIVE until Data-API confirms
+                  // RENAMED: "price_near_resolution" -> "near_resolution_candidate" for clarity
                   this.logger.debug(
-                    `[PositionTracker] price_near_resolution tokenId=${tokenId.slice(0, 16)}... price=${(currentPrice * 100).toFixed(2)}¢ but redeemable=false, keeping ACTIVE`,
+                    `[PositionTracker] near_resolution_candidate tokenId=${tokenId.slice(0, 16)}... price=${formatCents(currentPrice)} but redeemable=false, keeping ACTIVE`,
                   );
 
                   // Check Gamma for market closed status (NOT redeemable)
@@ -2815,6 +2843,11 @@ export class PositionTracker {
                 ? "REDEEMABLE"
                 : positionStatus;
 
+              // Compute nearResolutionCandidate flag using centralized logic
+              // CRITICAL: This uses isNearResolution() which has the 50¢ safety guard
+              const nearResolutionCandidate =
+                !finalRedeemable && isNearResolution(currentPrice);
+
               return {
                 marketId,
                 tokenId,
@@ -2847,6 +2880,8 @@ export class PositionTracker {
                 positionState,
                 redeemableProofSource,
                 marketClosed,
+                // Near-resolution candidate flag (Jan 2025 fix)
+                nearResolutionCandidate,
               };
             } catch (err) {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;

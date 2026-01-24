@@ -19,9 +19,9 @@ import { postOrder } from "../utils/post-order.util";
 import {
   LogDeduper,
   SkipReasonAggregator,
-  SKIP_LOG_TTL_MS,
   TOKEN_ID_DISPLAY_LENGTH,
 } from "../utils/log-deduper.util";
+import { formatCents, assessOrderbookQuality } from "../utils/price.util";
 
 /**
  * Smart Hedging Configuration
@@ -249,6 +249,34 @@ export class SmartHedgingStrategy {
         this.failedLiquidationCooldowns.delete(key);
       }
 
+      // === ORDERBOOK QUALITY ASSESSMENT (Jan 2025 Fix) ===
+      // Check if orderbook prices can be trusted before making P&L-based decisions.
+      // This prevents "catastrophic loss" false positives when orderbook is broken.
+      //
+      // CRITICAL: If orderbook is INVALID_BOOK or NO_BOOK, we should use
+      // Data-API price (dataApiCurPrice) instead of orderbook-derived P&L.
+      // The position.pnlTrusted flag already handles NO_BOOK cases, but we add
+      // explicit orderbook quality checking for additional safety.
+      const orderbookQuality = assessOrderbookQuality(
+        position.currentBidPrice,
+        position.currentAskPrice,
+        position.dataApiCurPrice,
+      );
+
+      if (orderbookQuality.quality === "INVALID_BOOK") {
+        // Orderbook is broken/stale - do not trust P&L derived from it
+        // Skip hedge/liquidation to avoid acting on bad data
+        const previousReason = this.lastSkipReasonByTokenId.get(key);
+        if (previousReason !== "invalid_book") {
+          this.logger.warn(
+            `[SmartHedging] ⚠️ Invalid orderbook for ${position.side} ${tokenIdShort}... (${orderbookQuality.reason}), skipping to avoid false catastrophic loss`,
+          );
+          this.lastSkipReasonByTokenId.set(key, "invalid_book");
+        }
+        skipAggregator.add(tokenIdShort, "invalid_book");
+        continue;
+      }
+
       // === CRITICAL: P&L TRUST CHECK ===
       // NEVER hedge or liquidate positions with untrusted P&L.
       // Acting on invalid data can cause selling winners and keeping losers.
@@ -289,6 +317,28 @@ export class SmartHedgingStrategy {
           this.lastSkipReasonByTokenId.set(key, "redeemable");
         }
         skipAggregator.add(tokenIdShort, "redeemable");
+        continue;
+      }
+
+      // === NEAR-RESOLUTION GATING (Jan 2025 Fix) ===
+      // CRITICAL: Skip positions that are near-resolution winners.
+      // These positions are almost certainly going to resolve to $1.00.
+      // Hedging/liquidating them would be selling winners at a discount.
+      //
+      // nearResolutionCandidate is computed by PositionTracker using:
+      // - currentPrice >= 99.5¢ (NEAR_RESOLUTION_THRESHOLD_DOLLARS)
+      // - currentPrice >= 50¢ (safety guard prevents false positives from broken orderbook)
+      // - redeemable === false
+      if (position.nearResolutionCandidate) {
+        const previousReason = this.lastSkipReasonByTokenId.get(key);
+        if (previousReason !== "near_resolution") {
+          // State changed to near-resolution - log once per TTL
+          this.logger.info(
+            `[SmartHedging] 🎯 Near-resolution position (${formatCents(position.currentPrice)}), skipping hedge/liquidation: ${position.side} ${tokenIdShort}...`,
+          );
+          this.lastSkipReasonByTokenId.set(key, "near_resolution");
+        }
+        skipAggregator.add(tokenIdShort, "near_resolution");
         continue;
       }
 
