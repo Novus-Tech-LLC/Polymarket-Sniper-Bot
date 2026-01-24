@@ -200,6 +200,155 @@ export interface ScalpTakeProfitConfig {
 }
 
 /**
+ * ORDERBOOK QUALITY VALIDATION (Jan 2025)
+ *
+ * Detects corrupted/mismatched orderbook data that would cause scalp failures.
+ * Common scenarios:
+ * 1. INVALID_BOOK: bestBid=0.01, bestAsk=0.99 (likely wrong tokenId or cache pollution)
+ * 2. EXEC_PRICE_UNTRUSTED: bestBid differs from Data-API price by > 30¢
+ * 3. NO_EXECUTION_PRICE: Missing bid/ask data entirely
+ *
+ * When orderbook quality is poor, ScalpExit MUST NOT attempt trades and should
+ * enter a cooldown period for that tokenId.
+ */
+export type OrderbookQualityStatus =
+  | "VALID" // Orderbook is usable for execution
+  | "INVALID_BOOK" // Extreme spread (bid < 5¢, ask > 95¢) - likely wrong token/cache
+  | "EXEC_PRICE_UNTRUSTED" // Bid differs from Data-API price by > 30¢
+  | "NO_EXECUTION_PRICE"; // No bid/ask data available
+
+/**
+ * Thresholds for orderbook quality validation
+ */
+export const ORDERBOOK_QUALITY_THRESHOLDS = {
+  /** If bestBid is below this, it's suspiciously low */
+  INVALID_BID_THRESHOLD: 0.05, // 5¢
+  /** If bestAsk is above this, it's suspiciously high */
+  INVALID_ASK_THRESHOLD: 0.95, // 95¢
+  /** Max acceptable difference between bestBid and dataApiPrice */
+  MAX_PRICE_DEVIATION: 0.30, // 30¢
+};
+
+/**
+ * Result of orderbook quality validation
+ */
+export interface OrderbookQualityResult {
+  status: OrderbookQualityStatus;
+  /** Human-readable reason for the status */
+  reason?: string;
+  /** Diagnostic data for logging */
+  diagnostics?: {
+    bestBid: number | null;
+    bestAsk: number | null;
+    dataApiPrice?: number;
+    spread?: number;
+    priceDeviation?: number;
+  };
+}
+
+/**
+ * Validate orderbook quality for execution safety.
+ *
+ * @param bestBid Best bid price from CLOB (null if missing)
+ * @param bestAsk Best ask price from CLOB (null if missing)
+ * @param dataApiPrice Reference price from Data-API (optional)
+ * @returns OrderbookQualityResult with status and diagnostics
+ */
+export function validateOrderbookQuality(
+  bestBid: number | null,
+  bestAsk: number | null,
+  dataApiPrice?: number,
+): OrderbookQualityResult {
+  const diagnostics: OrderbookQualityResult["diagnostics"] = {
+    bestBid,
+    bestAsk,
+    dataApiPrice,
+  };
+
+  // NO_EXECUTION_PRICE: Missing bid data
+  if (bestBid === null || bestBid === 0) {
+    return {
+      status: "NO_EXECUTION_PRICE",
+      reason: "No bestBid available from orderbook",
+      diagnostics,
+    };
+  }
+
+  // INVALID_BOOK: Extreme spread indicating wrong token mapping or cache pollution
+  // bestBid < 5¢ AND bestAsk > 95¢ is a clear indicator of corrupted data
+  if (
+    bestAsk !== null &&
+    bestAsk > 0 &&
+    bestBid < ORDERBOOK_QUALITY_THRESHOLDS.INVALID_BID_THRESHOLD &&
+    bestAsk > ORDERBOOK_QUALITY_THRESHOLDS.INVALID_ASK_THRESHOLD
+  ) {
+    diagnostics.spread = bestAsk - bestBid;
+    return {
+      status: "INVALID_BOOK",
+      reason: `Extreme spread: bestBid=${(bestBid * 100).toFixed(1)}¢ < 5¢ AND bestAsk=${(bestAsk * 100).toFixed(1)}¢ > 95¢ (likely wrong tokenId or cache pollution)`,
+      diagnostics,
+    };
+  }
+
+  // EXEC_PRICE_UNTRUSTED: bestBid differs too much from Data-API reference price
+  if (dataApiPrice !== undefined && dataApiPrice > 0) {
+    const priceDeviation = Math.abs(bestBid - dataApiPrice);
+    diagnostics.priceDeviation = priceDeviation;
+
+    if (priceDeviation > ORDERBOOK_QUALITY_THRESHOLDS.MAX_PRICE_DEVIATION) {
+      return {
+        status: "EXEC_PRICE_UNTRUSTED",
+        reason: `bestBid=${(bestBid * 100).toFixed(1)}¢ deviates from dataApiPrice=${(dataApiPrice * 100).toFixed(1)}¢ by ${(priceDeviation * 100).toFixed(1)}¢ (> ${(ORDERBOOK_QUALITY_THRESHOLDS.MAX_PRICE_DEVIATION * 100).toFixed(0)}¢ threshold)`,
+        diagnostics,
+      };
+    }
+  }
+
+  // VALID: Orderbook passed all checks
+  return {
+    status: "VALID",
+    diagnostics,
+  };
+}
+
+/**
+ * Circuit breaker entry for per-token execution disabling.
+ *
+ * When orderbook quality is repeatedly poor for a tokenId, we disable
+ * execution attempts with escalating cooldowns to prevent spam.
+ */
+export interface ExecutionCircuitBreakerEntry {
+  /** Unix timestamp (ms) when this token becomes re-enabled */
+  disabledUntilMs: number;
+  /** Reason for disabling */
+  reason: OrderbookQualityStatus;
+  /** Last observed bestBid when disabled */
+  lastBid: number | null;
+  /** Last observed bestAsk when disabled */
+  lastAsk: number | null;
+  /** Number of consecutive failures (for cooldown escalation) */
+  failureCount: number;
+  /** Unix timestamp (ms) of last failure */
+  lastFailureAtMs: number;
+}
+
+/**
+ * Cooldown escalation ladder for circuit breaker.
+ * Consecutive failures increase cooldown: 1m -> 5m -> 15m -> 60m (max)
+ */
+export const CIRCUIT_BREAKER_COOLDOWNS_MS = [
+  60_000, // 1 minute
+  300_000, // 5 minutes
+  900_000, // 15 minutes
+  3_600_000, // 60 minutes (max)
+];
+
+/**
+ * Dust cooldown duration (10 minutes)
+ */
+export const DUST_COOLDOWN_MS = 600_000;
+
+/**
  * Price history entry for momentum tracking
  */
 interface PriceHistoryEntry {
@@ -247,10 +396,12 @@ export interface ExitPlan {
   initialPnlPct: number;
   /** P&L USD when plan started (for logging) */
   initialPnlUsd: number;
-  /** If blocked due to NO_BID, track for backoff */
-  blockedReason?: "NO_BID" | "DUST";
+  /** If blocked due to execution issues, track for backoff */
+  blockedReason?: "NO_BID" | "DUST" | "INVALID_BOOK" | "EXEC_PRICE_UNTRUSTED" | "DUST_COOLDOWN";
   /** When blocked, timestamp of last block occurrence */
   blockedAtMs?: number;
+  /** Whether START log has been emitted for this plan (prevents re-logging) */
+  startLogged?: boolean;
 }
 
 /**
@@ -436,6 +587,16 @@ export class ScalpTakeProfitStrategy {
   // Tracks active exit plans per tokenId
   // Key: tokenId, Value: ExitPlan state
   private exitPlans: Map<string, ExitPlan> = new Map();
+
+  // === EXECUTION CIRCUIT BREAKER ===
+  // Tracks disabled tokens due to invalid orderbook data
+  // Key: tokenId, Value: ExecutionCircuitBreakerEntry
+  private executionCircuitBreaker: Map<string, ExecutionCircuitBreakerEntry> = new Map();
+
+  // === DUST COOLDOWN TRACKING ===
+  // Tracks tokens in dust cooldown to prevent repeated plan restarts
+  // Key: tokenId, Value: Unix timestamp (ms) when cooldown ends
+  private dustCooldowns: Map<string, number> = new Map();
 
   // === LOG DEDUPLICATION ===
   // Shared LogDeduper for rate-limiting and deduplicating logs
@@ -871,6 +1032,22 @@ export class ScalpTakeProfitStrategy {
         continue;
       }
 
+      // === CIRCUIT BREAKER CHECK (before creating new plans) ===
+      // If this token is in circuit breaker cooldown, skip without starting a new plan
+      const circuitBreaker = this.executionCircuitBreaker.get(position.tokenId);
+      if (circuitBreaker && circuitBreaker.disabledUntilMs > now) {
+        skipAggregator.add(tokenIdShort, "circuit_breaker");
+        continue;
+      }
+
+      // === DUST COOLDOWN CHECK (before creating new plans) ===
+      // If this token had a recent DUST exit, skip to prevent repeated plan creation
+      const dustCooldownEnd = this.dustCooldowns.get(position.tokenId);
+      if (dustCooldownEnd && dustCooldownEnd > now) {
+        skipAggregator.add(tokenIdShort, "dust_cooldown");
+        continue;
+      }
+
       // Check if position qualifies for scalp exit
       const exitDecision = await this.evaluateScalpExit(position, now);
 
@@ -897,6 +1074,34 @@ export class ScalpTakeProfitStrategy {
             skipAggregator.add(tokenIdShort, "other");
           }
         }
+        continue;
+      }
+
+      // === PRE-FLIGHT ORDERBOOK QUALITY CHECK ===
+      // Validate orderbook quality BEFORE creating exit plan to avoid creating plans
+      // that will immediately fail with INVALID_BOOK
+      const bestBid = position.currentBidPrice ?? null;
+      const bestAsk = position.currentAskPrice ?? null;
+      const dataApiPrice = position.currentPrice;
+
+      const preflightQuality = validateOrderbookQuality(bestBid, bestAsk, dataApiPrice);
+
+      if (preflightQuality.status !== "VALID") {
+        // Orderbook quality is poor - enter circuit breaker instead of creating plan
+        this.updateCircuitBreaker(position.tokenId, preflightQuality, now);
+
+        // Log only once per TTL
+        if (this.logDeduper.shouldLog(`ScalpExit:PREFLIGHT_INVALID:${position.tokenId}`, 30_000)) {
+          this.logger.warn(
+            `[CLOB] INVALID_BOOK (preflight) tokenId=${position.tokenId.slice(0, 12)}... ` +
+              `bestBid=${bestBid !== null ? (bestBid * 100).toFixed(1) + "¢" : "null"} ` +
+              `bestAsk=${bestAsk !== null ? (bestAsk * 100).toFixed(1) + "¢" : "null"} ` +
+              `dataApiPrice=${dataApiPrice !== undefined ? (dataApiPrice * 100).toFixed(1) + "¢" : "N/A"} ` +
+              `-> NOT creating exit plan. Reason: ${preflightQuality.reason}`,
+          );
+        }
+
+        skipAggregator.add(tokenIdShort, "invalid_book");
         continue;
       }
 
@@ -1488,6 +1693,7 @@ export class ScalpTakeProfitStrategy {
       sharesHeld: position.size,
       initialPnlPct: position.pnlPct,
       initialPnlUsd: position.pnlUsd,
+      startLogged: true, // Mark that START log was emitted
     };
 
     this.logger.info(
@@ -1585,27 +1791,82 @@ export class ScalpTakeProfitStrategy {
    * Execute an exit plan for a position
    *
    * Returns whether the plan should continue (false = remove plan)
+   *
+   * ORDERBOOK QUALITY VALIDATION (Jan 2025):
+   * Before attempting any trade, validate that the orderbook data is trustworthy.
+   * If INVALID_BOOK or EXEC_PRICE_UNTRUSTED, block execution and enter cooldown.
    */
   private async executeExitPlan(
     plan: ExitPlan,
     position: Position,
     now: number,
   ): Promise<ExitPlanResult> {
+    // === CIRCUIT BREAKER CHECK ===
+    // If this token is in circuit breaker cooldown, skip without logging repeatedly
+    const circuitBreaker = this.executionCircuitBreaker.get(plan.tokenId);
+    if (circuitBreaker && circuitBreaker.disabledUntilMs > now) {
+      // Token is disabled - keep plan alive but don't attempt
+      plan.blockedReason = circuitBreaker.reason as typeof plan.blockedReason;
+      plan.blockedAtMs = now;
+      // Log only once per 30 seconds to avoid spam
+      if (this.logDeduper.shouldLog(`ScalpExit:CIRCUIT_BREAKER:${plan.tokenId}`, 30_000)) {
+        const remainingSec = Math.ceil((circuitBreaker.disabledUntilMs - now) / 1000);
+        this.logger.debug(
+          `[ScalpExit] CIRCUIT_BREAKER tokenId=${plan.tokenId.slice(0, 12)}... ` +
+            `reason=${circuitBreaker.reason} cooldown=${remainingSec}s remaining`,
+        );
+      }
+      return { filled: false, reason: circuitBreaker.reason, shouldContinue: true };
+    }
+
     // Check for NO_BID condition
     if (position.currentBidPrice === undefined || position.status === "NO_BOOK") {
       // Mark as blocked
       plan.blockedReason = "NO_BID";
       plan.blockedAtMs = now;
-      this.logger.warn(
-        `[ScalpExit] BLOCKED tokenId=${plan.tokenId.slice(0, 12)}... reason=NO_BID`,
-      );
+      if (this.logDeduper.shouldLog(`ScalpExit:NO_BID:${plan.tokenId}`, 30_000)) {
+        this.logger.warn(
+          `[ScalpExit] BLOCKED tokenId=${plan.tokenId.slice(0, 12)}... reason=NO_BID`,
+        );
+      }
       return { filled: false, reason: "NO_BID", shouldContinue: true };
     }
 
-    // Clear blocked state if we now have a bid
-    if (plan.blockedReason === "NO_BID") {
+    // === ORDERBOOK QUALITY VALIDATION ===
+    // Get bestAsk for validation (we need both bid and ask to detect INVALID_BOOK)
+    const bestBid = position.currentBidPrice;
+    const bestAsk = position.currentAskPrice ?? null;
+    const dataApiPrice = position.currentPrice; // Use Data-API mark price as reference
+
+    const qualityResult = validateOrderbookQuality(bestBid, bestAsk, dataApiPrice);
+
+    if (qualityResult.status !== "VALID") {
+      // Orderbook quality is poor - enter circuit breaker
+      this.updateCircuitBreaker(plan.tokenId, qualityResult, now);
+
+      plan.blockedReason = qualityResult.status as typeof plan.blockedReason;
+      plan.blockedAtMs = now;
+
+      // Log only once per TTL to prevent spam
+      if (this.logDeduper.shouldLog(`ScalpExit:INVALID_BOOK:${plan.tokenId}`, 30_000)) {
+        this.logger.warn(
+          `[CLOB] INVALID_BOOK tokenId=${plan.tokenId.slice(0, 12)}... ` +
+            `bestBid=${qualityResult.diagnostics?.bestBid !== null ? (qualityResult.diagnostics?.bestBid! * 100).toFixed(1) + "¢" : "null"} ` +
+            `bestAsk=${qualityResult.diagnostics?.bestAsk !== null ? (qualityResult.diagnostics?.bestAsk! * 100).toFixed(1) + "¢" : "null"} ` +
+            `dataApiPrice=${dataApiPrice !== undefined ? (dataApiPrice * 100).toFixed(1) + "¢" : "N/A"} ` +
+            `-> disabling execution for cooldown. Reason: ${qualityResult.reason}`,
+        );
+      }
+
+      return { filled: false, reason: qualityResult.status, shouldContinue: true };
+    }
+
+    // Clear blocked state if we now have valid orderbook
+    if (plan.blockedReason === "NO_BID" || plan.blockedReason === "INVALID_BOOK" || plan.blockedReason === "EXEC_PRICE_UNTRUSTED") {
       plan.blockedReason = undefined;
       plan.blockedAtMs = undefined;
+      // Clear circuit breaker on successful validation
+      this.executionCircuitBreaker.delete(plan.tokenId);
     }
 
     const bestBidCents = position.currentBidPrice * 100;
@@ -1625,12 +1886,15 @@ export class ScalpTakeProfitStrategy {
     // Compute notional for preflight
     const notionalUsd = plan.sharesHeld * (limitCents / 100);
 
-    // DUST check
+    // DUST check with cooldown tracking
     if (notionalUsd < this.config.minOrderUsd) {
       plan.blockedReason = "DUST";
+      // Set dust cooldown to prevent re-starting plan
+      this.dustCooldowns.set(plan.tokenId, now + DUST_COOLDOWN_MS);
       this.logger.debug(
         `[ScalpExit] DUST_EXIT tokenId=${plan.tokenId.slice(0, 12)}... ` +
-          `notional=$${notionalUsd.toFixed(2)} < min=$${this.config.minOrderUsd}`,
+          `notional=$${notionalUsd.toFixed(2)} < min=$${this.config.minOrderUsd} ` +
+          `(cooldown 10min to prevent spam)`,
       );
       // Don't continue - remove plan for dust positions
       return { filled: false, reason: "DUST", shouldContinue: false };
@@ -1685,6 +1949,47 @@ export class ScalpTakeProfitStrategy {
   }
 
   /**
+   * Update the circuit breaker for a tokenId based on orderbook quality failure.
+   * Escalates cooldown on consecutive failures.
+   */
+  private updateCircuitBreaker(
+    tokenId: string,
+    qualityResult: OrderbookQualityResult,
+    now: number,
+  ): void {
+    const existing = this.executionCircuitBreaker.get(tokenId);
+
+    let failureCount = 1;
+    if (existing) {
+      // If failure happened recently (within max cooldown), escalate
+      const recentFailureWindow = CIRCUIT_BREAKER_COOLDOWNS_MS[CIRCUIT_BREAKER_COOLDOWNS_MS.length - 1];
+      if (now - existing.lastFailureAtMs < recentFailureWindow) {
+        failureCount = Math.min(existing.failureCount + 1, CIRCUIT_BREAKER_COOLDOWNS_MS.length);
+      }
+    }
+
+    // Get cooldown based on failure count (0-indexed)
+    const cooldownMs = CIRCUIT_BREAKER_COOLDOWNS_MS[Math.min(failureCount - 1, CIRCUIT_BREAKER_COOLDOWNS_MS.length - 1)];
+
+    this.executionCircuitBreaker.set(tokenId, {
+      disabledUntilMs: now + cooldownMs,
+      reason: qualityResult.status,
+      lastBid: qualityResult.diagnostics?.bestBid ?? null,
+      lastAsk: qualityResult.diagnostics?.bestAsk ?? null,
+      failureCount,
+      lastFailureAtMs: now,
+    });
+
+    // Log escalation
+    if (failureCount > 1) {
+      this.logger.debug(
+        `[ScalpExit] Circuit breaker escalated for tokenId=${tokenId.slice(0, 12)}... ` +
+          `failures=${failureCount} cooldown=${cooldownMs / 1000}s`,
+      );
+    }
+  }
+
+  /**
    * Check if a position has an active exit plan
    */
   hasExitPlan(tokenId: string): boolean {
@@ -1696,6 +2001,42 @@ export class ScalpTakeProfitStrategy {
    */
   getExitPlans(): Map<string, ExitPlan> {
     return new Map(this.exitPlans);
+  }
+
+  /**
+   * Get the circuit breaker entry for a token (for testing/debugging)
+   */
+  getCircuitBreaker(tokenId: string): ExecutionCircuitBreakerEntry | undefined {
+    return this.executionCircuitBreaker.get(tokenId);
+  }
+
+  /**
+   * Get all circuit breaker entries (for testing/debugging)
+   */
+  getCircuitBreakers(): Map<string, ExecutionCircuitBreakerEntry> {
+    return new Map(this.executionCircuitBreaker);
+  }
+
+  /**
+   * Clear circuit breaker for a token (for testing/recovery)
+   */
+  clearCircuitBreaker(tokenId: string): void {
+    this.executionCircuitBreaker.delete(tokenId);
+  }
+
+  /**
+   * Check if a token is in dust cooldown
+   */
+  isInDustCooldown(tokenId: string, now: number = Date.now()): boolean {
+    const cooldownEnd = this.dustCooldowns.get(tokenId);
+    return cooldownEnd !== undefined && cooldownEnd > now;
+  }
+
+  /**
+   * Clear dust cooldown for a token (for testing/recovery)
+   */
+  clearDustCooldown(tokenId: string): void {
+    this.dustCooldowns.delete(tokenId);
   }
 
   /**
