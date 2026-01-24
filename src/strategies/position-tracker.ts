@@ -545,6 +545,7 @@ export class PositionTracker {
   private static readonly MAX_BACKOFF_MS = 120_000; // 2 minutes max backoff
   private static readonly BASE_BACKOFF_MS = 5_000; // 5 seconds base backoff
   private static readonly FETCH_REGRESSION_THRESHOLD = 0.2; // 20% - below this is suspicious
+  private static readonly MAX_STALE_AGE_MS = 60_000; // 60 seconds - auto-clear stale snapshot to allow recovery (HFT-friendly)
 
   // Circuit breaker for spammy failing calls per tokenId
   private circuitBreaker: Map<string, CircuitBreakerEntry> = new Map();
@@ -1398,6 +1399,8 @@ export class PositionTracker {
    * 2. Calculate exponential backoff
    * 3. Fall back to lastGoodSnapshot (marked as stale)
    * 4. Log diagnostic with recovery info
+   * 5. AUTO-RECOVERY: If stale age exceeds MAX_STALE_AGE_MS, clear lastGoodSnapshot
+   *    to allow the next refresh to accept a fresh snapshot (simulates container restart)
    *
    * @param error The error that caused the failure
    */
@@ -1422,6 +1425,26 @@ export class PositionTracker {
       this.lastSnapshot = staleSnapshot;
       this.lastSnapshotCycleId = staleSnapshot.cycleId;
 
+      const staleAgeMs = staleSnapshot.staleAgeMs ?? 0;
+      const staleAgeSec = Math.round(staleAgeMs / 1000);
+      const activeCount = staleSnapshot.activePositions.length;
+      const redeemableCount = staleSnapshot.redeemablePositions.length;
+      const backoffSec = Math.round(this.currentBackoffMs / 1000);
+
+      // AUTO-RECOVERY: If snapshot is too stale, clear lastGoodSnapshot
+      // This allows the next refresh to accept a fresh snapshot, similar to container restart
+      if (staleAgeMs >= PositionTracker.MAX_STALE_AGE_MS) {
+        this.logger.warn(
+          `[PositionTracker] 🔄 AUTO-RECOVERY: Clearing stale snapshot (age=${staleAgeSec}s >= ${Math.round(PositionTracker.MAX_STALE_AGE_MS / 1000)}s threshold). ` +
+            `Next refresh will accept fresh data. reason="${error.message}" active=${activeCount} redeemable=${redeemableCount}`,
+        );
+        this.lastGoodSnapshot = null;
+        this.lastGoodAtMs = 0;
+        this.consecutiveFailures = 0;
+        this.currentBackoffMs = 0;
+        return;
+      }
+
       // Log diagnostic (rate-limited)
       if (
         this.logDeduper.shouldLog(
@@ -1429,11 +1452,6 @@ export class PositionTracker {
           PositionTracker.VALIDATION_FAILURE_LOG_INTERVAL_MS,
         )
       ) {
-        const activeCount = staleSnapshot.activePositions.length;
-        const redeemableCount = staleSnapshot.redeemablePositions.length;
-        const staleAgeSec = Math.round((staleSnapshot.staleAgeMs ?? 0) / 1000);
-        const backoffSec = Math.round(this.currentBackoffMs / 1000);
-
         this.logger.error(
           `[PositionTracker] ❌ refresh_failed: reason="${error.message}" ` +
             `using lastGoodSnapshot active=${activeCount} redeemable=${redeemableCount} ` +
