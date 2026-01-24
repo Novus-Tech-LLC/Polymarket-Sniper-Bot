@@ -344,3 +344,229 @@ describe("Min Order Size Handling", () => {
     assert.ok(!shouldContinue, "DUST position should not continue");
   });
 });
+
+// === NEAR-RESOLUTION CAPITAL RELEASE TESTS ===
+
+describe("Near-Resolution Capital Release", () => {
+  /**
+   * Helper to simulate shouldExcludeFromTimeExit logic
+   */
+  function shouldExcludeFromTimeExit(
+    entryPrice: number,
+    currentPrice: number,
+    resolutionExclusionPrice: number = 0.6,
+  ): boolean {
+    const NEAR_RESOLUTION_THRESHOLD = 0.9;
+    if (entryPrice > resolutionExclusionPrice) {
+      return false;
+    }
+    return currentPrice >= NEAR_RESOLUTION_THRESHOLD;
+  }
+
+  /**
+   * Helper to simulate evaluateScalpExit near-resolution logic
+   */
+  function evaluateNearResolutionExit(
+    entryPrice: number,
+    currentPrice: number,
+    holdMinutes: number,
+    maxHoldMinutes: number,
+    pnlPct: number,
+    minProfitPct: number = 5.0,
+    resolutionExclusionPrice: number = 0.6,
+  ): { shouldExit: boolean; reason: string } {
+    const isNearResolutionCandidate = shouldExcludeFromTimeExit(
+      entryPrice,
+      currentPrice,
+      resolutionExclusionPrice,
+    );
+
+    // Near-resolution positions are protected UNTIL maxHoldMinutes
+    if (isNearResolutionCandidate && holdMinutes < maxHoldMinutes) {
+      return {
+        shouldExit: false,
+        reason: `Resolution exclusion: entry ≤${(resolutionExclusionPrice * 100).toFixed(0)}¢ + current ≥90¢ (near resolution, held ${holdMinutes.toFixed(0)}/${maxHoldMinutes}min)`,
+      };
+    }
+
+    // After maxHoldMinutes, allow exit even for near-resolution
+    if (holdMinutes >= maxHoldMinutes && pnlPct >= minProfitPct) {
+      const nearResNote = isNearResolutionCandidate
+        ? " (near-resolution capital release)"
+        : "";
+      return {
+        shouldExit: true,
+        reason: `Max hold time: ${holdMinutes.toFixed(0)}min >= ${maxHoldMinutes}min at +${pnlPct.toFixed(1)}%${nearResNote}`,
+      };
+    }
+
+    // Not profitable enough
+    if (pnlPct < minProfitPct) {
+      return {
+        shouldExit: false,
+        reason: `Profit ${pnlPct.toFixed(1)}% < min ${minProfitPct}%`,
+      };
+    }
+
+    return { shouldExit: false, reason: "Hold time not met" };
+  }
+
+  test("Near-resolution position BEFORE maxHoldMinutes should be protected", () => {
+    // Position: entry 50¢, current 92¢, held 60min, max 90min
+    const result = evaluateNearResolutionExit(
+      0.5, // entry 50¢
+      0.92, // current 92¢ (near resolution)
+      60, // held 60 minutes
+      90, // max hold 90 minutes
+      84, // profit 84% (very profitable)
+    );
+
+    assert.strictEqual(
+      result.shouldExit,
+      false,
+      "Should NOT exit before maxHoldMinutes",
+    );
+    assert.ok(
+      result.reason.includes("Resolution exclusion"),
+      `Expected resolution exclusion, got: ${result.reason}`,
+    );
+    assert.ok(
+      result.reason.includes("60/90min"),
+      `Expected hold time info in reason, got: ${result.reason}`,
+    );
+  });
+
+  test("Near-resolution position AFTER maxHoldMinutes should allow exit to free capital", () => {
+    // Position: entry 50¢, current 92¢, held 120min, max 90min
+    const result = evaluateNearResolutionExit(
+      0.5, // entry 50¢
+      0.92, // current 92¢ (near resolution)
+      120, // held 120 minutes (exceeds max)
+      90, // max hold 90 minutes
+      84, // profit 84%
+    );
+
+    assert.strictEqual(
+      result.shouldExit,
+      true,
+      "Should allow exit after maxHoldMinutes to free capital",
+    );
+    assert.ok(
+      result.reason.includes("Max hold time"),
+      `Expected max hold time reason, got: ${result.reason}`,
+    );
+    assert.ok(
+      result.reason.includes("near-resolution capital release"),
+      `Expected capital release note, got: ${result.reason}`,
+    );
+  });
+
+  test("Non-near-resolution position follows normal rules", () => {
+    // Position: entry 50¢, current 65¢ (not near resolution)
+    const result = evaluateNearResolutionExit(
+      0.5, // entry 50¢
+      0.65, // current 65¢ (NOT near resolution)
+      60, // held 60 minutes
+      90, // max hold 90 minutes
+      30, // profit 30%
+    );
+
+    assert.strictEqual(
+      result.shouldExit,
+      false,
+      "Should NOT exit - hold time not reached",
+    );
+    assert.ok(
+      !result.reason.includes("Resolution exclusion"),
+      "Should not be resolution exclusion",
+    );
+  });
+
+  test("High-entry position at 92¢ should NOT get resolution exclusion", () => {
+    // Position: entry 75¢, current 92¢
+    // Entry is above resolution exclusion threshold (60¢)
+    const isExcluded = shouldExcludeFromTimeExit(
+      0.75, // entry 75¢ (above 60¢ threshold)
+      0.92, // current 92¢
+      0.6, // resolution exclusion threshold
+    );
+
+    assert.strictEqual(
+      isExcluded,
+      false,
+      "High entry (75¢) should NOT get resolution exclusion",
+    );
+  });
+
+  test("Low-entry position below 90¢ should NOT get resolution exclusion", () => {
+    // Position: entry 50¢, current 85¢
+    const isExcluded = shouldExcludeFromTimeExit(
+      0.5, // entry 50¢
+      0.85, // current 85¢ (below 90¢ threshold)
+      0.6,
+    );
+
+    assert.strictEqual(
+      isExcluded,
+      false,
+      "Position below 90¢ should NOT get resolution exclusion",
+    );
+  });
+
+  test("Resolution exclusion check correctly identifies near-resolution candidates", () => {
+    // Entry 40¢, current 95¢ - should be excluded (protected)
+    const case1 = shouldExcludeFromTimeExit(0.4, 0.95, 0.6);
+    assert.strictEqual(case1, true, "40¢→95¢ should be protected");
+
+    // Entry 60¢ (exactly at threshold), current 90¢ - should be excluded
+    const case2 = shouldExcludeFromTimeExit(0.6, 0.9, 0.6);
+    assert.strictEqual(case2, true, "60¢→90¢ should be protected");
+
+    // Entry 61¢ (just above threshold), current 95¢ - should NOT be excluded
+    const case3 = shouldExcludeFromTimeExit(0.61, 0.95, 0.6);
+    assert.strictEqual(case3, false, "61¢→95¢ should NOT be protected (entry above threshold)");
+
+    // Entry 50¢, current 89¢ - should NOT be excluded (not near resolution)
+    const case4 = shouldExcludeFromTimeExit(0.5, 0.89, 0.6);
+    assert.strictEqual(case4, false, "50¢→89¢ should NOT be protected (not near resolution)");
+  });
+
+  test("Capital release happens at exactly maxHoldMinutes", () => {
+    // Position: entry 50¢, current 92¢, held EXACTLY 90min, max 90min
+    const result = evaluateNearResolutionExit(
+      0.5,
+      0.92,
+      90, // held exactly max
+      90, // max hold
+      84, // profit
+    );
+
+    assert.strictEqual(
+      result.shouldExit,
+      true,
+      "Should exit at exactly maxHoldMinutes",
+    );
+  });
+
+  test("Near-resolution position with low profit should not exit even after maxHoldMinutes", () => {
+    // Position: entry 50¢, current 92¢, held 120min, but profit below min
+    const result = evaluateNearResolutionExit(
+      0.5,
+      0.92,
+      120, // held 120min (exceeds max)
+      90, // max hold
+      3, // profit only 3% (below 5% min)
+      5, // minProfitPct
+    );
+
+    assert.strictEqual(
+      result.shouldExit,
+      false,
+      "Should NOT exit if profit below minimum even after maxHoldMinutes",
+    );
+    assert.ok(
+      result.reason.includes("Profit 3.0% < min"),
+      `Expected profit check failure, got: ${result.reason}`,
+    );
+  });
+});

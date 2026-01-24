@@ -1252,13 +1252,20 @@ export class ScalpTakeProfitStrategy {
       };
     }
 
-    // === CRITICAL SAFEGUARD: Resolution exclusion (checked FIRST) ===
-    // Never force exit on positions that are near-certain $1.00 winners!
-    // This check runs BEFORE all other exit logic to protect these positions.
-    if (this.shouldExcludeFromTimeExit(position)) {
+    // === CRITICAL SAFEGUARD: Resolution exclusion ===
+    // Protect near-resolution positions from EARLY exits, but still allow
+    // time-based exits when maxHoldMinutes is exceeded (to free up capital).
+    // 
+    // This prevents force-exiting positions that are almost certain $1.00 winners
+    // while still respecting the user's capital efficiency settings.
+    const isNearResolutionCandidate = this.shouldExcludeFromTimeExit(position);
+    
+    // Only block if near resolution AND not yet at max hold time
+    // This allows capital to be freed if the position has been held too long
+    if (isNearResolutionCandidate && holdMinutes < this.config.maxHoldMinutes) {
       return {
         shouldExit: false,
-        reason: `Resolution exclusion: entry ≤${(this.config.resolutionExclusionPrice * 100).toFixed(0)}¢ + current ≥90¢ (near resolution)`,
+        reason: `Resolution exclusion: entry ≤${(this.config.resolutionExclusionPrice * 100).toFixed(0)}¢ + current ≥90¢ (near resolution, held ${holdMinutes.toFixed(0)}/${this.config.maxHoldMinutes}min)`,
       };
     }
 
@@ -1335,10 +1342,15 @@ export class ScalpTakeProfitStrategy {
     }
 
     // === Check 5: Max hold time exceeded with minimum profit ===
+    // This check now also applies to near-resolution positions that exceeded maxHoldMinutes
+    // to allow capital to be freed rather than waiting indefinitely for resolution
     if (holdMinutes >= this.config.maxHoldMinutes) {
+      const nearResNote = isNearResolutionCandidate 
+        ? " (near-resolution capital release)" 
+        : "";
       return {
         shouldExit: true,
-        reason: `Max hold time: ${holdMinutes.toFixed(0)}min >= ${this.config.maxHoldMinutes}min at +${position.pnlPct.toFixed(1)}%`,
+        reason: `Max hold time: ${holdMinutes.toFixed(0)}min >= ${this.config.maxHoldMinutes}min at +${position.pnlPct.toFixed(1)}%${nearResNote}`,
       };
     }
 
@@ -1407,17 +1419,22 @@ export class ScalpTakeProfitStrategy {
   }
 
   /**
-   * CRITICAL SAFEGUARD: Resolution Exclusion
+   * CRITICAL SAFEGUARD: Resolution Exclusion Check
    *
-   * Never force time-based exit on positions where:
+   * Identifies positions that are near-resolution candidates:
    * 1. Entry price ≤ 60¢ (speculative tier - potential big winners)
    * 2. AND current price >= 90¢ (near resolution - almost certain winner)
    *
-   * These are positions that started speculative but are now near-certain
-   * $1.00 winners. Don't force them out on a time window - let them ride!
+   * These positions are protected from EARLY exits (before maxHoldMinutes), but
+   * can still be sold once maxHoldMinutes is exceeded to free up capital.
    *
-   * Example: Bought at 50¢, now at 92¢ = don't force exit, let it resolve to $1.00
-   * Example: Bought at 50¢, now at 65¢ = still speculative, scalp rules apply
+   * NOTE: This function only IDENTIFIES near-resolution candidates.
+   * The calling code in evaluateScalpExit() determines whether to actually
+   * exclude based on hold time - positions past maxHoldMinutes are allowed to exit.
+   *
+   * Example: Bought at 50¢, now at 92¢, held 30min = protected (don't exit)
+   * Example: Bought at 50¢, now at 92¢, held 120min = allowed to exit (capital release)
+   * Example: Bought at 50¢, now at 65¢ = not near-resolution, normal scalp rules
    */
   private static readonly NEAR_RESOLUTION_THRESHOLD = 0.9; // 90¢ = near certain winner
 
