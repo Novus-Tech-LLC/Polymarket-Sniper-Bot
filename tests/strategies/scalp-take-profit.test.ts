@@ -285,3 +285,47 @@ test("SCALP_SUDDEN_SPIKE_THRESHOLD_PCT env variable overrides preset value", () 
   const config = loadStrategyConfig();
   assert.equal(config?.scalpSuddenSpikeThresholdPct, 18.0);
 });
+
+// === SCALP Low-Price Threshold Tests ===
+
+test("SCALP_LOW_PRICE_THRESHOLD defaults to 0 (disabled)", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLowPriceThreshold, 0);
+});
+
+test("SCALP_LOW_PRICE_THRESHOLD env variable enables low-price scalping", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    SCALP_LOW_PRICE_THRESHOLD: "0.20",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLowPriceThreshold, 0.20);
+});
+
+test("SCALP_LOW_PRICE_MAX_HOLD_MINUTES defaults to 3 (quick scalps)", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLowPriceMaxHoldMinutes, 3);
+});
+
+test("SCALP_LOW_PRICE_MAX_HOLD_MINUTES env variable overrides default", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    SCALP_LOW_PRICE_MAX_HOLD_MINUTES: "5",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLowPriceMaxHoldMinutes, 5);
+});

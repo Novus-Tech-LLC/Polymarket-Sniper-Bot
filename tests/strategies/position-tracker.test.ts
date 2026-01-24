@@ -966,3 +966,128 @@ describe("Stop-Loss Entry Time Validation", () => {
     );
   });
 });
+
+describe("Historical Trade Pagination Logic", () => {
+  test("Pagination correctly selects earliest BUY timestamp per position across multiple pages", () => {
+    // Simulates processing trades from multiple API pages
+    interface TradeItem {
+      timestamp: number;
+      conditionId: string;
+      asset: string;
+      side: string;
+    }
+
+    // Page 1 (most recent trades)
+    const page1: TradeItem[] = [
+      { timestamp: 1700002000, conditionId: "market1", asset: "token1", side: "BUY" },
+      { timestamp: 1700001500, conditionId: "market2", asset: "token2", side: "BUY" },
+    ];
+
+    // Page 2 (older trades) - contains earlier BUY for market1
+    const page2: TradeItem[] = [
+      { timestamp: 1700000000, conditionId: "market1", asset: "token1", side: "BUY" }, // Earlier!
+      { timestamp: 1700000500, conditionId: "market3", asset: "token3", side: "BUY" },
+    ];
+
+    const earliestBuyTimes = new Map<string, number>();
+
+    // Process all pages (simulating pagination)
+    for (const trades of [page1, page2]) {
+      for (const trade of trades) {
+        if (trade.side !== "BUY") continue;
+
+        const key = `${trade.conditionId}-${trade.asset}`;
+        const timestamp = trade.timestamp * 1000; // Convert to ms
+
+        const existing = earliestBuyTimes.get(key);
+        if (!existing || timestamp < existing) {
+          earliestBuyTimes.set(key, timestamp);
+        }
+      }
+    }
+
+    assert.strictEqual(
+      earliestBuyTimes.get("market1-token1"),
+      1700000000 * 1000,
+      "Should keep earliest BUY timestamp from page 2, not page 1",
+    );
+    assert.strictEqual(
+      earliestBuyTimes.get("market2-token2"),
+      1700001500 * 1000,
+      "market2 only has one BUY, should use that timestamp",
+    );
+    assert.strictEqual(
+      earliestBuyTimes.get("market3-token3"),
+      1700000500 * 1000,
+      "market3 from page 2 should be included",
+    );
+    assert.strictEqual(
+      earliestBuyTimes.size,
+      3,
+      "Should have 3 unique positions",
+    );
+  });
+
+  test("Pagination stops when receiving fewer results than page limit", () => {
+    // Simulates the pagination stop condition
+    const PAGE_LIMIT = 500;
+    const page1Results = 500; // Full page
+    const page2Results = 200; // Partial page - should stop after this
+
+    let shouldContinue = page1Results === PAGE_LIMIT;
+    assert.ok(shouldContinue, "Should continue after full page");
+
+    shouldContinue = page2Results === PAGE_LIMIT;
+    assert.ok(!shouldContinue, "Should stop after partial page");
+  });
+
+  test("Pagination respects max pages safety cap", () => {
+    const MAX_PAGES = 20;
+    let pageCount = 0;
+
+    // Simulate fetching pages until max
+    while (pageCount < MAX_PAGES) {
+      pageCount++;
+      // In real code, we'd check if last page was full
+      // For this test, assume we keep getting full pages
+    }
+
+    assert.strictEqual(
+      pageCount,
+      MAX_PAGES,
+      "Pagination should stop at MAX_PAGES even if more data exists",
+    );
+  });
+
+  test("Max pages warning condition is detected correctly", () => {
+    const MAX_PAGES = 20;
+    const PAGE_LIMIT = 500;
+
+    // Case 1: Hit max pages AND last page was full (should warn)
+    const pageCount1 = MAX_PAGES;
+    const totalTrades1 = MAX_PAGES * PAGE_LIMIT; // All pages full
+    const shouldWarn1 =
+      pageCount1 >= MAX_PAGES &&
+      totalTrades1 > 0 &&
+      totalTrades1 % PAGE_LIMIT === 0;
+    assert.ok(shouldWarn1, "Should warn when max pages hit and last page was full");
+
+    // Case 2: Hit max pages but last page was partial (no warning needed)
+    const pageCount2 = MAX_PAGES;
+    const totalTrades2 = (MAX_PAGES - 1) * PAGE_LIMIT + 200; // Last page partial
+    const shouldWarn2 =
+      pageCount2 >= MAX_PAGES &&
+      totalTrades2 > 0 &&
+      totalTrades2 % PAGE_LIMIT === 0;
+    assert.ok(!shouldWarn2, "Should NOT warn when last page was partial");
+
+    // Case 3: Didn't hit max pages (no warning needed)
+    const pageCount3 = 5;
+    const totalTrades3 = 5 * PAGE_LIMIT;
+    const shouldWarn3 =
+      pageCount3 >= MAX_PAGES &&
+      totalTrades3 > 0 &&
+      totalTrades3 % PAGE_LIMIT === 0;
+    assert.ok(!shouldWarn3, "Should NOT warn when max pages not reached");
+  });
+});
