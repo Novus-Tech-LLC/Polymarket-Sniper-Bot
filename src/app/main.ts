@@ -78,11 +78,11 @@ async function main(): Promise<void> {
   });
 
   // Start unified strategy orchestrator if STRATEGY_PRESET is configured
-  // Uses UNIFIED strategies for reliable, easy-to-debug trading
+  // Uses reliable strategies for reliable, easy-to-debug trading
   let orchestrator: Orchestrator | undefined;
   if (strategyConfig && strategyConfig.enabled && !tradingReady.detectOnly) {
     logger.info(
-      `🎯 Starting UNIFIED strategy orchestrator (preset: ${strategyConfig.presetName})`,
+      `🎯 Starting strategy orchestrator (preset: ${strategyConfig.presetName})`,
     );
     logger.info(
       `📊 Config: MAX_POSITION_USD=$${strategyConfig.endgameMaxPositionUsd}, ` +

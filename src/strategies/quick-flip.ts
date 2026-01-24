@@ -6,7 +6,7 @@
  * If a position is losing money, Quick Flip does NOTHING.
  * Losses are handled by Smart Hedging (which hedges or liquidates at configured thresholds).
  *
- * SIMPLE LOGIC:
+ * LOGIC:
  * 1. Find positions that are profitable at ACTUAL BID PRICE (not mid-price)
  * 2. If profit >= target % AND profit >= min USD AND held long enough, SELL
  * 3. If ANY of these conditions fail, DO NOTHING - let the position ride

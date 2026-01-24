@@ -3,7 +3,7 @@
  *
  * Instead of selling at a loss, buy the opposing outcome to guarantee profit.
  *
- * SIMPLE LOGIC:
+ * LOGIC:
  * 1. Find positions losing more than triggerLossPct
  * 2. If we can afford a hedge, BUY THE OPPOSITE SIDE
  * 3. If we can't hedge, SELL to stop bleeding

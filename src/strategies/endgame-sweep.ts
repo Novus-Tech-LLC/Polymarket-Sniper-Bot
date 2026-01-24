@@ -3,7 +3,7 @@
  *
  * Buy high-confidence positions near resolution (85-99¢) that are likely to pay $1.
  *
- * SIMPLE LOGIC:
+ * LOGIC:
  * 1. Scan for markets with prices in the sweet spot (85-99¢)
  * 2. Check we haven't exceeded MAX_POSITION_USD for that market
  * 3. Buy if we have capacity
