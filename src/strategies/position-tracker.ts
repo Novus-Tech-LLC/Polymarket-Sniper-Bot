@@ -119,6 +119,47 @@ export interface RefreshMetrics {
 }
 
 /**
+ * SNAPSHOT VALIDATION FAILURE REASONS
+ *
+ * Used to diagnose why a new snapshot was rejected during two-phase commit.
+ * Each reason triggers specific diagnostic logging.
+ */
+export type SnapshotValidationFailure =
+  | "ACTIVE_COLLAPSE_BUG" // raw_total > 0 && raw_active > 0 but final active = 0
+  | "FETCH_REGRESSION" // new total < 20% of previous (suspicious drop)
+  | "ADDRESS_FLIP_COLLAPSE"; // address changed AND position counts collapsed
+
+/**
+ * Result of snapshot validation check.
+ * Used by validateSnapshot() to determine if a new snapshot should be published.
+ */
+export interface SnapshotValidationResult {
+  /** Whether the snapshot passed validation */
+  ok: boolean;
+  /** Reason for failure (only set when ok === false) */
+  reason?: SnapshotValidationFailure;
+  /** Diagnostic details for logging */
+  diagnostics?: string;
+}
+
+/**
+ * Circuit breaker entry for a specific tokenId.
+ * Tracks failing API calls to prevent thrashing.
+ */
+export interface CircuitBreakerEntry {
+  /** Unix timestamp (ms) when first failure occurred in current window */
+  firstFailureAtMs: number;
+  /** Count of failures in current window */
+  failureCount: number;
+  /** Unix timestamp (ms) when circuit breaker opened (cooldown started) */
+  openedAtMs: number;
+  /** Last known price (Data-API) to use during cooldown */
+  lastKnownPrice?: number;
+  /** Error type that triggered the circuit breaker */
+  errorType: "404" | "422" | "TIMEOUT" | "NETWORK" | "OTHER";
+}
+
+/**
  * Summary of position counts for a portfolio snapshot.
  * All strategies must use this for consistent reporting.
  */
@@ -148,6 +189,11 @@ export interface PortfolioSummary {
  * 2. All strategies MUST use the same snapshot within a cycle
  * 3. No strategy may independently refresh or fetch positions
  * 4. Arrays are frozen to prevent mutation
+ *
+ * CRASH-PROOF RECOVERY (Jan 2025):
+ * - If snapshot.stale === true, the snapshot is from lastGoodSnapshot fallback
+ * - staleAgeMs indicates how old the data is
+ * - Strategies should still operate but may log a warning
  */
 export interface PortfolioSnapshot {
   /** Unique identifier for this snapshot's orchestrator cycle */
@@ -170,6 +216,22 @@ export interface PortfolioSnapshot {
   };
   /** Classification reasons for filtered positions (for diagnostics) */
   classificationReasons?: Map<string, number>;
+  /**
+   * CRASH-PROOF RECOVERY: Whether this snapshot is stale (from lastGoodSnapshot fallback).
+   * Set to true when refresh fails and we fall back to the last known-good snapshot.
+   * Downstream strategies should still operate but may log a warning.
+   */
+  stale?: boolean;
+  /**
+   * CRASH-PROOF RECOVERY: Age of the snapshot in milliseconds since it was created.
+   * Only set when stale === true. Computed as: now - originalFetchedAtMs
+   */
+  staleAgeMs?: number;
+  /**
+   * CRASH-PROOF RECOVERY: Reason for staleness (why refresh failed or validation rejected).
+   * Only set when stale === true.
+   */
+  staleReason?: string;
 }
 
 export interface Position {
@@ -471,6 +533,30 @@ export class PositionTracker {
   private lastSelectedAddress: string | null = null;
   private addressChangeLoggedAt: number = 0;
   private static readonly ADDRESS_CHANGE_LOG_COOLDOWN_MS = 300_000; // Log address change at most once per 5 min
+
+  // === CRASH-PROOF RECOVERY (Jan 2025) ===
+  // Two-phase commit: never replace good snapshot with failed/empty one
+  // Last known-good snapshot for fallback when refresh fails
+  private lastGoodSnapshot: PortfolioSnapshot | null = null;
+  private lastGoodAtMs: number = 0;
+  private lastErrorAtMs: number = 0;
+  private consecutiveFailures: number = 0;
+  private currentBackoffMs: number = 0;
+  private static readonly MAX_BACKOFF_MS = 120_000; // 2 minutes max backoff
+  private static readonly BASE_BACKOFF_MS = 5_000; // 5 seconds base backoff
+  private static readonly FETCH_REGRESSION_THRESHOLD = 0.2; // 20% - below this is suspicious
+
+  // Circuit breaker for spammy failing calls per tokenId
+  private circuitBreaker: Map<string, CircuitBreakerEntry> = new Map();
+  private static readonly CIRCUIT_BREAKER_THRESHOLD = 3; // failures before opening
+  private static readonly CIRCUIT_BREAKER_WINDOW_MS = 30_000; // 30s failure window
+  private static readonly CIRCUIT_BREAKER_COOLDOWN_MS = 60_000; // 60s cooldown when open
+  private static readonly MAX_CIRCUIT_BREAKER_ENTRIES = 500;
+
+  // Track last validation failure for rate-limited logging
+  private lastValidationFailureLoggedAt: number = 0;
+  private lastValidationFailureReason: string | null = null;
+  private static readonly VALIDATION_FAILURE_LOG_INTERVAL_MS = 60_000; // Log at most once per minute
 
   /**
    * Orderbook cache with TTL for accurate P&L calculation
@@ -835,6 +921,12 @@ export class PositionTracker {
    * Callers wanting to await the current refresh should use awaitCurrentRefresh().
    *
    * MIN REFRESH INTERVAL: Enforces minimum time between refreshes to prevent API hammering.
+   *
+   * CRASH-PROOF RECOVERY (Jan 2025):
+   * - Two-phase commit: Build new snapshot in local variables, validate before publish
+   * - Never replace a good snapshot with an empty/zero snapshot due to refresh error
+   * - On failure, keep serving the last known-good snapshot (marked as stale)
+   * - Automatic recovery with exponential backoff
    */
   async refresh(): Promise<void> {
     // Prevent concurrent refreshes (race condition protection)
@@ -854,9 +946,14 @@ export class PositionTracker {
     }
 
     // Enforce minimum refresh interval to prevent API hammering
+    // Also account for backoff if we're in recovery mode
+    const effectiveMinInterval = Math.max(
+      PositionTracker.MIN_REFRESH_INTERVAL_MS,
+      this.currentBackoffMs,
+    );
     const timeSinceLastRefresh = Date.now() - this.lastRefreshCompletedAt;
     if (
-      timeSinceLastRefresh < PositionTracker.MIN_REFRESH_INTERVAL_MS &&
+      timeSinceLastRefresh < effectiveMinInterval &&
       this.lastRefreshCompletedAt > 0
     ) {
       // Rate-limit this log too - only log when skipping starts or periodically
@@ -867,7 +964,7 @@ export class PositionTracker {
         )
       ) {
         this.logger.debug(
-          `[PositionTracker] Skipping refresh - throttled (min interval: ${PositionTracker.MIN_REFRESH_INTERVAL_MS}ms)`,
+          `[PositionTracker] Skipping refresh - throttled (interval: ${effectiveMinInterval}ms${this.currentBackoffMs > 0 ? ` backoff=${this.currentBackoffMs}ms` : ""})`,
         );
       }
       return;
@@ -891,10 +988,12 @@ export class PositionTracker {
       // Get current positions from Data API and enrich with current market prices
       // Note: "Refreshing positions" log removed to reduce noise - the summary log provides refresh status
 
-      // Fetch and process positions with current market data
+      // === PHASE 1: FETCH POSITIONS (local variables only) ===
+      // Never mutate this.positions during fetch
       const positions = await this.fetchPositionsFromAPI();
 
-      // Update positions map atomically
+      // === PHASE 2: BUILD NEW POSITION MAP (local variable) ===
+      // Never clear this.positions - build replacement map in local variable
       const newPositions = new Map<string, Position>();
       const now = Date.now();
 
@@ -913,8 +1012,57 @@ export class PositionTracker {
         }
       }
 
-      // Replace positions map atomically to avoid race conditions
+      // === PHASE 3: CREATE CANDIDATE SNAPSHOT (not published yet) ===
+      // Build snapshot from newPositions without modifying this.lastSnapshot
+      const candidateSnapshot = this.buildCandidateSnapshot(newPositions);
+
+      // === PHASE 4: VALIDATE CANDIDATE SNAPSHOT ===
+      // Check for ACTIVE_COLLAPSE_BUG, FETCH_REGRESSION, ADDRESS_FLIP_COLLAPSE
+      const validationResult = this.validateSnapshot(
+        candidateSnapshot,
+        this.lastGoodSnapshot,
+      );
+
+      if (!validationResult.ok) {
+        // Validation failed - DO NOT publish the new snapshot
+        // Log diagnostic (rate-limited)
+        const shouldLog =
+          this.lastValidationFailureReason !== validationResult.reason ||
+          Date.now() - this.lastValidationFailureLoggedAt >=
+            PositionTracker.VALIDATION_FAILURE_LOG_INTERVAL_MS;
+
+        if (shouldLog) {
+          this.lastValidationFailureLoggedAt = Date.now();
+          this.lastValidationFailureReason = validationResult.reason ?? null;
+
+          // Build classification reasons string for diagnostics
+          const reasonCounts: string[] = [];
+          if (candidateSnapshot.classificationReasons) {
+            for (const [reason, count] of candidateSnapshot.classificationReasons) {
+              reasonCounts.push(`${reason}=${count}`);
+            }
+          }
+          const reasonsStr = reasonCounts.join(", ") || "none";
+
+          this.logger.error(
+            `[PositionTracker] ❌ snapshot_rejected: ${validationResult.reason} ` +
+              `${validationResult.diagnostics} ` +
+              `reasons=[${reasonsStr}]`,
+          );
+        }
+
+        // Fall back to lastGoodSnapshot
+        this.handleRefreshFailure(
+          new Error(`snapshot_rejected: ${validationResult.reason}`),
+        );
+        return;
+      }
+
+      // === PHASE 5: ATOMIC COMMIT (validation passed) ===
+      // Only now do we modify this.positions and this.lastSnapshot
       this.positions = newPositions;
+      this.lastSnapshot = candidateSnapshot;
+      this.lastSnapshotCycleId = candidateSnapshot.cycleId;
 
       // Clean up stale entry times for positions that have disappeared.
       // Use a grace window to avoid clearing on transient API glitches.
@@ -933,18 +1081,15 @@ export class PositionTracker {
       // entry times in positionEntryTimes Map for a short grace window. This
       // provides resilience against temporary API glitches without treating
       // re-buys as long-held positions.
-      // Note: Removed redundant "Refreshed X positions" log - the summary log in fetchPositionsFromAPI provides this info
 
-      // === CREATE IMMUTABLE PORTFOLIO SNAPSHOT ===
-      // This snapshot is consumed by all strategies via getSnapshot()
-      // Arrays are frozen to prevent mutation
-      this.createSnapshot();
+      // === RECOVERY: Mark success and reset backoff ===
+      this.handleRefreshSuccess();
     } catch (err) {
-      this.logger.error(
-        "[PositionTracker] Failed to refresh positions",
-        err as Error,
+      // Refresh failed - use crash-proof recovery
+      this.handleRefreshFailure(
+        err instanceof Error ? err : new Error(String(err)),
       );
-      // Don't throw - let the caller decide whether to retry
+      // Don't throw - we've fallen back to lastGoodSnapshot if available
     } finally {
       this.isRefreshing = false;
       this.lastRefreshCompletedAt = Date.now();
@@ -952,7 +1097,67 @@ export class PositionTracker {
   }
 
   /**
-   * Create an immutable portfolio snapshot from current positions.
+   * CRASH-PROOF RECOVERY: Build a candidate snapshot from a position map.
+   *
+   * This method creates a snapshot WITHOUT modifying this.lastSnapshot.
+   * Used during two-phase commit to build a candidate for validation.
+   *
+   * @param positionMap The position map to build snapshot from
+   * @returns A candidate PortfolioSnapshot (not yet published)
+   */
+  private buildCandidateSnapshot(
+    positionMap: Map<string, Position>,
+  ): PortfolioSnapshot {
+    const allPositions = Array.from(positionMap.values());
+    const activePositions = allPositions.filter((p) => !p.redeemable);
+    const redeemablePositions = allPositions.filter((p) => p.redeemable);
+
+    // Calculate summary using pnlClassification for proper categorization
+    const prof = activePositions.filter(
+      (p) => p.pnlClassification === "PROFITABLE",
+    ).length;
+    const lose = activePositions.filter(
+      (p) => p.pnlClassification === "LOSING",
+    ).length;
+    const neutral = activePositions.filter(
+      (p) => p.pnlClassification === "NEUTRAL",
+    ).length;
+    const unknown = activePositions.filter(
+      (p) => p.pnlClassification === "UNKNOWN",
+    ).length;
+
+    const snapshotCycleId = this.lastSnapshotCycleId + 1;
+    const addressUsed = this.cachedHoldingAddress ?? "address-not-resolved";
+
+    // Build the candidate snapshot with frozen arrays
+    const candidate: PortfolioSnapshot = {
+      cycleId: snapshotCycleId,
+      addressUsed,
+      fetchedAtMs: Date.now(),
+      activePositions: Object.freeze([...activePositions]),
+      redeemablePositions: Object.freeze([...redeemablePositions]),
+      summary: {
+        activeTotal: activePositions.length,
+        prof,
+        lose,
+        neutral,
+        unknown,
+        redeemableTotal: redeemablePositions.length,
+      },
+      rawCounts: { ...this.lastRawCounts },
+      classificationReasons: new Map(this.lastClassificationReasons),
+    };
+
+    return candidate;
+  }
+
+  /**
+   * @deprecated This method is no longer called directly.
+   * Snapshot creation is now done via buildCandidateSnapshot() as part of the
+   * two-phase commit pattern in refresh(). This method is kept for reference
+   * and may be removed in a future cleanup.
+   *
+   * Legacy: Create an immutable portfolio snapshot from current positions.
    * Called after each refresh to ensure strategies see consistent data.
    *
    * INVARIANT CHECK: ACTIVE_COLLAPSE_BUG
@@ -1081,15 +1286,250 @@ export class PositionTracker {
   }
 
   /**
+   * CRASH-PROOF RECOVERY: Validate a new snapshot before publishing.
+   *
+   * Validation rules (NON-NEGOTIABLE):
+   * A) ACTIVE_COLLAPSE_BUG: If newSnap.rawTotal > 0 AND rawActiveCandidates > 0
+   *    AND activePositions.length === 0, REJECT.
+   * B) FETCH_REGRESSION: If newSnap.rawTotal < 20% of prevSnap.rawTotal
+   *    (and prevSnap had > 0 positions), REJECT as suspicious.
+   * C) ADDRESS_FLIP_COLLAPSE: If address changed AND position counts collapsed
+   *    simultaneously, REJECT.
+   *
+   * @param newSnap The candidate snapshot to validate
+   * @param prevSnap The previous known-good snapshot (for comparison)
+   * @returns Validation result with ok flag and reason if failed
+   */
+  private validateSnapshot(
+    newSnap: PortfolioSnapshot,
+    prevSnap: PortfolioSnapshot | null,
+  ): SnapshotValidationResult {
+    const rawTotal = newSnap.rawCounts?.rawTotal ?? 0;
+    const rawActiveCandidates = newSnap.rawCounts?.rawActiveCandidates ?? 0;
+    const finalActiveCount = newSnap.activePositions.length;
+
+    // Rule A: ACTIVE_COLLAPSE_BUG
+    // If raw total > 0 AND raw active candidates > 0 BUT final active = 0, this is a bug
+    if (rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0) {
+      return {
+        ok: false,
+        reason: "ACTIVE_COLLAPSE_BUG",
+        diagnostics:
+          `rawTotal=${rawTotal} rawActiveCandidates=${rawActiveCandidates} finalActive=${finalActiveCount}`,
+      };
+    }
+
+    // Rule B: FETCH_REGRESSION
+    // If new snapshot has dramatically fewer positions than previous (< 20%), reject
+    if (prevSnap) {
+      const prevRawTotal = prevSnap.rawCounts?.rawTotal ?? 0;
+      if (
+        prevRawTotal > 0 &&
+        rawTotal < prevRawTotal * PositionTracker.FETCH_REGRESSION_THRESHOLD
+      ) {
+        return {
+          ok: false,
+          reason: "FETCH_REGRESSION",
+          diagnostics:
+            `newRawTotal=${rawTotal} prevRawTotal=${prevRawTotal} threshold=${PositionTracker.FETCH_REGRESSION_THRESHOLD * 100}%`,
+        };
+      }
+    }
+
+    // Rule C: ADDRESS_FLIP_COLLAPSE
+    // If address changed AND position counts collapsed, reject
+    if (prevSnap) {
+      const addressChanged = newSnap.addressUsed !== prevSnap.addressUsed;
+      const prevActiveCount = prevSnap.activePositions.length;
+      const countsCollapsed =
+        prevActiveCount > 0 &&
+        finalActiveCount === 0 &&
+        newSnap.redeemablePositions.length === 0;
+
+      if (addressChanged && countsCollapsed) {
+        return {
+          ok: false,
+          reason: "ADDRESS_FLIP_COLLAPSE",
+          diagnostics:
+            `prevAddress=${prevSnap.addressUsed.slice(0, 10)}... newAddress=${newSnap.addressUsed.slice(0, 10)}... prevActive=${prevActiveCount} newActive=${finalActiveCount}`,
+        };
+      }
+    }
+
+    // All validations passed
+    return { ok: true };
+  }
+
+  /**
+   * CRASH-PROOF RECOVERY: Create a stale snapshot from lastGoodSnapshot.
+   *
+   * Called when refresh fails or validation rejects the new snapshot.
+   * Returns a copy of lastGoodSnapshot with stale=true and staleAgeMs set.
+   *
+   * @param reason Why this snapshot is stale
+   * @returns A stale copy of the lastGoodSnapshot, or null if no good snapshot exists
+   */
+  private createStaleSnapshot(reason: string): PortfolioSnapshot | null {
+    if (!this.lastGoodSnapshot) {
+      return null;
+    }
+
+    const now = Date.now();
+    const staleAgeMs = now - this.lastGoodSnapshot.fetchedAtMs;
+
+    // Create a new snapshot object with stale markers
+    // Keep the same data but update cycleId and mark as stale
+    const staleSnapshot: PortfolioSnapshot = {
+      ...this.lastGoodSnapshot,
+      cycleId: this.lastSnapshotCycleId + 1,
+      stale: true,
+      staleAgeMs,
+      staleReason: reason,
+    };
+
+    return staleSnapshot;
+  }
+
+  /**
+   * CRASH-PROOF RECOVERY: Handle refresh failure with backoff and fallback.
+   *
+   * When refresh fails:
+   * 1. Increment consecutiveFailures
+   * 2. Calculate exponential backoff
+   * 3. Fall back to lastGoodSnapshot (marked as stale)
+   * 4. Log diagnostic with recovery info
+   *
+   * @param error The error that caused the failure
+   */
+  private handleRefreshFailure(error: Error): void {
+    const now = Date.now();
+    this.consecutiveFailures++;
+    this.lastErrorAtMs = now;
+
+    // Calculate exponential backoff: base * 2^failures, capped at max
+    this.currentBackoffMs = Math.min(
+      PositionTracker.BASE_BACKOFF_MS * Math.pow(2, this.consecutiveFailures - 1),
+      PositionTracker.MAX_BACKOFF_MS,
+    );
+
+    // Create stale snapshot from lastGoodSnapshot
+    const staleSnapshot = this.createStaleSnapshot(
+      `refresh_failed: ${error.message}`,
+    );
+
+    if (staleSnapshot) {
+      // Use the stale snapshot
+      this.lastSnapshot = staleSnapshot;
+      this.lastSnapshotCycleId = staleSnapshot.cycleId;
+
+      // Log diagnostic (rate-limited)
+      if (
+        this.logDeduper.shouldLog(
+          "Tracker:refresh_failed",
+          PositionTracker.VALIDATION_FAILURE_LOG_INTERVAL_MS,
+        )
+      ) {
+        const activeCount = staleSnapshot.activePositions.length;
+        const redeemableCount = staleSnapshot.redeemablePositions.length;
+        const staleAgeSec = Math.round((staleSnapshot.staleAgeMs ?? 0) / 1000);
+        const backoffSec = Math.round(this.currentBackoffMs / 1000);
+
+        this.logger.error(
+          `[PositionTracker] ❌ refresh_failed: reason="${error.message}" ` +
+            `using lastGoodSnapshot active=${activeCount} redeemable=${redeemableCount} ` +
+            `staleAge=${staleAgeSec}s failures=${this.consecutiveFailures} backoff=${backoffSec}s`,
+        );
+      }
+    } else {
+      // No good snapshot to fall back to - this is critical
+      this.logger.error(
+        `[PositionTracker] ❌ refresh_failed: reason="${error.message}" ` +
+          `NO lastGoodSnapshot available! failures=${this.consecutiveFailures}`,
+      );
+    }
+  }
+
+  /**
+   * CRASH-PROOF RECOVERY: Handle successful refresh (reset backoff).
+   *
+   * When refresh succeeds:
+   * 1. Reset consecutiveFailures to 0
+   * 2. Clear backoff
+   * 3. Update lastGoodSnapshot
+   * 4. Log recovery if we were in failed state
+   */
+  private handleRefreshSuccess(): void {
+    const wasInFailedState = this.consecutiveFailures > 0;
+    const previousFailures = this.consecutiveFailures;
+
+    // Reset failure tracking
+    this.consecutiveFailures = 0;
+    this.currentBackoffMs = 0;
+
+    // Update lastGoodSnapshot (only if current snapshot is valid)
+    if (this.lastSnapshot && !this.lastSnapshot.stale) {
+      this.lastGoodSnapshot = this.lastSnapshot;
+      this.lastGoodAtMs = Date.now();
+    }
+
+    // Log recovery if we were in a failed state
+    if (wasInFailedState && this.lastSnapshot) {
+      const activeCount = this.lastSnapshot.activePositions.length;
+      const redeemableCount = this.lastSnapshot.redeemablePositions.length;
+
+      this.logger.info(
+        `[PositionTracker] ✅ recovered after ${previousFailures} failures; ` +
+          `snapshot updated active=${activeCount}, redeemable=${redeemableCount}`,
+      );
+    }
+  }
+
+  /**
    * Get the current portfolio snapshot.
    *
    * This is the ONLY way strategies should access position data during a cycle.
    * The snapshot is immutable and consistent within a single orchestrator cycle.
    *
+   * CRASH-PROOF RECOVERY: If the snapshot is stale (from lastGoodSnapshot fallback),
+   * the stale flag will be true. Strategies should still operate but may log a warning.
+   *
    * @returns The last created snapshot, or null if no refresh has completed
    */
   getSnapshot(): PortfolioSnapshot | null {
     return this.lastSnapshot;
+  }
+
+  /**
+   * CRASH-PROOF RECOVERY: Get the last known-good snapshot.
+   *
+   * Returns the most recent snapshot that passed validation.
+   * Useful for downstream strategies that need to detect upstream failures.
+   *
+   * @returns The last known-good snapshot, or null if none exists
+   */
+  getLastGoodSnapshot(): PortfolioSnapshot | null {
+    return this.lastGoodSnapshot;
+  }
+
+  /**
+   * CRASH-PROOF RECOVERY: Get recovery status information.
+   *
+   * Returns current failure/recovery state for diagnostics.
+   */
+  getRecoveryStatus(): {
+    consecutiveFailures: number;
+    currentBackoffMs: number;
+    lastGoodAtMs: number;
+    lastErrorAtMs: number;
+    isHealthy: boolean;
+  } {
+    return {
+      consecutiveFailures: this.consecutiveFailures,
+      currentBackoffMs: this.currentBackoffMs,
+      lastGoodAtMs: this.lastGoodAtMs,
+      lastErrorAtMs: this.lastErrorAtMs,
+      isHealthy: this.consecutiveFailures === 0,
+    };
   }
 
   /**
@@ -3634,6 +4074,157 @@ export class PositionTracker {
       );
     }
   }
+
+  // ========================================================================
+  // CRASH-PROOF RECOVERY: CIRCUIT BREAKER FOR SPAMMY FAILING CALLS
+  // ========================================================================
+
+  /**
+   * CIRCUIT BREAKER: Check if a tokenId is in cooldown (circuit is open).
+   *
+   * Returns true if we should skip API calls for this tokenId.
+   * When circuit is open:
+   * - Use lastKnownPrice from cache (if available)
+   * - Keep position ACTIVE (do not drop)
+   * - Set pnlTrusted=false or mark as ENRICH_FAILED
+   *
+   * @param tokenId The tokenId to check
+   * @returns true if circuit is open (should skip API calls), false otherwise
+   */
+  private isCircuitOpen(tokenId: string): boolean {
+    const entry = this.circuitBreaker.get(tokenId);
+    if (!entry) {
+      return false;
+    }
+
+    const now = Date.now();
+
+    // Check if cooldown has expired
+    if (
+      entry.openedAtMs > 0 &&
+      now - entry.openedAtMs >= PositionTracker.CIRCUIT_BREAKER_COOLDOWN_MS
+    ) {
+      // Cooldown expired - close the circuit and allow retry
+      this.circuitBreaker.delete(tokenId);
+      return false;
+    }
+
+    // Circuit is open if we have enough failures and cooldown is active
+    return entry.openedAtMs > 0;
+  }
+
+  /**
+   * CIRCUIT BREAKER: Record a failure for a tokenId.
+   *
+   * Called when an API call fails (404, 422, timeout, etc.).
+   * After reaching threshold failures within the window, opens the circuit.
+   *
+   * @param tokenId The tokenId that failed
+   * @param errorType The type of error
+   * @param lastKnownPrice Optional last known price to use during cooldown
+   */
+  private recordCircuitBreakerFailure(
+    tokenId: string,
+    errorType: CircuitBreakerEntry["errorType"],
+    lastKnownPrice?: number,
+  ): void {
+    const now = Date.now();
+    let entry = this.circuitBreaker.get(tokenId);
+
+    if (!entry) {
+      // Create new entry
+      entry = {
+        firstFailureAtMs: now,
+        failureCount: 1,
+        openedAtMs: 0,
+        lastKnownPrice,
+        errorType,
+      };
+    } else {
+      // Check if we're in a new window
+      if (
+        now - entry.firstFailureAtMs >
+        PositionTracker.CIRCUIT_BREAKER_WINDOW_MS
+      ) {
+        // New window - reset counter
+        entry.firstFailureAtMs = now;
+        entry.failureCount = 1;
+      } else {
+        // Same window - increment counter
+        entry.failureCount++;
+      }
+
+      // Update error type and last known price
+      entry.errorType = errorType;
+      if (lastKnownPrice !== undefined) {
+        entry.lastKnownPrice = lastKnownPrice;
+      }
+    }
+
+    // Check if threshold reached - open circuit
+    if (
+      entry.failureCount >= PositionTracker.CIRCUIT_BREAKER_THRESHOLD &&
+      entry.openedAtMs === 0
+    ) {
+      entry.openedAtMs = now;
+
+      // Log circuit breaker opening (rate-limited per tokenId)
+      if (
+        this.logDeduper.shouldLog(
+          `CircuitBreaker:open:${tokenId.slice(0, 16)}`,
+          PositionTracker.CIRCUIT_BREAKER_COOLDOWN_MS,
+        )
+      ) {
+        this.logger.warn(
+          `[PositionTracker] ⚡ Circuit breaker OPEN for tokenId=${tokenId.slice(0, 16)}... ` +
+            `reason=${errorType} failures=${entry.failureCount} cooldown=${Math.round(PositionTracker.CIRCUIT_BREAKER_COOLDOWN_MS / 1000)}s`,
+        );
+      }
+    }
+
+    // Enforce max entries
+    if (
+      this.circuitBreaker.size >= PositionTracker.MAX_CIRCUIT_BREAKER_ENTRIES
+    ) {
+      // Remove oldest entry
+      const firstKey = this.circuitBreaker.keys().next().value;
+      if (firstKey) {
+        this.circuitBreaker.delete(firstKey);
+      }
+    }
+
+    this.circuitBreaker.set(tokenId, entry);
+  }
+
+  /**
+   * CIRCUIT BREAKER: Record a success for a tokenId.
+   *
+   * Called when an API call succeeds.
+   * Clears the circuit breaker entry for this tokenId.
+   *
+   * @param tokenId The tokenId that succeeded
+   */
+  private recordCircuitBreakerSuccess(tokenId: string): void {
+    if (this.circuitBreaker.has(tokenId)) {
+      this.circuitBreaker.delete(tokenId);
+    }
+  }
+
+  /**
+   * CIRCUIT BREAKER: Get the last known price for a tokenId.
+   *
+   * Used when circuit is open to provide a fallback price.
+   *
+   * @param tokenId The tokenId to look up
+   * @returns The last known price, or undefined if not available
+   */
+  private getCircuitBreakerLastKnownPrice(tokenId: string): number | undefined {
+    return this.circuitBreaker.get(tokenId)?.lastKnownPrice;
+  }
+
+  // ========================================================================
+  // ENTRY METADATA ENRICHMENT
+  // ========================================================================
 
   /**
    * Enrich ACTIVE positions with entry metadata from trade history.

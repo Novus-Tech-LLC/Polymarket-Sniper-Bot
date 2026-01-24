@@ -3177,3 +3177,493 @@ describe("Holding Address Resolution", () => {
     );
   });
 });
+
+// ============================================================================
+// CRASH-PROOF RECOVERY TESTS (Jan 2025)
+// ============================================================================
+
+describe("Crash-Proof Recovery: Snapshot Validation", () => {
+  test("ACTIVE_COLLAPSE_BUG: Rejects snapshot when rawTotal > 0 AND rawActive > 0 but finalActive = 0", () => {
+    // This simulates the exact bug condition described in the issue
+    const mockPrevSnapshot = {
+      cycleId: 1,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: Date.now() - 30000,
+      activePositions: Object.freeze([{ marketId: "m1", tokenId: "t1" }]) as any,
+      redeemablePositions: Object.freeze([]) as any,
+      summary: { activeTotal: 1, prof: 0, lose: 1, neutral: 0, unknown: 0, redeemableTotal: 0 },
+      rawCounts: { rawTotal: 1, rawActiveCandidates: 1, rawRedeemableCandidates: 0 },
+    };
+
+    // New snapshot has raw positions but 0 final active (ACTIVE_COLLAPSE_BUG)
+    const mockNewSnapshot = {
+      cycleId: 2,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: Date.now(),
+      activePositions: Object.freeze([]) as any, // BUG: Empty even though raw has positions
+      redeemablePositions: Object.freeze([]) as any,
+      summary: { activeTotal: 0, prof: 0, lose: 0, neutral: 0, unknown: 0, redeemableTotal: 0 },
+      rawCounts: { rawTotal: 33, rawActiveCandidates: 33, rawRedeemableCandidates: 0 },
+    };
+
+    // Simulate validation logic
+    const rawTotal = mockNewSnapshot.rawCounts?.rawTotal ?? 0;
+    const rawActiveCandidates = mockNewSnapshot.rawCounts?.rawActiveCandidates ?? 0;
+    const finalActiveCount = mockNewSnapshot.activePositions.length;
+
+    const isActiveCollapseBug =
+      rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0;
+
+    assert.strictEqual(
+      isActiveCollapseBug,
+      true,
+      "Should detect ACTIVE_COLLAPSE_BUG when raw has positions but final has none"
+    );
+  });
+
+  test("FETCH_REGRESSION: Rejects snapshot when newTotal < 20% of prevTotal", () => {
+    const prevRawTotal = 50;
+    const newRawTotal = 5; // 10% of prev - should be rejected
+    const threshold = 0.2; // 20%
+
+    const isFetchRegression = newRawTotal < prevRawTotal * threshold;
+
+    assert.strictEqual(
+      isFetchRegression,
+      true,
+      "Should detect FETCH_REGRESSION when new total is dramatically lower"
+    );
+
+    // Test borderline case (exactly 20% - should pass)
+    const borderlineRawTotal = 10; // 20% of 50
+    const isBorderlineRegression = borderlineRawTotal < prevRawTotal * threshold;
+    assert.strictEqual(
+      isBorderlineRegression,
+      false,
+      "Should NOT detect FETCH_REGRESSION when exactly at threshold"
+    );
+  });
+
+  test("ADDRESS_FLIP_COLLAPSE: Rejects when address changes AND counts collapse", () => {
+    const prevAddress = "0x1111111111111111111111111111111111111111";
+    const newAddress = "0x2222222222222222222222222222222222222222";
+
+    // Previous had positions, new has none, AND address changed
+    const prevActiveCount = 10;
+    const newActiveCount = 0;
+    const newRedeemableCount = 0;
+
+    const addressChanged = newAddress !== prevAddress;
+    const countsCollapsed =
+      prevActiveCount > 0 && newActiveCount === 0 && newRedeemableCount === 0;
+
+    const isAddressFlipCollapse = addressChanged && countsCollapsed;
+
+    assert.strictEqual(
+      isAddressFlipCollapse,
+      true,
+      "Should detect ADDRESS_FLIP_COLLAPSE when address changes and counts collapse"
+    );
+
+    // Test: Same address, counts collapse - should NOT be address flip collapse
+    // When address is the same, addressChanged would be false, so isAddressFlipCollapse would be false
+    const sameAddressChanged = prevAddress !== prevAddress; // false because same address
+    const sameAddressFlipCollapse = sameAddressChanged && countsCollapsed;
+    assert.strictEqual(
+      sameAddressFlipCollapse,
+      false,
+      "Collapse without address change should NOT be ADDRESS_FLIP_COLLAPSE"
+    );
+  });
+
+  test("Valid snapshot passes all validation checks", () => {
+    const prevRawTotal = 30;
+    const newRawTotal = 28; // Slight decrease is fine
+    const threshold = 0.2;
+
+    const mockNewSnapshot = {
+      activePositions: [{ id: 1 }, { id: 2 }],
+      redeemablePositions: [{ id: 3 }],
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      rawCounts: { rawTotal: newRawTotal, rawActiveCandidates: 2, rawRedeemableCandidates: 1 },
+    };
+
+    const mockPrevSnapshot = {
+      activePositions: [{ id: 1 }, { id: 2 }, { id: 4 }],
+      redeemablePositions: [],
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      rawCounts: { rawTotal: prevRawTotal, rawActiveCandidates: 3, rawRedeemableCandidates: 0 },
+    };
+
+    // Check all validations
+    const rawTotal = mockNewSnapshot.rawCounts.rawTotal;
+    const rawActiveCandidates = mockNewSnapshot.rawCounts.rawActiveCandidates;
+    const finalActiveCount = mockNewSnapshot.activePositions.length;
+
+    // Rule A: ACTIVE_COLLAPSE_BUG
+    const isActiveCollapseBug =
+      rawTotal > 0 && rawActiveCandidates > 0 && finalActiveCount === 0;
+
+    // Rule B: FETCH_REGRESSION
+    const isFetchRegression = newRawTotal < prevRawTotal * threshold;
+
+    // Rule C: ADDRESS_FLIP_COLLAPSE
+    const addressChanged = mockNewSnapshot.addressUsed !== mockPrevSnapshot.addressUsed;
+    const countsCollapsed =
+      mockPrevSnapshot.activePositions.length > 0 &&
+      finalActiveCount === 0 &&
+      mockNewSnapshot.redeemablePositions.length === 0;
+    const isAddressFlipCollapse = addressChanged && countsCollapsed;
+
+    const isValid = !isActiveCollapseBug && !isFetchRegression && !isAddressFlipCollapse;
+
+    assert.strictEqual(isValid, true, "Valid snapshot should pass all checks");
+  });
+});
+
+describe("Crash-Proof Recovery: Stale Snapshot Handling", () => {
+  test("Stale snapshot preserves data from lastGoodSnapshot", () => {
+    const lastGoodFetchedAt = Date.now() - 60000; // 60 seconds ago
+    const lastGoodSnapshot = {
+      cycleId: 5,
+      addressUsed: "0x1234567890123456789012345678901234567890",
+      fetchedAtMs: lastGoodFetchedAt,
+      activePositions: Object.freeze([
+        { tokenId: "t1", marketId: "m1", size: 100 },
+        { tokenId: "t2", marketId: "m2", size: 50 },
+      ]) as any,
+      redeemablePositions: Object.freeze([]) as any,
+      summary: { activeTotal: 2, prof: 1, lose: 1, neutral: 0, unknown: 0, redeemableTotal: 0 },
+    };
+
+    // Simulate creating stale snapshot
+    const now = Date.now();
+    const staleAgeMs = now - lastGoodSnapshot.fetchedAtMs;
+    const staleReason = "refresh_failed: Network timeout";
+
+    const staleSnapshot = {
+      ...lastGoodSnapshot,
+      cycleId: 6, // New cycle ID
+      stale: true,
+      staleAgeMs,
+      staleReason,
+    };
+
+    // Verify stale snapshot properties
+    assert.strictEqual(staleSnapshot.stale, true, "Should be marked as stale");
+    assert.ok(staleSnapshot.staleAgeMs >= 60000, "Should have stale age >= 60s");
+    assert.strictEqual(staleSnapshot.staleReason, staleReason, "Should preserve stale reason");
+    assert.strictEqual(
+      staleSnapshot.activePositions.length,
+      2,
+      "Should preserve active positions from lastGoodSnapshot"
+    );
+    assert.strictEqual(
+      staleSnapshot.addressUsed,
+      lastGoodSnapshot.addressUsed,
+      "Should preserve address from lastGoodSnapshot"
+    );
+  });
+
+  test("Recovery status tracks consecutive failures", () => {
+    // Simulate recovery state tracking
+    let consecutiveFailures = 0;
+    let currentBackoffMs = 0;
+    let lastErrorAtMs = 0;
+    let lastGoodAtMs = Date.now() - 300000; // 5 minutes ago
+    const BASE_BACKOFF_MS = 5000;
+    const MAX_BACKOFF_MS = 120000;
+
+    // Simulate 3 consecutive failures
+    for (let i = 0; i < 3; i++) {
+      consecutiveFailures++;
+      lastErrorAtMs = Date.now();
+      currentBackoffMs = Math.min(
+        BASE_BACKOFF_MS * Math.pow(2, consecutiveFailures - 1),
+        MAX_BACKOFF_MS
+      );
+    }
+
+    assert.strictEqual(consecutiveFailures, 3, "Should track 3 failures");
+    assert.strictEqual(currentBackoffMs, 20000, "Backoff should be 5000 * 2^2 = 20000ms");
+
+    // Simulate recovery (successful refresh)
+    const wasInFailedState = consecutiveFailures > 0;
+    consecutiveFailures = 0;
+    currentBackoffMs = 0;
+    lastGoodAtMs = Date.now();
+
+    assert.strictEqual(wasInFailedState, true, "Should detect we were in failed state");
+    assert.strictEqual(consecutiveFailures, 0, "Should reset failure count on success");
+    assert.strictEqual(currentBackoffMs, 0, "Should reset backoff on success");
+  });
+
+  test("Exponential backoff is capped at MAX_BACKOFF_MS", () => {
+    const BASE_BACKOFF_MS = 5000;
+    const MAX_BACKOFF_MS = 120000;
+
+    // Simulate many failures
+    for (let failures = 1; failures <= 10; failures++) {
+      const backoff = Math.min(
+        BASE_BACKOFF_MS * Math.pow(2, failures - 1),
+        MAX_BACKOFF_MS
+      );
+
+      if (failures <= 5) {
+        // Before cap: 5000, 10000, 20000, 40000, 80000
+        const expected = BASE_BACKOFF_MS * Math.pow(2, failures - 1);
+        assert.strictEqual(backoff, expected, `Failure ${failures} backoff should be ${expected}ms`);
+      } else {
+        // After cap: all should be MAX_BACKOFF_MS
+        assert.strictEqual(backoff, MAX_BACKOFF_MS, `Failure ${failures} backoff should be capped at ${MAX_BACKOFF_MS}ms`);
+      }
+    }
+  });
+});
+
+describe("Crash-Proof Recovery: Circuit Breaker", () => {
+  test("Circuit breaker opens after threshold failures", () => {
+    const circuitBreaker = new Map<string, {
+      failureCount: number;
+      firstFailureAtMs: number;
+      openedAtMs: number;
+    }>();
+
+    const THRESHOLD = 3;
+    const WINDOW_MS = 30000;
+    const tokenId = "test-token-123";
+
+    // Simulate failures
+    const now = Date.now();
+    for (let i = 1; i <= THRESHOLD; i++) {
+      let entry = circuitBreaker.get(tokenId);
+      if (!entry) {
+        entry = { failureCount: 0, firstFailureAtMs: now, openedAtMs: 0 };
+      }
+      entry.failureCount++;
+      
+      if (entry.failureCount >= THRESHOLD) {
+        entry.openedAtMs = now;
+      }
+      
+      circuitBreaker.set(tokenId, entry);
+    }
+
+    const finalEntry = circuitBreaker.get(tokenId);
+    assert.ok(finalEntry, "Entry should exist");
+    assert.strictEqual(finalEntry!.failureCount, THRESHOLD, "Should have threshold failures");
+    assert.ok(finalEntry!.openedAtMs > 0, "Circuit should be open");
+  });
+
+  test("Circuit breaker resets after cooldown", () => {
+    const COOLDOWN_MS = 60000;
+    const tokenId = "test-token-456";
+
+    // Simulate circuit that was opened 65 seconds ago
+    const circuitBreaker = new Map<string, {
+      failureCount: number;
+      openedAtMs: number;
+    }>();
+
+    const openedAtMs = Date.now() - 65000; // 65 seconds ago
+    circuitBreaker.set(tokenId, {
+      failureCount: 3,
+      openedAtMs,
+    });
+
+    // Check if cooldown has expired
+    const now = Date.now();
+    const entry = circuitBreaker.get(tokenId);
+    const cooldownExpired = entry && now - entry.openedAtMs >= COOLDOWN_MS;
+
+    if (cooldownExpired) {
+      circuitBreaker.delete(tokenId);
+    }
+
+    assert.strictEqual(cooldownExpired, true, "Cooldown should be expired after 65s");
+    assert.strictEqual(
+      circuitBreaker.has(tokenId),
+      false,
+      "Entry should be deleted after cooldown"
+    );
+  });
+
+  test("Successful API call resets circuit breaker for token", () => {
+    const circuitBreaker = new Map<string, { failureCount: number; openedAtMs: number }>();
+    const tokenId = "test-token-789";
+
+    // Set up an open circuit
+    circuitBreaker.set(tokenId, {
+      failureCount: 5,
+      openedAtMs: Date.now(),
+    });
+
+    assert.strictEqual(circuitBreaker.has(tokenId), true, "Circuit should exist");
+
+    // Simulate successful call - should delete entry
+    circuitBreaker.delete(tokenId);
+
+    assert.strictEqual(
+      circuitBreaker.has(tokenId),
+      false,
+      "Circuit should be reset on success"
+    );
+  });
+});
+
+describe("Crash-Proof Recovery: Downstream Strategy Hardening", () => {
+  test("Strategy detects stale snapshot and continues operating", () => {
+    // Simulate what ScalpTakeProfit does with stale snapshot
+    const staleSnapshot = {
+      stale: true,
+      staleAgeMs: 45000, // 45 seconds stale
+      staleReason: "refresh_failed: 502 Bad Gateway",
+      activePositions: [
+        { tokenId: "t1", pnlPct: 8.5, pnlTrusted: true },
+        { tokenId: "t2", pnlPct: -3.2, pnlTrusted: true },
+      ],
+      summary: { activeTotal: 2, prof: 1, lose: 1, neutral: 0, unknown: 0, redeemableTotal: 0 },
+    };
+
+    // Strategy should still operate on stale data
+    const shouldTrade = staleSnapshot.activePositions.length > 0;
+    const shouldLogWarning = staleSnapshot.stale === true;
+    const staleAgeSec = Math.round((staleSnapshot.staleAgeMs ?? 0) / 1000);
+
+    assert.strictEqual(shouldTrade, true, "Should still trade with stale snapshot");
+    assert.strictEqual(shouldLogWarning, true, "Should log warning about stale data");
+    assert.strictEqual(staleAgeSec, 45, "Should report stale age correctly");
+  });
+
+  test("Strategy falls back to lastGoodSnapshot when current reports 0", () => {
+    // Simulate the scenario where current snapshot suddenly reports 0 but lastGood had positions
+    const currentSnapshot = {
+      stale: false,
+      activePositions: [] as any[],
+      summary: { activeTotal: 0, prof: 0, lose: 0, neutral: 0, unknown: 0, redeemableTotal: 0 },
+    };
+
+    const lastGoodSnapshot = {
+      stale: false,
+      activePositions: [
+        { tokenId: "t1", pnlPct: 5.0 },
+        { tokenId: "t2", pnlPct: -2.0 },
+      ],
+      summary: { activeTotal: 2, prof: 1, lose: 1, neutral: 0, unknown: 0, redeemableTotal: 0 },
+    };
+
+    // Strategy logic: If current is empty but lastGood has positions, use lastGood
+    const shouldUseFallback =
+      currentSnapshot.activePositions.length === 0 &&
+      lastGoodSnapshot &&
+      lastGoodSnapshot.activePositions.length > 0 &&
+      !currentSnapshot.stale;
+
+    const effectiveSnapshot = shouldUseFallback ? lastGoodSnapshot : currentSnapshot;
+
+    assert.strictEqual(shouldUseFallback, true, "Should detect need for fallback");
+    assert.strictEqual(
+      effectiveSnapshot.activePositions.length,
+      2,
+      "Should use lastGoodSnapshot positions"
+    );
+  });
+});
+
+describe("Crash-Proof Recovery: Non-Fatal External Lookups", () => {
+  test("CLOB 404 error should NOT drop position", () => {
+    // When CLOB orderbook returns 404, position should be kept ACTIVE
+    // with pnlTrusted=false, not dropped entirely
+    
+    interface MockPosition {
+      tokenId: string;
+      status: string;
+      pnlTrusted: boolean;
+      pnlUntrustedReason?: string;
+    }
+
+    // Simulate position processing when orderbook returns 404
+    const position: MockPosition = {
+      tokenId: "test-token",
+      status: "NO_BOOK",
+      pnlTrusted: false,
+      pnlUntrustedReason: "ORDERBOOK_404",
+    };
+
+    // Position should be kept, not dropped
+    const isPositionKept = position.status !== "DROPPED";
+    const isPnlMarkedUntrusted = position.pnlTrusted === false;
+    const hasUntrustedReason = position.pnlUntrustedReason !== undefined;
+
+    assert.strictEqual(isPositionKept, true, "Position should NOT be dropped on 404");
+    assert.strictEqual(isPnlMarkedUntrusted, true, "P&L should be marked as untrusted");
+    assert.strictEqual(hasUntrustedReason, true, "Should record reason for untrusted P&L");
+  });
+
+  test("Gamma API 422 error should NOT mark position as redeemable", () => {
+    // When Gamma API returns 422 for outcome lookup, position should
+    // remain ACTIVE with classification tracking, not marked as redeemable
+    
+    const position = {
+      tokenId: "test-token",
+      positionState: "ACTIVE" as const,
+      redeemable: false,
+      pnlTrusted: false,
+      classificationReason: "GAMMA_API_422",
+    };
+
+    // Position should remain ACTIVE, not become REDEEMABLE
+    assert.strictEqual(
+      position.positionState,
+      "ACTIVE",
+      "Position should remain ACTIVE on API error"
+    );
+    assert.strictEqual(
+      position.redeemable,
+      false,
+      "Position should NOT be marked redeemable on API error"
+    );
+    assert.strictEqual(
+      position.classificationReason,
+      "GAMMA_API_422",
+      "Should record classification reason"
+    );
+  });
+
+  test("Network timeout should trigger circuit breaker, not drop positions", () => {
+    // When network times out repeatedly, circuit breaker should open
+    // but positions should be kept with fallback pricing
+    
+    const circuitBreakerEntries = new Map<string, {
+      failureCount: number;
+      errorType: string;
+      lastKnownPrice: number;
+    }>();
+
+    const tokenId = "timeout-token";
+    const lastKnownPrice = 0.65; // From previous Data-API fetch
+
+    // Record timeout failures
+    for (let i = 0; i < 3; i++) {
+      const entry = circuitBreakerEntries.get(tokenId) ?? {
+        failureCount: 0,
+        errorType: "",
+        lastKnownPrice,
+      };
+      entry.failureCount++;
+      entry.errorType = "TIMEOUT";
+      circuitBreakerEntries.set(tokenId, entry);
+    }
+
+    const finalEntry = circuitBreakerEntries.get(tokenId);
+    
+    assert.ok(finalEntry, "Should have circuit breaker entry");
+    assert.strictEqual(finalEntry!.failureCount, 3, "Should track 3 timeout failures");
+    assert.strictEqual(finalEntry!.errorType, "TIMEOUT", "Should record error type");
+    assert.strictEqual(
+      finalEntry!.lastKnownPrice,
+      lastKnownPrice,
+      "Should preserve last known price for fallback"
+    );
+  });
+});

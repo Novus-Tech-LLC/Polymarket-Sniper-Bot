@@ -502,6 +502,12 @@ export class ScalpTakeProfitStrategy {
    * It MUST use snapshot.activePositions, NOT call positionTracker methods directly.
    * This ensures all strategies operate on the same consistent data per cycle.
    *
+   * CRASH-PROOF RECOVERY (Jan 2025):
+   * - If snapshot.stale === true, we're using lastGoodSnapshot fallback
+   * - Still trade, but log once: "using stale snapshot age=Xs"
+   * - If snapshot suddenly reports activeTotal=0 but lastGoodSnapshot had >0,
+   *   treat as upstream failure and keep using lastGoodSnapshot
+   *
    * @param snapshot Optional PortfolioSnapshot from orchestrator. If not provided,
    *                 falls back to positionTracker.getSnapshot() for backward compatibility.
    */
@@ -512,7 +518,57 @@ export class ScalpTakeProfitStrategy {
 
     // === SNAPSHOT RESOLUTION ===
     // Prefer snapshot passed from orchestrator, fall back to positionTracker.getSnapshot()
-    const effectiveSnapshot = snapshot ?? this.positionTracker.getSnapshot();
+    let effectiveSnapshot = snapshot ?? this.positionTracker.getSnapshot();
+
+    // === CRASH-PROOF RECOVERY: HANDLE STALE/EMPTY SNAPSHOTS ===
+    // If snapshot is stale, log warning but continue trading
+    // If snapshot suddenly reports 0 active but we had positions before, treat as failure
+    if (effectiveSnapshot) {
+      // Check for stale snapshot and log warning (rate-limited)
+      if (effectiveSnapshot.stale) {
+        const staleAgeSec = Math.round(
+          (effectiveSnapshot.staleAgeMs ?? 0) / 1000,
+        );
+        if (
+          this.logDeduper.shouldLog(
+            "ScalpTakeProfit:stale_snapshot",
+            30_000, // Log at most every 30 seconds
+          )
+        ) {
+          this.logger.warn(
+            `[ScalpTakeProfit] ⚠️ using stale snapshot age=${staleAgeSec}s ` +
+              `reason="${effectiveSnapshot.staleReason ?? "unknown"}" ` +
+              `active=${effectiveSnapshot.activePositions.length} ` +
+              `redeemable=${effectiveSnapshot.redeemablePositions.length}`,
+          );
+        }
+      }
+
+      // Check for sudden collapse to 0 active positions
+      // This is a safety net against upstream failures that slip through validation
+      const lastGoodSnapshot = this.positionTracker.getLastGoodSnapshot?.();
+      if (
+        effectiveSnapshot.activePositions.length === 0 &&
+        lastGoodSnapshot &&
+        lastGoodSnapshot.activePositions.length > 0 &&
+        !effectiveSnapshot.stale // Not already marked as stale
+      ) {
+        // Snapshot reports 0 but lastGood had positions - treat as upstream failure
+        if (
+          this.logDeduper.shouldLog(
+            "ScalpTakeProfit:zero_active_fallback",
+            30_000,
+          )
+        ) {
+          this.logger.warn(
+            `[ScalpTakeProfit] ⚠️ snapshot reports activeTotal=0 but lastGoodSnapshot had ` +
+              `${lastGoodSnapshot.activePositions.length} positions; using lastGoodSnapshot as fallback`,
+          );
+        }
+        // Use lastGoodSnapshot instead
+        effectiveSnapshot = lastGoodSnapshot;
+      }
+    }
 
     // CRITICAL: Get positions enriched with entry metadata from trade history API
     // This provides accurate timeHeldSec that survives container restarts
