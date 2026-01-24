@@ -168,7 +168,9 @@ export const executeRelayerTxs = async (params: {
       throw new Error(`[Relayer] Invalid 'to' address format: ${tx.to}`);
     }
     if (!tx.data.startsWith("0x")) {
-      throw new Error(`[Relayer] Invalid 'data' format: ${tx.data.slice(0, 20)}...`);
+      throw new Error(
+        `[Relayer] Invalid 'data' format: ${tx.data.slice(0, 20)}...`,
+      );
     }
     return {
       to: tx.to as `0x${string}`,
@@ -200,8 +202,7 @@ export const executeRelayerTxs = async (params: {
   try {
     result = await response.wait();
   } catch (waitErr) {
-    const errMsg =
-      waitErr instanceof Error ? waitErr.message : String(waitErr);
+    const errMsg = waitErr instanceof Error ? waitErr.message : String(waitErr);
     params.logger.error(`[Relayer] SDK wait() failed: ${errMsg}`);
     throw new Error(`Relayer SDK wait() failed: ${errMsg}`);
   }

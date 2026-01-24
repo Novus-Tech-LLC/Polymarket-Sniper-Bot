@@ -1605,7 +1605,8 @@ export function loadStrategyConfig(
     scalpTargetProfitPct:
       parseNumber(readEnv("SCALP_TARGET_PROFIT_PCT", overrides) ?? "") ??
       ("SCALP_TARGET_PROFIT_PCT" in preset
-        ? (preset as { SCALP_TARGET_PROFIT_PCT: number }).SCALP_TARGET_PROFIT_PCT
+        ? (preset as { SCALP_TARGET_PROFIT_PCT: number })
+            .SCALP_TARGET_PROFIT_PCT
         : undefined) ??
       8.0, // Default: 8% - meaningful profit after all costs
     // SCALP_MIN_PROFIT_USD: minimum profit in USD for exit

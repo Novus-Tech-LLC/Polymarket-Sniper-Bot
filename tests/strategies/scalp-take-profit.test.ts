@@ -306,7 +306,7 @@ test("SCALP_LOW_PRICE_THRESHOLD env variable enables low-price scalping", () => 
   });
 
   const config = loadStrategyConfig();
-  assert.equal(config?.scalpLowPriceThreshold, 0.20);
+  assert.equal(config?.scalpLowPriceThreshold, 0.2);
 });
 
 test("SCALP_LOW_PRICE_MAX_HOLD_MINUTES defaults to 3 (quick scalps)", () => {

@@ -145,7 +145,7 @@ export class AutoRedeemStrategy {
     // Use configured interval or default from constants
     this.checkIntervalMs =
       strategyConfig.config.checkIntervalMs ?? AUTO_REDEEM_CHECK_INTERVAL_MS;
-    
+
     // Log relayer availability
     if (this.relayer?.enabled) {
       this.logger.info(
@@ -199,7 +199,9 @@ export class AutoRedeemStrategy {
 
     // Check global rate limit - if we hit "in-flight transaction limit", pause all redemptions
     if (this.globalRateLimitUntil > now) {
-      const remainingSeconds = Math.ceil((this.globalRateLimitUntil - now) / 1000);
+      const remainingSeconds = Math.ceil(
+        (this.globalRateLimitUntil - now) / 1000,
+      );
       this.logger.info(
         `[AutoRedeem] ⏳ Global rate limit active - paused for ${remainingSeconds}s (RPC provider limit)`,
       );
@@ -472,14 +474,15 @@ export class AutoRedeemStrategy {
         } else {
           // Check if this was a rate limit error - if so, set global pause
           if (result.isRateLimited) {
-            this.globalRateLimitUntil = Date.now() + AutoRedeemStrategy.RPC_RATE_LIMIT_COOLDOWN_MS;
+            this.globalRateLimitUntil =
+              Date.now() + AutoRedeemStrategy.RPC_RATE_LIMIT_COOLDOWN_MS;
             this.logger.warn(
               `[AutoRedeem] 🚫 RPC rate limit hit - pausing ALL redemptions for ${AutoRedeemStrategy.RPC_RATE_LIMIT_COOLDOWN_MS / 60000} minutes`,
             );
             // Don't count as failure - this is a temporary rate limit, not a position problem
             break; // Stop trying more redemptions this cycle
           }
-          
+
           // Track failure by marketId
           const currentAttempts = this.redemptionAttempts.get(marketId) || {
             lastAttempt: 0,
@@ -508,7 +511,7 @@ export class AutoRedeemStrategy {
           `[AutoRedeem] Error redeeming market ${marketId}: ${errorMsg}`,
         );
       }
-      
+
       // Add small delay between redemption attempts to avoid overwhelming RPC
       // This helps prevent "in-flight transaction limit" errors
       await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 second delay between redemptions
@@ -521,7 +524,10 @@ export class AutoRedeemStrategy {
 
     // Log diagnostic info if we have redeemable positions but didn't attempt any redemptions
     const totalSkipped =
-      skippedAlreadyRedeemed + skippedCooldown + skippedMaxFailures + skippedRateLimited;
+      skippedAlreadyRedeemed +
+      skippedCooldown +
+      skippedMaxFailures +
+      skippedRateLimited;
     if (attemptedRedemptions === 0 && totalSkipped > 0) {
       this.logger.info(
         `[AutoRedeem] ⚠️ ${redeemablePositions.length} redeemable but ${totalSkipped} skipped: ` +
@@ -741,7 +747,7 @@ export class AutoRedeemStrategy {
         this.logger.info(
           `[AutoRedeem] 🔄 Sending gasless redemption via relayer to CTF contract ${ctfAddress}...`,
         );
-        
+
         // Build the redeemPositions transaction data
         const ctfInterface = new Interface(CTF_ABI);
         const txData = ctfInterface.encodeFunctionData("redeemPositions", [
@@ -750,7 +756,7 @@ export class AutoRedeemStrategy {
           conditionId,
           indexSets,
         ]);
-        
+
         try {
           const result = await executeRelayerTxs({
             relayer: this.relayer,
@@ -758,9 +764,12 @@ export class AutoRedeemStrategy {
             description: `Redeem market ${conditionId.slice(0, 16)}...`,
             logger: this.logger,
           });
-          
-          if (result.state === "STATE_CONFIRMED" || result.state === "STATE_MINED") {
-            // Verify redemption by checking both USDC balance AND token balance
+
+          if (
+            result.state === "STATE_CONFIRMED" ||
+            result.state === "STATE_MINED"
+          ) {
+            // Get USDC balance after redemption
             const balanceAfter = (await usdcContract.balanceOf(
               wallet.address,
             )) as bigint;
@@ -817,10 +826,16 @@ export class AutoRedeemStrategy {
             };
           }
         } catch (relayerErr) {
-          const errMsg = relayerErr instanceof Error ? relayerErr.message : String(relayerErr);
-          
+          const errMsg =
+            relayerErr instanceof Error
+              ? relayerErr.message
+              : String(relayerErr);
+
           // Check for relayer quota exceeded
-          if (errMsg.includes("RELAYER_QUOTA_EXCEEDED") || errMsg.includes("429")) {
+          if (
+            errMsg.includes("RELAYER_QUOTA_EXCEEDED") ||
+            errMsg.includes("429")
+          ) {
             this.logger.warn(
               `[AutoRedeem] 🚫 Relayer quota exceeded - will retry later`,
             );
@@ -832,7 +847,7 @@ export class AutoRedeemStrategy {
               isRateLimited: true,
             };
           }
-          
+
           this.logger.error(
             `[AutoRedeem] ❌ Relayer redemption failed: ${errMsg}`,
           );
@@ -918,18 +933,18 @@ export class AutoRedeemStrategy {
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      
+
       // Log the full error at ERROR level for diagnosis
       this.logger.error(
         `[AutoRedeem] ❌ Redemption transaction failed for ${position.marketId.slice(0, 16)}...: ${errorMsg}`,
       );
 
       // Check for RPC rate limit errors (delegated account limits)
-      const isRateLimitError = 
+      const isRateLimitError =
         errorMsg.includes("in-flight transaction limit") ||
         errorMsg.includes("-32000") ||
         errorMsg.includes("could not coalesce error");
-      
+
       if (isRateLimitError) {
         this.logger.warn(
           `[AutoRedeem] 🚫 RPC rate limit detected - this indicates too many pending transactions. Will pause redemptions.`,
