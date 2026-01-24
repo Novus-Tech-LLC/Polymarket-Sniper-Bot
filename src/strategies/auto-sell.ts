@@ -271,7 +271,7 @@ export class AutoSellStrategy {
         outcome: "YES", // Direction doesn't matter for sells
         side: "SELL",
         sizeUsd,
-        maxAcceptablePrice: bestBid * 0.9, // Accept up to 10% slippage for urgent exit
+        minAcceptablePrice: bestBid * 0.9, // Accept up to 10% slippage below current bid for urgent exit
         logger: this.logger,
         priority: false,
         skipDuplicatePrevention: true, // Auto-sell must bypass duplicate prevention for exits

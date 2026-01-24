@@ -36,6 +36,143 @@ export type OrderOutcome = "YES" | "NO";
  */
 export const GLOBAL_MIN_BUY_PRICE = 0.1;
 
+/**
+ * Price protection validation result
+ */
+export type PriceProtectionResult = {
+  valid: boolean;
+  error?: string;
+  diagnostics?: {
+    side: OrderSide;
+    tokenId: string;
+    bestBid: number | null;
+    bestAsk: number | null;
+    minAcceptablePrice?: number;
+    maxAcceptablePrice?: number;
+    priceUnits: "dollars"; // All prices in decimal dollars [0..1]
+  };
+};
+
+/**
+ * Validate price protection for an order
+ *
+ * PRICE UNITS: All prices are in decimal dollars (e.g., 0.637 = 63.7¢).
+ * Valid range is [0, 1] for prediction market outcomes.
+ *
+ * SELL PROTECTION (floor - don't dump too cheap):
+ *   - Uses bestBid (what we can sell into)
+ *   - Fails if bestBid < minAcceptablePrice
+ *
+ * BUY PROTECTION (cap - don't overpay):
+ *   - Uses bestAsk (what we must pay)
+ *   - Fails if bestAsk > maxAcceptablePrice
+ *
+ * @param params Validation parameters
+ * @returns PriceProtectionResult with validation status and diagnostics
+ */
+export function validatePriceProtection(params: {
+  side: OrderSide;
+  tokenId: string;
+  bestBid: number | null;
+  bestAsk: number | null;
+  minAcceptablePrice?: number;
+  maxAcceptablePrice?: number;
+}): PriceProtectionResult {
+  const { side, tokenId, bestBid, bestAsk, minAcceptablePrice, maxAcceptablePrice } = params;
+
+  // Build diagnostics for logging (always include for debugging)
+  const diagnostics: PriceProtectionResult["diagnostics"] = {
+    side,
+    tokenId,
+    bestBid,
+    bestAsk,
+    minAcceptablePrice,
+    maxAcceptablePrice,
+    priceUnits: "dollars",
+  };
+
+  // Sanity check: prices should be in [0, 1] range for prediction markets
+  const validatePriceRange = (price: number | null | undefined, label: string): string | null => {
+    if (price === null || price === undefined) return null;
+    if (price < 0 || price > 1) {
+      return `PRICE_UNITS_ERROR: ${label}=${price} is outside valid range [0,1]. ` +
+        `Possible cents/dollars confusion. Expected decimal dollars (e.g., 0.637 not 63.7)`;
+    }
+    return null;
+  };
+
+  // Validate all prices are in correct units
+  const bidRangeError = validatePriceRange(bestBid, "bestBid");
+  if (bidRangeError) return { valid: false, error: bidRangeError, diagnostics };
+
+  const askRangeError = validatePriceRange(bestAsk, "bestAsk");
+  if (askRangeError) return { valid: false, error: askRangeError, diagnostics };
+
+  const minRangeError = validatePriceRange(minAcceptablePrice, "minAcceptablePrice");
+  if (minRangeError) return { valid: false, error: minRangeError, diagnostics };
+
+  const maxRangeError = validatePriceRange(maxAcceptablePrice, "maxAcceptablePrice");
+  if (maxRangeError) return { valid: false, error: maxRangeError, diagnostics };
+
+  if (side === "SELL") {
+    // SELL protection: check bestBid against floor (minAcceptablePrice)
+    if (minAcceptablePrice === undefined) {
+      // No floor protection requested
+      return { valid: true, diagnostics };
+    }
+
+    if (bestBid === null) {
+      return {
+        valid: false,
+        error: `SELL price protection: no bestBid available (NO_BOOK). ` +
+          `Cannot verify floor price ${minAcceptablePrice.toFixed(4)} (${(minAcceptablePrice * 100).toFixed(1)}¢)`,
+        diagnostics,
+      };
+    }
+
+    if (bestBid < minAcceptablePrice) {
+      return {
+        valid: false,
+        error: `SELL price protection: bestBid ${bestBid.toFixed(4)} (${(bestBid * 100).toFixed(1)}¢) ` +
+          `below minAcceptable ${minAcceptablePrice.toFixed(4)} (${(minAcceptablePrice * 100).toFixed(1)}¢). ` +
+          `Would sell too cheap.`,
+        diagnostics,
+      };
+    }
+
+    // SELL protection passed
+    return { valid: true, diagnostics };
+  } else {
+    // BUY protection: check bestAsk against cap (maxAcceptablePrice)
+    if (maxAcceptablePrice === undefined) {
+      // No cap protection requested
+      return { valid: true, diagnostics };
+    }
+
+    if (bestAsk === null) {
+      return {
+        valid: false,
+        error: `BUY price protection: no bestAsk available (NO_BOOK). ` +
+          `Cannot verify cap price ${maxAcceptablePrice.toFixed(4)} (${(maxAcceptablePrice * 100).toFixed(1)}¢)`,
+        diagnostics,
+      };
+    }
+
+    if (bestAsk > maxAcceptablePrice) {
+      return {
+        valid: false,
+        error: `BUY price protection: bestAsk ${bestAsk.toFixed(4)} (${(bestAsk * 100).toFixed(1)}¢) ` +
+          `exceeds maxAcceptable ${maxAcceptablePrice.toFixed(4)} (${(maxAcceptablePrice * 100).toFixed(1)}¢). ` +
+          `Would overpay.`,
+        diagnostics,
+      };
+    }
+
+    // BUY protection passed
+    return { valid: true, diagnostics };
+  }
+}
+
 export type PostOrderInput = {
   client: ClobClient;
   wallet?: Wallet; // Required for on-chain mode
@@ -47,7 +184,18 @@ export type PostOrderInput = {
   collateralTokenAddress?: string;
   collateralTokenDecimals?: number;
   collateralTokenId?: string;
+  /**
+   * Maximum acceptable price for BUY orders (cap protection).
+   * For BUY: If bestAsk > maxAcceptablePrice, reject (don't overpay).
+   * Should NOT be used for SELL orders - use minAcceptablePrice instead.
+   */
   maxAcceptablePrice?: number;
+  /**
+   * Minimum acceptable price for SELL orders (floor protection).
+   * For SELL: If bestBid < minAcceptablePrice, reject (don't dump too cheap).
+   * Should NOT be used for BUY orders - use maxAcceptablePrice instead.
+   */
+  minAcceptablePrice?: number;
   priority?: boolean; // For frontrunning - execute with higher priority
   targetGasPrice?: string; // Gas price of target transaction for frontrunning
   /**
@@ -336,6 +484,7 @@ async function postOrderClobInner(
     side,
     sizeUsd,
     maxAcceptablePrice,
+    minAcceptablePrice,
     logger,
   } = input;
   const settings = toOrderSubmissionSettings({
@@ -398,15 +547,27 @@ async function postOrderClobInner(
     );
   }
 
-  const bestPrice = parseFloat(levels[0].price);
-  if (
-    maxAcceptablePrice &&
-    ((isBuy && bestPrice > maxAcceptablePrice) ||
-      (!isBuy && bestPrice < maxAcceptablePrice))
-  ) {
-    throw new Error(
-      `Price protection: best price ${bestPrice} exceeds max acceptable ${maxAcceptablePrice}`,
+  // Extract best prices for price protection validation
+  const bestBid = orderBook.bids?.[0] ? parseFloat(orderBook.bids[0].price) : null;
+  const bestAsk = orderBook.asks?.[0] ? parseFloat(orderBook.asks[0].price) : null;
+
+  // Use the new validatePriceProtection helper for correct side-aware validation
+  const priceProtection = validatePriceProtection({
+    side,
+    tokenId,
+    bestBid,
+    bestAsk,
+    minAcceptablePrice,
+    maxAcceptablePrice,
+  });
+
+  if (!priceProtection.valid) {
+    // Log diagnostics for debugging
+    logger.warn(
+      `[CLOB] Price protection failed: ${priceProtection.error} ` +
+        `diagnostics=${JSON.stringify(priceProtection.diagnostics)}`,
     );
+    throw new Error(priceProtection.error ?? "Price protection failed");
   }
 
   const orderSide = isBuy ? Side.BUY : Side.SELL;

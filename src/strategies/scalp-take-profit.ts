@@ -1378,7 +1378,7 @@ export class ScalpTakeProfitStrategy {
         outcome: (position.side?.toUpperCase() as "YES" | "NO") || "YES",
         side: "SELL",
         sizeUsd: notionalUsd,
-        maxAcceptablePrice: effectiveLimitPrice,
+        minAcceptablePrice: effectiveLimitPrice, // For SELL: floor protection (don't dump too cheap)
         logger: this.logger,
         skipDuplicatePrevention: true,
       });

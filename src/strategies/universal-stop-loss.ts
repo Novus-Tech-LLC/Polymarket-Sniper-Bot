@@ -376,7 +376,7 @@ export class UniversalStopLossStrategy {
         outcome: "YES",
         side: "SELL",
         sizeUsd,
-        maxAcceptablePrice: bestBid * 0.9, // Accept up to 10% slippage for stop-loss
+        minAcceptablePrice: bestBid * 0.9, // Accept up to 10% slippage below current bid for stop-loss
         logger: this.logger,
         priority: true, // High priority for stop-loss
         skipDuplicatePrevention: true, // Stop-loss must bypass duplicate prevention
