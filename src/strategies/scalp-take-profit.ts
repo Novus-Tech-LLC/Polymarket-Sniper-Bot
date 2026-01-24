@@ -187,10 +187,21 @@ interface PriceHistoryEntry {
  * EXCEPTION - SUDDEN SPIKE: If price spikes massively in a short window
  * (e.g., +15% in 10 minutes), capture it immediately - such moves often reverse.
  *
- * ENTRY TIMES: This strategy relies on the PositionTracker's historical
- * entry time loading from the wallet activity API. On container restart,
- * entry times are fetched from actual purchase history, NOT container
- * start time. See PositionTracker.loadHistoricalEntryTimes() for details.
+ * ENTRY TIMES (STATELESS, SURVIVES RESTARTS):
+ * This strategy uses EntryMetaResolver to derive entry timestamps from the
+ * Polymarket trade history API. This is STATELESS - no disk persistence.
+ *
+ * WHY THIS MATTERS:
+ * Previously, entry times were tracked since container start. After container
+ * restarts/redeploys, the "time held" clock reset and the scalper missed valid
+ * take-profit opportunities on positions already in the green (e.g., showing
+ * "20min" when the position was actually held for hours/days).
+ *
+ * NOW: timeHeldSec is computed from actual trade history timestamps:
+ * - firstAcquiredAt: timestamp of the first BUY that contributed to position
+ * - timeHeldSec = now - firstAcquiredAt (stable across restarts)
+ *
+ * See EntryMetaResolver and Position.timeHeldSec for implementation details.
  */
 export const DEFAULT_SCALP_TAKE_PROFIT_CONFIG: ScalpTakeProfitConfig = {
   enabled: true,
@@ -349,31 +360,19 @@ export class ScalpTakeProfitStrategy {
    * Execute the scalp take-profit strategy
    * Returns number of positions scalped
    *
-   * SINGLE-FLIGHT: Skips if already running (returns 0)
+   * CRITICAL FIX: This method now uses timeHeldSec from trade history API instead of
+   * container uptime. Previously, after container restarts, the "time held" clock
+   * would reset and the scalper would miss valid take-profit opportunities.
+   * Now we derive entry timestamps from actual trade history, which survives restarts.
    */
   async execute(): Promise<number> {
     if (!this.config.enabled) {
       return 0;
     }
 
-    // Single-flight guard: prevent concurrent execution
-    if (this.inFlight) {
-      this.logger.debug("[ScalpTakeProfit] Skipped - already in flight");
-      return 0;
-    }
-
-    this.inFlight = true;
-    try {
-      return await this.executeInternal();
-    } finally {
-      this.inFlight = false;
-    }
-  }
-
-  /**
-   * Internal execution logic (called by execute() with in-flight guard)
-   */
-  private async executeInternal(): Promise<number> {
+    // CRITICAL: Get positions enriched with entry metadata from trade history API
+    // This provides accurate timeHeldSec that survives container restarts
+    const enrichedPositions = await this.positionTracker.enrichPositionsWithEntryMeta();
     const positions = this.positionTracker.getPositions();
     let scalpedCount = 0;
     const now = Date.now();
@@ -427,20 +426,21 @@ export class ScalpTakeProfitStrategy {
         );
       }
 
-      // Log profitable positions at DEBUG level
+      // Log profitable positions at DEBUG level with STATELESS timeHeldSec from trade history
       if (profitable.length > 0) {
         for (const p of profitable.slice(0, 10)) {
           // Top 10
-          const entryTime = this.positionTracker.getPositionEntryTime(
-            p.marketId,
-            p.tokenId,
-          );
-          const holdMin = entryTime
-            ? Math.round((now - entryTime) / 60000)
+          // Find enriched position to get timeHeldSec from trade history
+          const enriched = enrichedPositions.find(ep => ep.tokenId === p.tokenId);
+          const holdMin = enriched?.timeHeldSec !== undefined
+            ? Math.round(enriched.timeHeldSec / 60)
             : "?";
+          const entryPriceCents = enriched?.avgEntryPriceCents !== undefined
+            ? enriched.avgEntryPriceCents.toFixed(1)
+            : (p.entryPrice * 100).toFixed(1);
           this.logger.debug(
             `[ScalpTakeProfit] 💰 ${p.tokenId.slice(0, 12)}... +${p.pnlPct.toFixed(1)}% ($${p.pnlUsd.toFixed(2)}) | ` +
-              `entry=${(p.entryPrice * 100).toFixed(1)}¢ current=${(p.currentPrice * 100).toFixed(1)}¢ | ` +
+              `entry=${entryPriceCents}¢ current=${(p.currentPrice * 100).toFixed(1)}¢ | ` +
               `held=${holdMin}min | size=${p.size.toFixed(2)}`,
           );
         }
@@ -453,6 +453,7 @@ export class ScalpTakeProfitStrategy {
     }
 
     // Log highly profitable positions that should be candidates for scalping
+    // CRITICAL: Uses timeHeldSec from trade history API, not container uptime
     const highlyProfitable = this.positionTracker.getActivePositionsAboveTarget(
       this.config.targetProfitPct,
     );
@@ -462,12 +463,10 @@ export class ScalpTakeProfitStrategy {
           highlyProfitable
             .slice(0, 5)
             .map((p) => {
-              const entryTime = this.positionTracker.getPositionEntryTime(
-                p.marketId,
-                p.tokenId,
-              );
-              const holdMin = entryTime
-                ? Math.round((now - entryTime) / 60000)
+              // Find enriched position to get timeHeldSec from trade history
+              const enriched = enrichedPositions.find(ep => ep.tokenId === p.tokenId);
+              const holdMin = enriched?.timeHeldSec !== undefined
+                ? Math.round(enriched.timeHeldSec / 60)
                 : "?";
               return `${p.tokenId.slice(0, 8)}...+${p.pnlPct.toFixed(1)}%/$${p.pnlUsd.toFixed(2)} (${holdMin}min)`;
             })
@@ -476,7 +475,8 @@ export class ScalpTakeProfitStrategy {
       );
     }
 
-    for (const position of positions) {
+    // Iterate over ENRICHED positions to use trade history-derived timeHeldSec
+    for (const position of enrichedPositions) {
       const positionKey = `${position.marketId}-${position.tokenId}`;
 
       // Skip if already exited
@@ -571,34 +571,55 @@ export class ScalpTakeProfitStrategy {
       );
     }
 
-    // Clean up stale tracking data
-    this.cleanupStaleData(positions);
+    // Clean up stale tracking data (use enrichedPositions since they include all ACTIVE positions)
+    this.cleanupStaleData(enrichedPositions);
 
     return scalpedCount;
   }
 
   /**
    * Evaluate whether a position should be scalped
+   *
+   * CRITICAL: Uses position.timeHeldSec from trade history API when available.
+   * This is stateless and survives container restarts. Falls back to container
+   * uptime only when trade history cannot be resolved (legacy behavior).
    */
   private async evaluateScalpExit(
     position: Position,
     now: number,
   ): Promise<{ shouldExit: boolean; reason?: string }> {
-    const entryTime = this.positionTracker.getPositionEntryTime(
-      position.marketId,
-      position.tokenId,
-    );
+    // CRITICAL FIX: Use timeHeldSec from trade history API (stateless, survives restarts)
+    // Falls back to container uptime only if trade history is unavailable
+    let holdMinutes: number;
+    let hasTradeHistoryTime = false;
 
-    // If no entry time is available, treat position as "old enough" (assume external purchase)
-    // Use a very large holdMinutes value so all hold time checks pass
-    // This is safer than blocking - if someone bought externally, they want to sell when profitable
-    const holdMinutes = entryTime
-      ? (now - entryTime) / (60 * 1000)
-      : ScalpTakeProfitStrategy.NO_ENTRY_TIME_HOLD_MINUTES;
+    if (position.timeHeldSec !== undefined) {
+      // Use stateless timeHeldSec from trade history API (preferred)
+      holdMinutes = position.timeHeldSec / 60;
+      hasTradeHistoryTime = true;
+    } else {
+      // Fallback to legacy container uptime-based tracking
+      // WHY THIS IS WRONG: After container restart, this clock resets to 0.
+      // We only use this as fallback when trade history API is unavailable.
+      const entryTime = this.positionTracker.getPositionEntryTime(
+        position.marketId,
+        position.tokenId,
+      );
 
-    if (!entryTime) {
+      if (entryTime) {
+        holdMinutes = (now - entryTime) / (60 * 1000);
+      } else {
+        // If no entry time at all, treat position as "old enough" (assume external purchase)
+        // Use a very large holdMinutes value so all hold time checks pass
+        holdMinutes = ScalpTakeProfitStrategy.NO_ENTRY_TIME_HOLD_MINUTES;
+      }
+    }
+
+    // Log if we couldn't get trade history time (important diagnostic)
+    if (!hasTradeHistoryTime && holdMinutes < ScalpTakeProfitStrategy.NO_ENTRY_TIME_HOLD_MINUTES) {
       this.logger.debug(
-        `[ScalpTakeProfit] Position ${position.tokenId.slice(0, 8)}... has no entry time - treating as old enough to scalp`,
+        `[ScalpTakeProfit] Position ${position.tokenId.slice(0, 8)}... using FALLBACK entry time (container uptime). ` +
+          `Trade history not available - timeHeldSec may be inaccurate after restarts.`,
       );
     }
 
@@ -1037,17 +1058,30 @@ export class ScalpTakeProfitStrategy {
 
   /**
    * Update statistics after a successful scalp
+   * Uses position.timeHeldSec from trade history API when available (preferred)
    */
   private updateStats(position: Position): void {
     this.stats.scalpCount++;
     this.stats.totalProfitUsd += position.pnlUsd;
 
-    const entryTime = this.positionTracker.getPositionEntryTime(
-      position.marketId,
-      position.tokenId,
-    );
-    if (entryTime) {
-      const holdMinutes = (Date.now() - entryTime) / (60 * 1000);
+    // Prefer stateless timeHeldSec from trade history API
+    let holdMinutes: number | undefined;
+
+    if (position.timeHeldSec !== undefined) {
+      // Use stateless timeHeldSec from trade history API (survives restarts)
+      holdMinutes = position.timeHeldSec / 60;
+    } else {
+      // Fallback to container uptime-based tracking
+      const entryTime = this.positionTracker.getPositionEntryTime(
+        position.marketId,
+        position.tokenId,
+      );
+      if (entryTime) {
+        holdMinutes = (Date.now() - entryTime) / (60 * 1000);
+      }
+    }
+
+    if (holdMinutes !== undefined) {
       // Running average of hold time
       this.stats.avgHoldMinutes =
         (this.stats.avgHoldMinutes * (this.stats.scalpCount - 1) +
