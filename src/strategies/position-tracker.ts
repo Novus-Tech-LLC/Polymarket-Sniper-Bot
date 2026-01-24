@@ -1152,7 +1152,12 @@ export class PositionTracker {
   }
 
   /**
-   * Create an immutable portfolio snapshot from current positions.
+   * @deprecated This method is no longer called directly.
+   * Snapshot creation is now done via buildCandidateSnapshot() as part of the
+   * two-phase commit pattern in refresh(). This method is kept for reference
+   * and may be removed in a future cleanup.
+   *
+   * Legacy: Create an immutable portfolio snapshot from current positions.
    * Called after each refresh to ensure strategies see consistent data.
    *
    * INVARIANT CHECK: ACTIVE_COLLAPSE_BUG
