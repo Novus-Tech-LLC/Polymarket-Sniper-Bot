@@ -100,6 +100,45 @@ export const DEFAULT_SIMPLE_HEDGING_CONFIG: SimpleSmartHedgingConfig = {
 };
 
 /**
+ * Cooldown duration for failed liquidation attempts (5 minutes).
+ * 
+ * RATIONALE:
+ * - After a sell/hedge fails (due to insufficient balance, allowance, or liquidity),
+ *   retrying immediately will almost certainly fail again.
+ * - 5 minutes is long enough for external conditions to potentially change
+ *   (e.g., deposits, approvals, or liquidity improvements).
+ * - This prevents repeated attempts that spam logs, waste resources, and may
+ *   trigger rate limits.
+ * 
+ * WHEN APPLIED:
+ * - When a sell order fails after hedge fails (both attempts exhausted)
+ * - When a liquidation order fails in force-liquidation scenario
+ * - When a liquidation fails in no-hedge window
+ */
+const FAILED_LIQUIDATION_COOLDOWN_MS = 5 * 60 * 1000;
+
+/**
+ * Maximum number of entries to keep in the failedLiquidationCooldowns map.
+ * Prevents unbounded memory growth if positions are removed through other means
+ * (e.g., sold externally, redeemed, manually removed) before their cooldown expires.
+ */
+const MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES = 1000;
+
+/**
+ * Threshold for detecting essentially resolved markets.
+ * When the opposite side price >= this threshold, the market is
+ * considered resolved and liquidation is skipped in favor of redemption.
+ */
+const MARKET_RESOLVED_THRESHOLD = 0.95;
+
+/**
+ * Threshold for determining hedge is too expensive.
+ * When the opposite side price >= this threshold but < MARKET_RESOLVED_THRESHOLD,
+ * hedging is skipped but liquidation may still be attempted.
+ */
+const HEDGE_TOO_EXPENSIVE_THRESHOLD = 0.9;
+
+/**
  * Simple Smart Hedging Strategy
  */
 export class SimpleSmartHedgingStrategy {
@@ -110,6 +149,10 @@ export class SimpleSmartHedgingStrategy {
 
   // Track what we've already hedged to avoid double-hedging
   private hedgedPositions: Set<string> = new Set();
+
+  // Track failed liquidation attempts with cooldown to prevent repeated retries
+  // Key: position key (marketId-tokenId), Value: timestamp when cooldown expires
+  private failedLiquidationCooldowns: Map<string, number> = new Map();
 
   constructor(config: {
     client: ClobClient;
@@ -136,6 +179,9 @@ export class SimpleSmartHedgingStrategy {
       return 0;
     }
 
+    // Clean up expired cooldown entries periodically to prevent memory leaks
+    this.cleanupExpiredCooldowns();
+
     const positions = this.positionTracker.getPositions();
     let actionsCount = 0;
     const now = Date.now();
@@ -146,6 +192,20 @@ export class SimpleSmartHedgingStrategy {
       // Skip if already hedged
       if (this.hedgedPositions.has(key)) {
         continue;
+      }
+
+      // Skip if in failed liquidation cooldown (prevents repeated attempts)
+      const cooldownUntil = this.failedLiquidationCooldowns.get(key);
+      if (cooldownUntil && now < cooldownUntil) {
+        const remainingSec = Math.ceil((cooldownUntil - now) / 1000);
+        this.logger.debug(
+          `[SimpleHedging] ⏳ Skipping position in liquidation cooldown: ${key} (${remainingSec}s remaining)`,
+        );
+        continue;
+      }
+      // Clean up expired cooldown entries (for current position)
+      if (cooldownUntil && now >= cooldownUntil) {
+        this.failedLiquidationCooldowns.delete(key);
       }
 
       // Skip if not losing enough
@@ -209,6 +269,12 @@ export class SimpleSmartHedgingStrategy {
             if (sold) {
               actionsCount++;
               this.hedgedPositions.add(key);
+            } else {
+              // Sell failed in no-hedge window - add to cooldown
+              this.failedLiquidationCooldowns.set(key, now + FAILED_LIQUIDATION_COOLDOWN_MS);
+              this.logger.warn(
+                `[SimpleHedging] ⏳ Liquidation failed in no-hedge window - position on cooldown for 5 minutes: ${key}`,
+              );
             }
           } else {
             this.logger.debug(
@@ -251,6 +317,12 @@ export class SimpleSmartHedgingStrategy {
         if (sold) {
           actionsCount++;
           this.hedgedPositions.add(key);
+        } else {
+          // Sell failed - add to cooldown to prevent repeated attempts
+          this.failedLiquidationCooldowns.set(key, now + FAILED_LIQUIDATION_COOLDOWN_MS);
+          this.logger.warn(
+            `[SimpleHedging] ⏳ Liquidation failed - position on cooldown for 5 minutes: ${key}`,
+          );
         }
         continue;
       }
@@ -260,19 +332,36 @@ export class SimpleSmartHedgingStrategy {
         `[SimpleHedging] 🎯 Position losing ${lossPct.toFixed(1)}% - attempting hedge`,
       );
 
-      const hedged = await this.executeHedge(position);
-      if (hedged) {
+      const hedgeResult = await this.executeHedge(position);
+      if (hedgeResult.success) {
         actionsCount++;
         this.hedgedPositions.add(key);
         continue;
       }
 
+      // If market is essentially resolved (opposite side >= 95¢), skip liquidation
+      // The position should be redeemed, not sold at a loss
+      if (hedgeResult.reason === "MARKET_RESOLVED") {
+        this.logger.info(
+          `[SimpleHedging] 📋 Position marked as resolved - skipping liquidation, awaiting redemption: ${key}`,
+        );
+        // Add to hedged positions to prevent future attempts (will be redeemed instead)
+        this.hedgedPositions.add(key);
+        continue;
+      }
+
       // Hedge failed - liquidate to stop bleeding
-      this.logger.warn(`[SimpleHedging] ⚠️ Hedge failed - liquidating instead`);
+      this.logger.warn(`[SimpleHedging] ⚠️ Hedge failed (${hedgeResult.reason}) - liquidating instead`);
       const sold = await this.sellPosition(position);
       if (sold) {
         actionsCount++;
         this.hedgedPositions.add(key);
+      } else {
+        // Both hedge and sell failed - add to cooldown to prevent repeated attempts
+        this.failedLiquidationCooldowns.set(key, now + FAILED_LIQUIDATION_COOLDOWN_MS);
+        this.logger.warn(
+          `[SimpleHedging] ⏳ Hedge and liquidation both failed - position on cooldown for 5 minutes: ${key}`,
+        );
       }
     }
 
@@ -282,8 +371,13 @@ export class SimpleSmartHedgingStrategy {
   /**
    * Execute a hedge - buy the opposite side
    * Supports all binary market types: YES/NO, Over/Under, Team A/Team B, etc.
+   * 
+   * @returns Object with success status and reason for failure
+   *          - reason "MARKET_RESOLVED" means opposite side >= 95¢, skip liquidation
+   *          - reason "TOO_EXPENSIVE" means opposite side >= 90¢ but < 95¢, try liquidation
+   *          - other reasons indicate hedge attempt failed, try liquidation
    */
-  private async executeHedge(position: Position): Promise<boolean> {
+  private async executeHedge(position: Position): Promise<{ success: boolean; reason?: string }> {
     const currentSide = position.side?.toUpperCase();
 
     // Get the opposite token (works for any binary market)
@@ -296,7 +390,7 @@ export class SimpleSmartHedgingStrategy {
       this.logger.warn(
         `[SimpleHedging] Could not find opposite token for ${currentSide}`,
       );
-      return false;
+      return { success: false, reason: "NO_OPPOSITE_TOKEN" };
     }
 
     const { tokenId: oppositeTokenId, outcome: oppositeSide } = oppositeInfo;
@@ -307,20 +401,28 @@ export class SimpleSmartHedgingStrategy {
       const orderbook = await this.client.getOrderBook(oppositeTokenId);
       if (!orderbook.asks || orderbook.asks.length === 0) {
         this.logger.warn(`[SimpleHedging] No liquidity for ${oppositeSide}`);
-        return false;
+        return { success: false, reason: "NO_LIQUIDITY" };
       }
       oppositePrice = parseFloat(orderbook.asks[0].price);
     } catch {
       this.logger.warn(`[SimpleHedging] Failed to get opposite price`);
-      return false;
+      return { success: false, reason: "ORDERBOOK_ERROR" };
     }
 
     // If opposite is too expensive (>90¢), our side is probably losing - just sell
-    if (oppositePrice >= 0.9) {
+    // EXCEPTION: If opposite is >= 95¢, market is essentially resolved - don't try to sell
+    if (oppositePrice >= MARKET_RESOLVED_THRESHOLD) {
+      this.logger.info(
+        `[SimpleHedging] ${oppositeSide} at ${(oppositePrice * 100).toFixed(0)}¢ - market essentially resolved, skipping (await redemption)`,
+      );
+      // Return special indicator that this is a resolved market, not a hedge failure
+      return { success: false, reason: "MARKET_RESOLVED" };
+    }
+    if (oppositePrice >= HEDGE_TOO_EXPENSIVE_THRESHOLD) {
       this.logger.warn(
         `[SimpleHedging] ${oppositeSide} at ${(oppositePrice * 100).toFixed(0)}¢ - too expensive to hedge`,
       );
-      return false;
+      return { success: false, reason: "TOO_EXPENSIVE" };
     }
 
     // Calculate hedge size
@@ -344,7 +446,7 @@ export class SimpleSmartHedgingStrategy {
       this.logger.debug(
         `[SimpleHedging] Hedge $${hedgeUsd.toFixed(2)} below min $${this.config.minHedgeUsd}`,
       );
-      return false;
+      return { success: false, reason: "BELOW_MIN_HEDGE" };
     }
 
     // Calculate expected outcomes
@@ -363,7 +465,7 @@ export class SimpleSmartHedgingStrategy {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
       this.logger.error(`[SimpleHedging] No wallet - cannot hedge`);
-      return false;
+      return { success: false, reason: "NO_WALLET" };
     }
 
     try {
@@ -386,18 +488,18 @@ export class SimpleSmartHedgingStrategy {
 
       if (result.status === "submitted") {
         this.logger.info(`[SimpleHedging] ✅ Hedge executed successfully`);
-        return true;
+        return { success: true };
       }
 
       this.logger.warn(
         `[SimpleHedging] ⚠️ Hedge order not filled: ${result.reason ?? "unknown"}`,
       );
-      return false;
+      return { success: false, reason: result.reason ?? "ORDER_NOT_FILLED" };
     } catch (err) {
       this.logger.error(
         `[SimpleHedging] ❌ Hedge failed: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return false;
+      return { success: false, reason: "HEDGE_ERROR" };
     }
   }
 
@@ -529,12 +631,57 @@ export class SimpleSmartHedgingStrategy {
   }
 
   /**
+   * Clean up expired cooldown entries to prevent unbounded memory growth.
+   * 
+   * This handles cases where positions are removed through other means
+   * (e.g., sold externally, redeemed, manually removed) before their
+   * cooldown expires. Without cleanup, entries would accumulate indefinitely.
+   * 
+   * Strategy:
+   * 1. Remove all entries with expired timestamps
+   * 2. If still over max size, remove oldest entries
+   */
+  private cleanupExpiredCooldowns(): void {
+    const now = Date.now();
+    let expiredCount = 0;
+
+    // First pass: remove all expired entries
+    for (const [key, expiresAt] of this.failedLiquidationCooldowns) {
+      if (now >= expiresAt) {
+        this.failedLiquidationCooldowns.delete(key);
+        expiredCount++;
+      }
+    }
+
+    // Second pass: if still over max size, remove oldest entries
+    if (this.failedLiquidationCooldowns.size > MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES) {
+      const entries = Array.from(this.failedLiquidationCooldowns.entries());
+      // Sort by expiration time (oldest first)
+      entries.sort((a, b) => a[1] - b[1]);
+      
+      const toRemove = entries.length - MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES;
+      for (let i = 0; i < toRemove; i++) {
+        this.failedLiquidationCooldowns.delete(entries[i][0]);
+      }
+      
+      this.logger.debug(
+        `[SimpleHedging] Cleaned up ${expiredCount} expired + ${toRemove} oldest cooldown entries (max: ${MAX_FAILED_LIQUIDATION_COOLDOWN_ENTRIES})`,
+      );
+    } else if (expiredCount > 0) {
+      this.logger.debug(
+        `[SimpleHedging] Cleaned up ${expiredCount} expired cooldown entries`,
+      );
+    }
+  }
+
+  /**
    * Get strategy stats
    */
-  getStats(): { enabled: boolean; hedgedCount: number } {
+  getStats(): { enabled: boolean; hedgedCount: number; failedLiquidationCooldownCount: number } {
     return {
       enabled: this.config.enabled,
       hedgedCount: this.hedgedPositions.size,
+      failedLiquidationCooldownCount: this.failedLiquidationCooldowns.size,
     };
   }
 

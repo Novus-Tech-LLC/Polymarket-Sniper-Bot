@@ -454,7 +454,10 @@ export class PositionTracker {
                   }
                 } else {
                   // Calculate settlement price based on whether position won or lost
-                  currentPrice = side === winningOutcome ? 1.0 : 0.0;
+                  // Normalize both strings for comparison (case-insensitive, trimmed)
+                  const normalizedSide = side.toLowerCase().trim();
+                  const normalizedWinner = winningOutcome.toLowerCase().trim();
+                  currentPrice = normalizedSide === normalizedWinner ? 1.0 : 0.0;
                   resolvedCount++;
 
                   // Only log on first resolution (not cached) to reduce noise
@@ -536,7 +539,10 @@ export class PositionTracker {
                   // Market is confirmed resolved - mark as redeemable
                   finalRedeemable = true;
                   // Adjust current price to exact settlement price based on outcome
-                  currentPrice = side === winningOutcome ? 1.0 : 0.0;
+                  // Normalize both strings for comparison (case-insensitive, trimmed)
+                  const normalizedSide = side.toLowerCase().trim();
+                  const normalizedWinner = winningOutcome.toLowerCase().trim();
+                  currentPrice = normalizedSide === normalizedWinner ? 1.0 : 0.0;
                   resolvedCount++;
                   activeCount--; // Was counted as active, now resolved
                   this.logger.info(

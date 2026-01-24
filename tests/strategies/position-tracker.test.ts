@@ -323,21 +323,28 @@ describe("PositionTracker Multi-Outcome Market Support", () => {
     assert.strictEqual(pnlPct, -100, "P&L should be -100%");
   });
 
-  test("Outcome comparison is case-sensitive", () => {
-    // Multi-outcome market outcomes should match exactly (case-sensitive)
+  test("Outcome comparison is case-insensitive", () => {
+    // Multi-outcome market outcomes should match case-insensitively
+    // This was changed from case-sensitive to case-insensitive to fix
+    // a bug where "Bucks" vs "bucks" caused winning positions to show as 0% PnL
     const positionSide = "Medjedovic";
     const winningOutcome1 = "Medjedovic";
     const winningOutcome2 = "medjedovic";
 
+    // Both should match when normalized to lowercase
+    const normalizedSide = positionSide.toLowerCase().trim();
+    const normalizedWinner1 = winningOutcome1.toLowerCase().trim();
+    const normalizedWinner2 = winningOutcome2.toLowerCase().trim();
+
     assert.strictEqual(
-      positionSide === winningOutcome1,
+      normalizedSide === normalizedWinner1,
       true,
       "Exact match should succeed",
     );
     assert.strictEqual(
-      positionSide === winningOutcome2,
-      false,
-      "Case-different match should fail",
+      normalizedSide === normalizedWinner2,
+      true,
+      "Case-different match should now succeed (case-insensitive)",
     );
   });
 });
