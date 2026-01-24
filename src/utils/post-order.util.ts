@@ -127,19 +127,28 @@ export async function postOrder(
 
 /**
  * Post order via on-chain execution (bypasses CLOB API)
+ *
+ * ⚠️ IMPORTANT: On-chain trading mode is EXPERIMENTAL and NOT FULLY IMPLEMENTED.
+ *
+ * The on-chain executor can verify balances and approvals, but cannot actually
+ * execute trades because it requires signed maker orders from the CLOB API.
+ *
+ * For trading (BUY/SELL), use TRADE_MODE=clob instead.
+ *
+ * Redemption of resolved positions works separately via the AutoRedeem strategy
+ * which directly calls the CTF contract's redeemPositions() function.
  */
 async function postOrderOnChain(
   input: PostOrderInput,
 ): Promise<OrderSubmissionResult> {
-  const {
-    wallet,
-    tokenId,
-    outcome,
-    side,
-    sizeUsd,
-    maxAcceptablePrice,
-    logger,
-  } = input;
+  const { wallet, tokenId, side, sizeUsd, logger } = input;
+
+  // Emit a clear warning about on-chain mode limitations
+  logger.warn(
+    `[ONCHAIN] ⚠️ TRADE_MODE=onchain does NOT support ${side} orders. ` +
+      `On-chain trading requires signed maker orders (not implemented). ` +
+      `Use TRADE_MODE=clob for trading. Redemption of resolved positions works separately via AutoRedeem.`,
+  );
 
   const liveTradingEnabled = isLiveTradingEnabled();
   if (!liveTradingEnabled) {
@@ -153,17 +162,17 @@ async function postOrderOnChain(
   }
 
   logger.info(
-    `[ONCHAIN] Executing on-chain order: ${side} ${sizeUsd} USD of token ${tokenId}`,
+    `[ONCHAIN] Attempting on-chain order: ${side} ${sizeUsd} USD of token ${tokenId.slice(0, 16)}...`,
   );
 
   try {
     const result = await executeOnChainOrder({
       wallet,
       tokenId,
-      outcome,
+      outcome: input.outcome,
       side,
       sizeUsd,
-      maxAcceptablePrice,
+      maxAcceptablePrice: input.maxAcceptablePrice,
       collateralTokenAddress: input.collateralTokenAddress,
       collateralTokenDecimals: input.collateralTokenDecimals,
       logger,
@@ -180,7 +189,16 @@ async function postOrderOnChain(
         orderId: result.transactionHash,
       };
     } else {
-      logger.error(`[ONCHAIN] Order failed: ${result.error ?? result.reason}`);
+      // Provide actionable guidance for NOT_IMPLEMENTED error
+      if (result.reason === "NOT_IMPLEMENTED") {
+        logger.error(
+          `[ONCHAIN] ❌ On-chain ${side} not supported. Switch to TRADE_MODE=clob for trading.`,
+        );
+      } else {
+        logger.error(
+          `[ONCHAIN] Order failed: ${result.error ?? result.reason}`,
+        );
+      }
       return {
         status: "failed",
         reason: result.reason ?? "ONCHAIN_EXECUTION_FAILED",
@@ -212,13 +230,13 @@ async function postOrderClob(
   // === GLOBAL MINIMUM BUY PRICE CHECK ===
   // Prevents buying extremely low-probability "loser" positions (e.g., 3¢)
   // This is a SAFETY NET that catches orders from any source (ARB, copy trading, etc.)
-  // 
+  //
   // EXCEPTION: If SCALP_LOW_PRICE_THRESHOLD is set, allow buys at or below that threshold.
   // This enables scalping volatile low-price positions - one setting controls everything.
   // Example: SCALP_LOW_PRICE_THRESHOLD=0.20 allows buying at 20¢ or below.
   const effectiveMinBuyPrice = input.minBuyPrice ?? GLOBAL_MIN_BUY_PRICE;
   const scalpThreshold = input.scalpLowPriceThreshold ?? 0;
-  
+
   if (
     side === "BUY" &&
     !input.skipMinBuyPriceCheck &&
@@ -226,8 +244,9 @@ async function postOrderClob(
     effectiveMinBuyPrice > 0 // Skip check if minBuyPrice is 0 (uncapped)
   ) {
     // Allow buys at or below the scalp threshold (for low-price scalping)
-    const allowedByScalpThreshold = scalpThreshold > 0 && maxAcceptablePrice <= scalpThreshold;
-    
+    const allowedByScalpThreshold =
+      scalpThreshold > 0 && maxAcceptablePrice <= scalpThreshold;
+
     if (!allowedByScalpThreshold && maxAcceptablePrice < effectiveMinBuyPrice) {
       logger.warn(
         `[CLOB] 🚫 Order blocked (LOSER_POSITION): BUY price ${(maxAcceptablePrice * 100).toFixed(1)}¢ < ${(effectiveMinBuyPrice * 100).toFixed(0)}¢ min. ` +

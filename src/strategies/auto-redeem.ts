@@ -473,6 +473,11 @@ export class AutoRedeemStrategy {
 
   /**
    * Redeem a single position by calling the CTF contract
+   *
+   * IMPORTANT: Polymarket CTF redemption requires:
+   * 1. The condition must be resolved on-chain (payoutDenominator > 0)
+   * 2. You must hold tokens for the winning outcome
+   * 3. IndexSets must match your position (1=YES, 2=NO for binary markets)
    */
   private async redeemPosition(position: Position): Promise<RedemptionResult> {
     // Access wallet from client - this is a common pattern in the codebase
@@ -511,11 +516,84 @@ export class AutoRedeemStrategy {
         wallet.address,
       )) as bigint;
 
-      // For Polymarket, the conditionId is the marketId
+      // For Polymarket, the conditionId is the marketId (from API's conditionId field)
       // The parentCollectionId is always bytes32(0) for top-level positions
       const parentCollectionId =
         "0x0000000000000000000000000000000000000000000000000000000000000000";
       const conditionId = position.marketId;
+
+      // Validate conditionId format (should be a bytes32 hex string)
+      if (
+        !conditionId ||
+        !conditionId.startsWith("0x") ||
+        conditionId.length !== 66
+      ) {
+        return {
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          error: `Invalid conditionId format: ${conditionId} (expected 0x + 64 hex chars)`,
+        };
+      }
+
+      // Check if condition is resolved on-chain by checking payoutDenominator
+      // payoutDenominator > 0 means the condition has been resolved
+      let payoutDenominator: bigint;
+      try {
+        payoutDenominator = (await ctfContract.payoutDenominator(
+          conditionId,
+        )) as bigint;
+        this.logger.debug(
+          `[AutoRedeem] Condition ${conditionId.slice(0, 16)}... payoutDenominator=${payoutDenominator}`,
+        );
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        return {
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          error: `Failed to check condition resolution status: ${errMsg}`,
+        };
+      }
+
+      if (payoutDenominator === 0n) {
+        return {
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          error: `Condition not resolved on-chain yet (payoutDenominator=0). Market may be marked redeemable in API but not yet resolved on blockchain.`,
+        };
+      }
+
+      // Check token balance for this position
+      // The tokenId from the position is the ERC1155 token ID
+      let tokenBalance: bigint;
+      try {
+        tokenBalance = (await ctfContract.balanceOf(
+          wallet.address,
+          position.tokenId,
+        )) as bigint;
+        this.logger.debug(
+          `[AutoRedeem] Token ${position.tokenId.slice(0, 16)}... balance=${tokenBalance}`,
+        );
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        return {
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          error: `Failed to check token balance: ${errMsg}`,
+        };
+      }
+
+      if (tokenBalance === 0n) {
+        return {
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          error: `No token balance to redeem (balance=0). Position may already be redeemed.`,
+        };
+      }
 
       // Determine index sets dynamically based on the position's side.
       // For multi-outcome markets, `position.side` can be > 2 (e.g., 3, 4, ...).
