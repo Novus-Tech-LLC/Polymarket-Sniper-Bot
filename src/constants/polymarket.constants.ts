@@ -113,6 +113,9 @@ export const POLYMARKET_API = {
   /** Profile API - Get user's proxy wallet address (public, no auth needed) */
   PROFILE_ENDPOINT: (user: string) =>
     `${POLYMARKET_API.DATA_API_BASE_URL}/profile?address=${user}`,
+  /** Gamma Public Profile API - Get proxy wallet address from Gamma (alternative endpoint) */
+  GAMMA_PROFILE_ENDPOINT: (user: string) =>
+    `${POLYMARKET_API.GAMMA_API_BASE_URL}/public-profile?address=${user}`,
   /** Trades API - User trade history with timestamps (more efficient than activity for BUY trades) */
   TRADES_ENDPOINT: (user: string) =>
     `${POLYMARKET_API.DATA_API_BASE_URL}/trades?user=${user}`,
