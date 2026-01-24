@@ -596,7 +596,13 @@ export class PositionTracker {
         this.holdingAddressCacheMs = now;
 
         // Log once per refresh in required format
-        if (this.logDeduper.shouldLog("Tracker:holding_address", HEARTBEAT_INTERVAL_MS, proxyWallet)) {
+        if (
+          this.logDeduper.shouldLog(
+            "Tracker:holding_address",
+            HEARTBEAT_INTERVAL_MS,
+            proxyWallet,
+          )
+        ) {
           this.logger.info(
             `[PositionTracker] wallet=${signerAddress} proxy=${proxyWallet} using=${proxyWallet}`,
           );
@@ -608,7 +614,12 @@ export class PositionTracker {
       this.cachedHoldingAddress = signerAddress;
       this.holdingAddressCacheMs = now;
 
-      if (this.logDeduper.shouldLog("Tracker:holding_address_eoa", HEARTBEAT_INTERVAL_MS)) {
+      if (
+        this.logDeduper.shouldLog(
+          "Tracker:holding_address_eoa",
+          HEARTBEAT_INTERVAL_MS,
+        )
+      ) {
         this.logger.info(
           `[PositionTracker] wallet=${signerAddress} proxy=none using=${signerAddress}`,
         );
@@ -1363,29 +1374,39 @@ export class PositionTracker {
 
       // Build positions URL and log it once per refresh
       const positionsUrl = POLYMARKET_API.POSITIONS_ENDPOINT(holdingAddress);
-      if (this.logDeduper.shouldLog("Tracker:positions_url", HEARTBEAT_INTERVAL_MS, positionsUrl)) {
+      if (
+        this.logDeduper.shouldLog(
+          "Tracker:positions_url",
+          HEARTBEAT_INTERVAL_MS,
+          positionsUrl,
+        )
+      ) {
         this.logger.info(`[PositionTracker] positions_url=${positionsUrl}`);
       }
 
-      let apiPositions = await httpGet<ApiPosition[]>(
-        positionsUrl,
-        { timeout: PositionTracker.API_TIMEOUT_MS },
-      );
+      let apiPositions = await httpGet<ApiPosition[]>(positionsUrl, {
+        timeout: PositionTracker.API_TIMEOUT_MS,
+      });
 
       // ADDRESS PROBE: If we got 0-2 positions and address probe hasn't been done,
       // try both EOA and proxy separately and pick whichever returns more positions.
       // This handles the case where we're using the wrong address.
       const initialPositionCount = apiPositions?.length ?? 0;
-      if (initialPositionCount <= 2 && !this.addressProbeCompleted && this.cachedEOAAddress && this.cachedHoldingAddress) {
+      if (
+        initialPositionCount <= 2 &&
+        !this.addressProbeCompleted &&
+        this.cachedEOAAddress &&
+        this.cachedHoldingAddress
+      ) {
         const eoaAddress = this.cachedEOAAddress;
         const proxyAddress = this.cachedHoldingAddress;
-        
+
         // Only probe if EOA and proxy are different
         if (eoaAddress !== proxyAddress) {
           this.logger.info(
             `[PositionTracker] Low position count (${initialPositionCount}), running address probe...`,
           );
-          
+
           try {
             // Fetch from both addresses
             const [eoaPositions, proxyPositions] = await Promise.all([
@@ -1398,18 +1419,18 @@ export class PositionTracker {
                 { timeout: PositionTracker.API_TIMEOUT_MS },
               ).catch(() => [] as ApiPosition[]),
             ]);
-            
+
             const eoaCount = eoaPositions?.length ?? 0;
             const proxyCount = proxyPositions?.length ?? 0;
-            
+
             // Determine which address to use (pick whichever returned more positions)
             const selectedAddress = eoaCount >= proxyCount ? "eoa" : "proxy";
-            
+
             // Log the probe results with the actual selection
             this.logger.info(
               `[PositionTracker] address_probe: eoa_positions=${eoaCount} proxy_positions=${proxyCount} selected=${selectedAddress}`,
             );
-            
+
             // Use whichever returned more positions
             if (eoaCount >= proxyCount && eoaCount > initialPositionCount) {
               apiPositions = eoaPositions;
@@ -1425,7 +1446,7 @@ export class PositionTracker {
                 `[PositionTracker] Address probe confirmed proxy (${proxyCount} positions vs ${eoaCount} EOA)`,
               );
             }
-            
+
             this.addressProbeCompleted = true;
           } catch (probeErr) {
             this.logger.warn(
@@ -1440,19 +1461,24 @@ export class PositionTracker {
       // === RAW COUNTS BEFORE ANY FILTERING ===
       // Log raw counts to diagnose where positions are being lost
       const rawTotal = apiPositions?.length ?? 0;
-      const rawActiveCandidates = apiPositions?.filter(
-        (p) => {
-          const size = typeof p.size === "string" ? parseFloat(p.size) : (p.size ?? 0);
+      const rawActiveCandidates =
+        apiPositions?.filter((p) => {
+          const size =
+            typeof p.size === "string" ? parseFloat(p.size) : (p.size ?? 0);
           return size > 0;
-        }
-      ).length ?? 0;
-      const rawRedeemableCandidates = apiPositions?.filter(
-        (p) => p.redeemable === true
-      ).length ?? 0;
-      
+        }).length ?? 0;
+      const rawRedeemableCandidates =
+        apiPositions?.filter((p) => p.redeemable === true).length ?? 0;
+
       // Log raw counts once per refresh or when counts change
       const rawCountsFingerprint = `${rawTotal}-${rawActiveCandidates}-${rawRedeemableCandidates}`;
-      if (this.logDeduper.shouldLog("Tracker:raw_counts", HEARTBEAT_INTERVAL_MS, rawCountsFingerprint)) {
+      if (
+        this.logDeduper.shouldLog(
+          "Tracker:raw_counts",
+          HEARTBEAT_INTERVAL_MS,
+          rawCountsFingerprint,
+        )
+      ) {
         this.logger.info(
           `[PositionTracker] raw_total=${rawTotal} raw_active_candidates=${rawActiveCandidates} raw_redeemable_candidates=${rawRedeemableCandidates}`,
         );
@@ -2008,7 +2034,8 @@ export class PositionTracker {
                 // For diagnostic purposes, check if price suggests the market might be near resolution
                 // This is used for logging/diagnostics only, NOT to change state
                 const priceNearResolution =
-                  currentPrice >= PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
+                  currentPrice >=
+                    PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD ||
                   currentPrice <= PositionTracker.RESOLVED_PRICE_LOW_THRESHOLD;
 
                 if (priceNearResolution) {
@@ -2146,8 +2173,8 @@ export class PositionTracker {
                 } else {
                   pnlTrusted = false;
                   // Use more descriptive reason based on what actually failed
-                  pnlUntrustedReason = pricingFetchFailed 
-                    ? "PRICING_FETCH_FAILED" 
+                  pnlUntrustedReason = pricingFetchFailed
+                    ? "PRICING_FETCH_FAILED"
                     : "NO_ORDERBOOK_BIDS";
                 }
               }
@@ -2346,14 +2373,26 @@ export class PositionTracker {
 
           // === STRICT STATE MACHINE DIAGNOSTIC ===
           // Log detailed state breakdown using positionState field
-          const stateActive = positions.filter((p) => p.positionState === "ACTIVE").length;
-          const stateRedeemable = positions.filter((p) => p.positionState === "REDEEMABLE").length;
-          const stateClosedNotRedeemable = positions.filter((p) => p.positionState === "CLOSED_NOT_REDEEMABLE").length;
-          const stateUnknown = positions.filter((p) => p.positionState === "UNKNOWN").length;
+          const stateActive = positions.filter(
+            (p) => p.positionState === "ACTIVE",
+          ).length;
+          const stateRedeemable = positions.filter(
+            (p) => p.positionState === "REDEEMABLE",
+          ).length;
+          const stateClosedNotRedeemable = positions.filter(
+            (p) => p.positionState === "CLOSED_NOT_REDEEMABLE",
+          ).length;
+          const stateUnknown = positions.filter(
+            (p) => p.positionState === "UNKNOWN",
+          ).length;
 
           // Count redeemable by proof source
-          const redeemableByDataApi = positions.filter((p) => p.redeemableProofSource === "DATA_API_FLAG").length;
-          const redeemableByOnchain = positions.filter((p) => p.redeemableProofSource === "ONCHAIN_DENOM").length;
+          const redeemableByDataApi = positions.filter(
+            (p) => p.redeemableProofSource === "DATA_API_FLAG",
+          ).length;
+          const redeemableByOnchain = positions.filter(
+            (p) => p.redeemableProofSource === "ONCHAIN_DENOM",
+          ).length;
 
           // Final diagnostic: raw vs final counts
           this.logger.info(
@@ -2370,7 +2409,9 @@ export class PositionTracker {
           // INTERNAL BUG CHECK: Redeemable without valid proof source is a BUG
           // Use positionState instead of redeemable field to align with strict state machine
           const redeemableWithoutProof = positions.filter(
-            (p) => p.positionState === "REDEEMABLE" && p.redeemableProofSource === "NONE"
+            (p) =>
+              p.positionState === "REDEEMABLE" &&
+              p.redeemableProofSource === "NONE",
           );
           if (redeemableWithoutProof.length > 0) {
             this.logger.error(

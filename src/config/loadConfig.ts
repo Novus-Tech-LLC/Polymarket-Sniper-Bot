@@ -1286,8 +1286,9 @@ export type StrategyConfig = {
    * Set to 0 to disable (hold indefinitely). Default: 3 minutes (quick scalps!)
    */
   scalpLowPriceMaxHoldMinutes: number;
-  // === SELL EARLY STRATEGY SETTINGS ===
-  // Capital efficiency: Sell positions at ~99.9¢ instead of waiting for slow redemption
+  // === SELL EARLY STRATEGY SETTINGS (SIMPLIFIED Jan 2025) ===
+  // Capital efficiency: Sell positions at 99.9¢ instead of waiting for slow redemption
+  // ONE CORE BEHAVIOR: If bid >= 99.9¢, SELL IT. No extra knobs by default.
   /**
    * Enable sell-early strategy for capital efficiency
    * When a position is essentially won (price near $1) but not yet redeemable,
@@ -1303,20 +1304,23 @@ export type StrategyConfig = {
   sellEarlyBidCents: number;
   /**
    * Minimum liquidity in USD at/near best bid to consider selling.
+   * Set to 0 to DISABLE this check (default).
    * Prevents selling into thin books where slippage would be significant.
-   * Default: 50 USD
+   * Default: 0 (DISABLED)
    */
   sellEarlyMinLiquidityUsd: number;
   /**
    * Maximum spread in cents allowed for sell-early.
+   * Set to 0 to DISABLE this check (default).
    * If spread > this, the book may be stale or illiquid.
-   * Default: 0.3 cents
+   * Default: 0 (DISABLED)
    */
   sellEarlyMaxSpreadCents: number;
   /**
    * Minimum time (seconds) to hold a position before sell-early can trigger.
+   * Set to 0 to DISABLE this check (default).
    * Prevents instant flips if desired.
-   * Default: 60 seconds
+   * Default: 0 (DISABLED)
    */
   sellEarlyMinHoldSec: number;
   // Combined settings from ARB and MONITOR
@@ -1709,7 +1713,7 @@ export function loadStrategyConfig(
             .SCALP_LOW_PRICE_MAX_HOLD_MINUTES
         : undefined) ??
       3, // Default: 3 minutes - quick scalps, don't hold volatile positions
-    // === SELL EARLY STRATEGY (Capital Efficiency) ===
+    // === SELL EARLY STRATEGY (Capital Efficiency - SIMPLIFIED Jan 2025) ===
     // SELL_EARLY_ENABLED: Enable selling near-$1 positions before redemption
     sellEarlyEnabled:
       parseBool(readEnv("SELL_EARLY_ENABLED", overrides) ?? "") ??
@@ -1724,29 +1728,30 @@ export function loadStrategyConfig(
         ? (preset as { SELL_EARLY_BID_CENTS: number }).SELL_EARLY_BID_CENTS
         : undefined) ??
       99.9, // Default: 99.9¢ - essentially won positions
-    // SELL_EARLY_MIN_LIQUIDITY_USD: Minimum depth at best bid
+    // SELL_EARLY_MIN_LIQUIDITY_USD: Minimum depth at best bid (0 = DISABLED)
     sellEarlyMinLiquidityUsd:
       parseNumber(readEnv("SELL_EARLY_MIN_LIQUIDITY_USD", overrides) ?? "") ??
       ("SELL_EARLY_MIN_LIQUIDITY_USD" in preset
         ? (preset as { SELL_EARLY_MIN_LIQUIDITY_USD: number })
             .SELL_EARLY_MIN_LIQUIDITY_USD
         : undefined) ??
-      50, // Default: $50 liquidity required
-    // SELL_EARLY_MAX_SPREAD_CENTS: Maximum allowed spread
+      0, // Default: 0 = DISABLED (no liquidity gating)
+    // SELL_EARLY_MAX_SPREAD_CENTS: Maximum allowed spread (0 = DISABLED)
     sellEarlyMaxSpreadCents:
       parseNumber(readEnv("SELL_EARLY_MAX_SPREAD_CENTS", overrides) ?? "") ??
       ("SELL_EARLY_MAX_SPREAD_CENTS" in preset
         ? (preset as { SELL_EARLY_MAX_SPREAD_CENTS: number })
             .SELL_EARLY_MAX_SPREAD_CENTS
         : undefined) ??
-      0.3, // Default: 0.3¢ max spread
-    // SELL_EARLY_MIN_HOLD_SEC: Minimum hold time before sell-early
+      0, // Default: 0 = DISABLED (no spread gating)
+    // SELL_EARLY_MIN_HOLD_SEC: Minimum hold time before sell-early (0 = DISABLED)
     sellEarlyMinHoldSec:
       parseNumber(readEnv("SELL_EARLY_MIN_HOLD_SEC", overrides) ?? "") ??
       ("SELL_EARLY_MIN_HOLD_SEC" in preset
-        ? (preset as { SELL_EARLY_MIN_HOLD_SEC: number }).SELL_EARLY_MIN_HOLD_SEC
+        ? (preset as { SELL_EARLY_MIN_HOLD_SEC: number })
+            .SELL_EARLY_MIN_HOLD_SEC
         : undefined) ??
-      60, // Default: 60 seconds
+      0, // Default: 0 = DISABLED (no hold time gating)
   };
 
   // Apply preset settings to environment for ARB and MONITOR config loaders

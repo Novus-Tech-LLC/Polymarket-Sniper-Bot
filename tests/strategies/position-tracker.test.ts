@@ -623,7 +623,10 @@ describe("PositionTracker Strict State Machine", () => {
       currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD;
 
     // This SHOULD be true (diagnostic triggers)
-    assert.ok(priceNearResolution, "Diagnostic should detect price near resolution");
+    assert.ok(
+      priceNearResolution,
+      "Diagnostic should detect price near resolution",
+    );
 
     // But state should still be ACTIVE (not REDEEMABLE)
     const positionState = dataApiRedeemable ? "REDEEMABLE" : "ACTIVE";
@@ -679,11 +682,9 @@ describe("PositionTracker Strict State Machine", () => {
     const positionState = "REDEEMABLE";
     const redeemableProofSource = "NONE"; // Bug: no proof!
 
-    const isBug = positionState === "REDEEMABLE" && redeemableProofSource === "NONE";
-    assert.ok(
-      isBug,
-      "Should detect bug when REDEEMABLE has no proof source",
-    );
+    const isBug =
+      positionState === "REDEEMABLE" && redeemableProofSource === "NONE";
+    assert.ok(isBug, "Should detect bug when REDEEMABLE has no proof source");
   });
 });
 

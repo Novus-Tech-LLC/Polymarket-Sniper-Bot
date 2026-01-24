@@ -197,14 +197,15 @@ export const STRATEGY_PRESETS = {
     SCALP_MIN_PROFIT_USD: 0.5,
     SCALP_RESOLUTION_EXCLUSION_PRICE: 0.6, // Never time-exit ≤60¢ entry positions that reach 90¢+ (near resolution)
     /**
-     * SELL EARLY - Disabled in off preset
-     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
+     * SELL EARLY - SIMPLIFIED (Jan 2025)
+     * ONE CORE BEHAVIOR: Sell at 99.9¢ to free capital.
+     * All optional gates are OFF (0 = disabled) unless explicitly enabled via env vars.
      */
-    SELL_EARLY_ENABLED: false,
+    SELL_EARLY_ENABLED: false, // Disabled in "off" preset
     SELL_EARLY_BID_CENTS: 99.9,
-    SELL_EARLY_MIN_LIQUIDITY_USD: 50,
-    SELL_EARLY_MAX_SPREAD_CENTS: 0.3,
-    SELL_EARLY_MIN_HOLD_SEC: 60,
+    SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
+    SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
+    SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
   },
   conservative: {
     STRATEGY_ENABLED: true,
@@ -282,15 +283,15 @@ export const STRATEGY_PRESETS = {
     SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 20.0, // Only capture 20%+ spikes (conservative)
     SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 10,
     /**
-     * SELL EARLY - Conservative settings
-     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
-     * Only applies to ACTIVE positions (never to REDEEMABLE - those go to AutoRedeem).
+     * SELL EARLY - SIMPLIFIED (Jan 2025)
+     * ONE CORE BEHAVIOR: Sell at 99.9¢ to free capital.
+     * All optional gates are OFF (0 = disabled) unless explicitly enabled via env vars.
      */
     SELL_EARLY_ENABLED: true,
     SELL_EARLY_BID_CENTS: 99.9, // Sell when bid >= 99.9¢
-    SELL_EARLY_MIN_LIQUIDITY_USD: 100, // Conservative: require $100 liquidity
-    SELL_EARLY_MAX_SPREAD_CENTS: 0.2, // Conservative: tighter spread requirement
-    SELL_EARLY_MIN_HOLD_SEC: 120, // Conservative: hold at least 2 minutes
+    SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
+    SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
+    SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
     // Rate limits
     ORDER_SUBMIT_MAX_PER_HOUR: 30,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
@@ -385,15 +386,15 @@ export const STRATEGY_PRESETS = {
     SCALP_SUDDEN_SPIKE_THRESHOLD_PCT: 15.0, // Capture 15%+ spikes
     SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 10,
     /**
-     * SELL EARLY - Balanced settings
-     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
-     * Only applies to ACTIVE positions (never to REDEEMABLE - those go to AutoRedeem).
+     * SELL EARLY - SIMPLIFIED (Jan 2025)
+     * ONE CORE BEHAVIOR: Sell at 99.9¢ to free capital.
+     * All optional gates are OFF (0 = disabled) unless explicitly enabled via env vars.
      */
     SELL_EARLY_ENABLED: true,
     SELL_EARLY_BID_CENTS: 99.9, // Sell when bid >= 99.9¢
-    SELL_EARLY_MIN_LIQUIDITY_USD: 50, // Balanced: require $50 liquidity
-    SELL_EARLY_MAX_SPREAD_CENTS: 0.3, // Balanced: allow 0.3¢ spread
-    SELL_EARLY_MIN_HOLD_SEC: 60, // Balanced: hold at least 60 seconds
+    SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
+    SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
+    SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
     // Rate limits (higher for more trades)
     ORDER_SUBMIT_MAX_PER_HOUR: 60,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
@@ -544,15 +545,15 @@ export const STRATEGY_PRESETS = {
     SCALP_SUDDEN_SPIKE_WINDOW_MINUTES: 5, // Shorter window - faster detection
 
     /**
-     * SELL EARLY - Aggressive settings
-     * Capital efficiency: Sell near-$1 positions instead of waiting for slow redemption.
-     * Only applies to ACTIVE positions (never to REDEEMABLE - those go to AutoRedeem).
+     * SELL EARLY - SIMPLIFIED (Jan 2025)
+     * ONE CORE BEHAVIOR: Sell at 99.9¢ to free capital.
+     * All optional gates are OFF (0 = disabled) unless explicitly enabled via env vars.
      */
     SELL_EARLY_ENABLED: true,
-    SELL_EARLY_BID_CENTS: 99.8, // Aggressive: sell at slightly lower threshold 99.8¢
-    SELL_EARLY_MIN_LIQUIDITY_USD: 25, // Aggressive: lower liquidity requirement
-    SELL_EARLY_MAX_SPREAD_CENTS: 0.5, // Aggressive: allow wider spread
-    SELL_EARLY_MIN_HOLD_SEC: 30, // Aggressive: faster reaction
+    SELL_EARLY_BID_CENTS: 99.9, // Sell when bid >= 99.9¢
+    SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
+    SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
+    SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
 
     /**
      * RATE LIMITS - HIGH THROUGHPUT
