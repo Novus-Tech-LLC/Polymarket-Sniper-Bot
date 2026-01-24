@@ -1286,6 +1286,18 @@ export type StrategyConfig = {
    * Set to 0 to disable (hold indefinitely). Default: 3 minutes (quick scalps!)
    */
   scalpLowPriceMaxHoldMinutes: number;
+  /**
+   * Exit window duration in seconds for the scalp exit ladder
+   * After a position is flagged for scalp, the ladder progresses: PROFIT -> BREAKEVEN -> FORCE
+   * Default: 120 seconds (2 minutes)
+   */
+  scalpExitWindowSec: number;
+  /**
+   * Retry cadence in seconds during the PROFIT stage of exit ladder
+   * How often to retry the profitable exit attempt
+   * Default: 15 seconds
+   */
+  scalpProfitRetrySec: number;
   // === SELL EARLY STRATEGY SETTINGS (SIMPLIFIED Jan 2025) ===
   // Capital efficiency: Sell positions at 99.9¢ instead of waiting for slow redemption
   // ONE CORE BEHAVIOR: If bid >= 99.9¢, SELL IT. No extra knobs by default.
@@ -1713,6 +1725,21 @@ export function loadStrategyConfig(
             .SCALP_LOW_PRICE_MAX_HOLD_MINUTES
         : undefined) ??
       3, // Default: 3 minutes - quick scalps, don't hold volatile positions
+    // SCALP_EXIT_WINDOW_SEC: Exit ladder window duration in seconds
+    // When a scalp is triggered, the ladder progresses: PROFIT -> BREAKEVEN -> FORCE
+    scalpExitWindowSec:
+      parseNumber(readEnv("SCALP_EXIT_WINDOW_SEC", overrides) ?? "") ??
+      ("SCALP_EXIT_WINDOW_SEC" in preset
+        ? (preset as { SCALP_EXIT_WINDOW_SEC: number }).SCALP_EXIT_WINDOW_SEC
+        : undefined) ??
+      120, // Default: 120 seconds (2 minutes)
+    // SCALP_PROFIT_RETRY_SEC: Retry cadence during PROFIT stage of exit ladder
+    scalpProfitRetrySec:
+      parseNumber(readEnv("SCALP_PROFIT_RETRY_SEC", overrides) ?? "") ??
+      ("SCALP_PROFIT_RETRY_SEC" in preset
+        ? (preset as { SCALP_PROFIT_RETRY_SEC: number }).SCALP_PROFIT_RETRY_SEC
+        : undefined) ??
+      15, // Default: 15 seconds
     // === SELL EARLY STRATEGY (Capital Efficiency - SIMPLIFIED Jan 2025) ===
     // SELL_EARLY_ENABLED: Enable selling near-$1 positions before redemption
     sellEarlyEnabled:
