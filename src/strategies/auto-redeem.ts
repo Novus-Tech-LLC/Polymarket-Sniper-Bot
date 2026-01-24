@@ -51,6 +51,8 @@ export interface RedemptionResult {
   error?: string;
   /** True if error was due to RPC rate limiting (e.g., "in-flight transaction limit") */
   isRateLimited?: boolean;
+  /** True if error was due to condition not being resolved on-chain yet (oracle hasn't reported results) */
+  isNotResolvedYet?: boolean;
 }
 
 /**
@@ -493,6 +495,18 @@ export class AutoRedeemStrategy {
             break; // Stop trying more redemptions this cycle
           }
 
+          // Check if condition is not resolved on-chain yet - don't count as failure
+          // The oracle just hasn't reported results yet, will retry later
+          if (result.isNotResolvedYet) {
+            // Set a short cooldown (1 minute) to avoid spamming checks
+            this.redemptionAttempts.set(marketId, {
+              lastAttempt: Date.now(),
+              failures: 0, // Don't increment failures - this is expected behavior
+            });
+            // Don't log as failure - already logged in redeemPosition()
+            continue;
+          }
+
           // Track failure by marketId
           const currentAttempts = this.redemptionAttempts.get(marketId) || {
             lastAttempt: 0,
@@ -560,6 +574,28 @@ export class AutoRedeemStrategy {
    * NOTE: This only requires a private key and RPC URL - no Polymarket API keys needed!
    * The data-api.polymarket.com endpoints are public.
    */
+  /**
+   * Check if a condition has been resolved on-chain by querying payoutDenominator.
+   * Returns true only when the oracle has reported the results (payoutDenominator > 0).
+   * This prevents attempting redemption before on-chain resolution.
+   */
+  private async isConditionResolvedOnChain(
+    wallet: Wallet,
+    ctfAddress: string,
+    conditionId: string,
+  ): Promise<{ resolved: boolean; error?: string }> {
+    try {
+      const ctfContract = new Contract(ctfAddress, CTF_ABI, wallet.provider);
+      const payoutDenominator = await ctfContract.payoutDenominator(conditionId);
+      // payoutDenominator is 0 when condition is not resolved, > 0 when resolved
+      const resolved = BigInt(payoutDenominator) > 0n;
+      return { resolved };
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      return { resolved: false, error: errorMsg };
+    }
+  }
+
   private async redeemPosition(position: Position): Promise<RedemptionResult> {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
 
@@ -595,6 +631,37 @@ export class AutoRedeemStrategy {
         success: false,
         error: `Invalid conditionId format: ${conditionId}`,
       };
+    }
+
+    // CRITICAL: Check if condition is actually resolved on-chain before attempting redemption
+    // The API may mark positions as "redeemable" before the oracle has reported results
+    const resolutionCheck = await this.isConditionResolvedOnChain(
+      wallet,
+      ctfAddress,
+      conditionId,
+    );
+
+    if (resolutionCheck.error) {
+      this.logger.warn(
+        `[AutoRedeem] ⚠️ Could not verify on-chain resolution for ${conditionId.slice(0, 16)}...: ${resolutionCheck.error}`,
+      );
+      // Continue anyway - let the actual redemption call fail if not resolved
+    } else if (!resolutionCheck.resolved) {
+      // Condition not resolved on-chain yet - skip redemption attempt
+      this.logger.info(
+        `[AutoRedeem] ⏳ Market ${conditionId.slice(0, 16)}... marked redeemable but NOT resolved on-chain yet (oracle hasn't reported results)`,
+      );
+      return {
+        tokenId: position.tokenId,
+        marketId: position.marketId,
+        success: false,
+        error: "Condition not resolved on-chain yet (payoutDenominator=0)",
+        isNotResolvedYet: true,
+      };
+    } else {
+      this.logger.debug(
+        `[AutoRedeem] ✓ On-chain resolution confirmed for ${conditionId.slice(0, 16)}...`,
+      );
     }
 
     try {
@@ -718,12 +785,19 @@ export class AutoRedeemStrategy {
         errorMsg.includes("in-flight transaction limit") ||
         errorMsg.includes("-32000");
 
+      // Check for "not resolved yet" errors from the contract
+      // This can happen if our on-chain check failed but we tried anyway
+      const isNotResolvedYet =
+        errorMsg.includes("result for condition not received yet") ||
+        errorMsg.includes("condition not resolved");
+
       return {
         tokenId: position.tokenId,
         marketId: position.marketId,
         success: false,
         error: errorMsg,
         isRateLimited: isRateLimitError,
+        isNotResolvedYet: isNotResolvedYet,
       };
     }
   }
