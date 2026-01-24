@@ -57,24 +57,29 @@ export const INVALID_BOOK_ASK_THRESHOLD_DOLLARS = 0.95; // 95¢
 /**
  * Convert a price value to dollars in [0, 1].
  *
- * If the value is > 1, it's assumed to be in cents and is divided by 100.
- * If the value is already in [0, 1], it's returned as-is.
+ * Behavior:
+ * - If value > 1, it's assumed to be in cents and is divided by 100.
+ * - If value is already in [0, 1], it's returned as-is.
+ * - Negative values are clamped to 0.
+ * - Values > 100 (cents) are clamped to 1.0 (dollars).
  *
  * @param value - Price value (may be dollars or cents)
- * @returns Price in dollars [0, 1]
+ * @returns Price in dollars, clamped to [0, 1]
  *
  * @example
  * toDollars(0.65) // => 0.65 (already dollars)
  * toDollars(65)   // => 0.65 (was cents)
  * toDollars(100)  // => 1.0  (was cents)
  * toDollars(0.9995) // => 0.9995 (already dollars)
+ * toDollars(-0.5) // => 0 (clamped negative)
+ * toDollars(150)  // => 1.0 (clamped above 100¢)
  */
 export function toDollars(value: number): number {
   if (value < 0) {
     return 0;
   }
   if (value > 1) {
-    // Value is in cents, convert to dollars
+    // Value is in cents, convert to dollars (capped at 1.0)
     return Math.min(value / 100, 1);
   }
   // Value is already in dollars
