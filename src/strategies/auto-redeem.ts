@@ -43,6 +43,8 @@ export interface RedemptionResult {
   transactionHash?: string;
   amountRedeemed?: string;
   error?: string;
+  /** True if error was due to RPC rate limiting (e.g., "in-flight transaction limit") */
+  isRateLimited?: boolean;
 }
 
 /**
@@ -77,17 +79,25 @@ export class AutoRedeemStrategy {
   private redeemedMarkets: Set<string> = new Set();
   private redemptionAttempts: Map<
     string,
-    { lastAttempt: number; failures: number }
+    { lastAttempt: number; failures: number; isRateLimited?: boolean }
   > = new Map();
   // Track markets where fallback sell was attempted (to avoid repeated sell attempts)
   private fallbackSellAttempted: Set<string> = new Set();
   // Throttling: track last execution time to avoid checking too frequently
   private lastExecutionTime: number = 0;
   private checkIntervalMs: number;
+  // Global rate limit flag - when hit, pause ALL redemptions
+  private globalRateLimitUntil: number = 0;
 
   // Constants
   private static readonly MAX_REDEMPTION_FAILURES = 3;
   private static readonly REDEMPTION_RETRY_COOLDOWN_MS = 1 * 60 * 1000; // 1 minute - reduced from 5 min for faster retries
+  /**
+   * Extended cooldown for RPC rate limit errors (e.g., "in-flight transaction limit reached")
+   * These errors indicate the RPC provider is overwhelmed - need longer backoff
+   * Default: 15 minutes
+   */
+  private static readonly RPC_RATE_LIMIT_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
   private static readonly DEFAULT_GAS_LIMIT = 300000n;
   // Multiplier to convert USD threshold to minimum share count: minPositionUsd * this = minimum shares to redeem
   // For example, if minPositionUsd = 1, we require at least 0.01 shares to redeem
@@ -170,6 +180,15 @@ export class AutoRedeemStrategy {
     }
     this.lastExecutionTime = now;
 
+    // Check global rate limit - if we hit "in-flight transaction limit", pause all redemptions
+    if (this.globalRateLimitUntil > now) {
+      const remainingSeconds = Math.ceil((this.globalRateLimitUntil - now) / 1000);
+      this.logger.info(
+        `[AutoRedeem] ⏳ Global rate limit active - paused for ${remainingSeconds}s (RPC provider limit)`,
+      );
+      return 0;
+    }
+
     this.logger.debug(`[AutoRedeem] 🔄 Running redemption check...`);
 
     // Clean up stale entries
@@ -179,6 +198,7 @@ export class AutoRedeemStrategy {
     let skippedAlreadyRedeemed = 0;
     let skippedCooldown = 0;
     let skippedMaxFailures = 0;
+    let skippedRateLimited = 0;
     let attemptedRedemptions = 0;
 
     // Get all positions and filter for redeemable ones OR positions at ~100¢ (essentially resolved winners)
@@ -423,6 +443,16 @@ export class AutoRedeemStrategy {
             `[AutoRedeem] ✓ Successfully redeemed market ${marketId} (~$${totalValueUsd.toFixed(2)}) (tx: ${result.transactionHash})`,
           );
         } else {
+          // Check if this was a rate limit error - if so, set global pause
+          if (result.isRateLimited) {
+            this.globalRateLimitUntil = Date.now() + AutoRedeemStrategy.RPC_RATE_LIMIT_COOLDOWN_MS;
+            this.logger.warn(
+              `[AutoRedeem] 🚫 RPC rate limit hit - pausing ALL redemptions for ${AutoRedeemStrategy.RPC_RATE_LIMIT_COOLDOWN_MS / 60000} minutes`,
+            );
+            // Don't count as failure - this is a temporary rate limit, not a position problem
+            break; // Stop trying more redemptions this cycle
+          }
+          
           // Track failure by marketId
           const currentAttempts = this.redemptionAttempts.get(marketId) || {
             lastAttempt: 0,
@@ -451,6 +481,10 @@ export class AutoRedeemStrategy {
           `[AutoRedeem] Error redeeming market ${marketId}: ${errorMsg}`,
         );
       }
+      
+      // Add small delay between redemption attempts to avoid overwhelming RPC
+      // This helps prevent "in-flight transaction limit" errors
+      await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 second delay between redemptions
     }
 
     // Log summary of redemption activity
@@ -460,7 +494,7 @@ export class AutoRedeemStrategy {
 
     // Log diagnostic info if we have redeemable positions but didn't attempt any redemptions
     const totalSkipped =
-      skippedAlreadyRedeemed + skippedCooldown + skippedMaxFailures;
+      skippedAlreadyRedeemed + skippedCooldown + skippedMaxFailures + skippedRateLimited;
     if (attemptedRedemptions === 0 && totalSkipped > 0) {
       this.logger.info(
         `[AutoRedeem] ⚠️ ${redeemablePositions.length} redeemable but ${totalSkipped} skipped: ` +
@@ -721,6 +755,30 @@ export class AutoRedeemStrategy {
       };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
+      
+      // Log the full error at ERROR level for diagnosis
+      this.logger.error(
+        `[AutoRedeem] ❌ Redemption transaction failed for ${position.marketId.slice(0, 16)}...: ${errorMsg}`,
+      );
+
+      // Check for RPC rate limit errors (delegated account limits)
+      const isRateLimitError = 
+        errorMsg.includes("in-flight transaction limit") ||
+        errorMsg.includes("-32000") ||
+        errorMsg.includes("could not coalesce error");
+      
+      if (isRateLimitError) {
+        this.logger.warn(
+          `[AutoRedeem] 🚫 RPC rate limit detected - this indicates too many pending transactions. Will pause redemptions.`,
+        );
+        return {
+          tokenId: position.tokenId,
+          marketId: position.marketId,
+          success: false,
+          error: "RPC rate limit: too many in-flight transactions",
+          isRateLimited: true,
+        };
+      }
 
       // Handle specific error cases
       if (errorMsg.includes("insufficient funds")) {

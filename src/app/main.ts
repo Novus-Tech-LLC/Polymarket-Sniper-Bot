@@ -115,13 +115,7 @@ async function main(): Promise<void> {
         nearCloseLossPct: strategyConfig.smartHedgingNearCloseLossPct,
         noHedgeWindowMinutes: strategyConfig.smartHedgingNoHedgeWindowMinutes,
       },
-      // Pass quick flip config
-      quickFlipConfig: {
-        enabled: strategyConfig.quickFlipEnabled,
-        targetPct: strategyConfig.quickFlipTargetPct,
-        minHoldSeconds: strategyConfig.quickFlipMinHoldSeconds,
-        minProfitUsd: strategyConfig.quickFlipMinProfitUsd,
-      },
+      // Quick flip module removed - functionality covered by ScalpTakeProfit
       // Pass endgame config
       endgameConfig: {
         enabled: strategyConfig.endgameSweepEnabled,

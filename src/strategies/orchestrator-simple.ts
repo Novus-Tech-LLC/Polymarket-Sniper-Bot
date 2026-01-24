@@ -26,11 +26,12 @@ import {
   type SimpleEndgameSweepConfig,
   DEFAULT_SIMPLE_ENDGAME_CONFIG,
 } from "./endgame-sweep-simple";
-import {
-  SimpleQuickFlipStrategy,
-  type SimpleQuickFlipConfig,
-  DEFAULT_SIMPLE_QUICKFLIP_CONFIG,
-} from "./quick-flip-simple";
+// Quick Flip module removed - functionality covered by ScalpTakeProfit
+// import {
+//   SimpleQuickFlipStrategy,
+//   type SimpleQuickFlipConfig,
+//   DEFAULT_SIMPLE_QUICKFLIP_CONFIG,
+// } from "./quick-flip-simple";
 import {
   ScalpTakeProfitStrategy,
   type ScalpTakeProfitConfig,
@@ -54,7 +55,7 @@ export interface SimpleOrchestratorConfig {
   riskPreset?: "conservative" | "balanced" | "aggressive";
   hedgingConfig?: Partial<SimpleSmartHedgingConfig>;
   endgameConfig?: Partial<SimpleEndgameSweepConfig>;
-  quickFlipConfig?: Partial<SimpleQuickFlipConfig>;
+  // quickFlipConfig removed - module deprecated
   scalpConfig?: Partial<ScalpTakeProfitConfig>;
   autoRedeemConfig?: Partial<AutoRedeemConfig>;
   stopLossConfig?: Partial<UniversalStopLossConfig>;
@@ -73,7 +74,7 @@ export class SimpleOrchestrator {
   private stopLossStrategy: UniversalStopLossStrategy;
   private scalpStrategy: ScalpTakeProfitStrategy;
   private endgameStrategy: SimpleEndgameSweepStrategy;
-  private quickFlipStrategy: SimpleQuickFlipStrategy;
+  // quickFlipStrategy removed - module deprecated
 
   private executionTimer?: NodeJS.Timeout;
   private isRunning = false;
@@ -170,16 +171,7 @@ export class SimpleOrchestrator {
       },
     });
 
-    // 6. Quick Flip - Take profits (larger % targets)
-    this.quickFlipStrategy = new SimpleQuickFlipStrategy({
-      client: config.client,
-      logger: config.logger,
-      positionTracker: this.positionTracker,
-      config: {
-        ...DEFAULT_SIMPLE_QUICKFLIP_CONFIG,
-        ...config.quickFlipConfig,
-      },
-    });
+    // Quick Flip module removed - ScalpTakeProfit handles profit-taking
 
     this.logger.info(
       `[SimpleOrchestrator] Initialized with maxPosition=$${config.maxPositionUsd}`,
@@ -237,10 +229,7 @@ export class SimpleOrchestrator {
       // 5. Endgame Sweep - buy high-confidence positions (85-99¢)
       await this.runStrategy("Endgame", () => this.endgameStrategy.execute());
 
-      // 6. Quick Flip - take profits when larger target reached
-      await this.runStrategy("QuickFlip", () =>
-        this.quickFlipStrategy.execute(),
-      );
+      // Quick Flip removed - functionality covered by ScalpTakeProfit
     } catch (err) {
       this.logger.error(
         `[SimpleOrchestrator] Error: ${err instanceof Error ? err.message : String(err)}`,

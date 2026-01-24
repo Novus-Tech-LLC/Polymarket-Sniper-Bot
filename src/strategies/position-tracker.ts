@@ -443,15 +443,52 @@ export class PositionTracker {
 
                 if (!winningOutcome) {
                   // Cannot determine outcome from Gamma API, but position is marked redeemable
-                  // Use entry price as fallback - the redemption will succeed/fail on chain
-                  // This ensures positions aren't silently dropped when outcome API is unavailable
-                  currentPrice = entryPrice;
-                  resolvedCount++;
-                  if (!wasCached) {
-                    this.logger.debug(
-                      `[PositionTracker] Redeemable position with unknown outcome: tokenId=${tokenId}, side=${side}, using entryPrice=${entryPrice} as fallback`,
+                  // Try to fetch actual price from orderbook or price API first
+                  // This is important for profit calculation - don't default to entryPrice which makes pnlPct=0%
+                  try {
+                    // First try orderbook
+                    if (!this.missingOrderbooks.has(tokenId)) {
+                      try {
+                        const orderbook = await this.client.getOrderBook(tokenId);
+                        if (orderbook.bids?.[0] && orderbook.asks?.[0]) {
+                          const bestBid = parseFloat(orderbook.bids[0].price);
+                          const bestAsk = parseFloat(orderbook.asks[0].price);
+                          currentPrice = (bestBid + bestAsk) / 2;
+                          this.logger.debug(
+                            `[PositionTracker] Redeemable with unknown outcome: using orderbook price ${(currentPrice * 100).toFixed(1)}¢ for tokenId=${tokenId.slice(0, 16)}...`,
+                          );
+                        } else {
+                          // Empty orderbook, try price fallback
+                          this.missingOrderbooks.add(tokenId);
+                          currentPrice = await this.fetchPriceFallback(tokenId);
+                          this.logger.debug(
+                            `[PositionTracker] Redeemable with unknown outcome: using fallback price ${(currentPrice * 100).toFixed(1)}¢ for tokenId=${tokenId.slice(0, 16)}...`,
+                          );
+                        }
+                      } catch {
+                        // Orderbook fetch failed, try price fallback
+                        this.missingOrderbooks.add(tokenId);
+                        currentPrice = await this.fetchPriceFallback(tokenId);
+                        this.logger.debug(
+                          `[PositionTracker] Redeemable with unknown outcome: using fallback price ${(currentPrice * 100).toFixed(1)}¢ for tokenId=${tokenId.slice(0, 16)}...`,
+                        );
+                      }
+                    } else {
+                      // Already know orderbook is missing, use price fallback
+                      currentPrice = await this.fetchPriceFallback(tokenId);
+                      this.logger.debug(
+                        `[PositionTracker] Redeemable with unknown outcome: using fallback price ${(currentPrice * 100).toFixed(1)}¢ for tokenId=${tokenId.slice(0, 16)}...`,
+                      );
+                    }
+                  } catch (priceErr) {
+                    // All pricing methods failed - use entryPrice as last resort
+                    // This prevents silent position drops but may show 0% profit
+                    currentPrice = entryPrice;
+                    this.logger.warn(
+                      `[PositionTracker] ⚠️ Redeemable with unknown outcome AND price fetch failed for tokenId=${tokenId.slice(0, 16)}..., using entryPrice=${entryPrice} (will show 0% profit)`,
                     );
                   }
+                  resolvedCount++;
                 } else {
                   // Calculate settlement price based on whether position won or lost
                   // Normalize both strings for comparison (case-insensitive, trimmed)
@@ -561,6 +598,21 @@ export class PositionTracker {
               // Calculate P&L
               const pnlUsd = (currentPrice - entryPrice) * size;
               const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+
+              // Debug log for positions that should be profitable but show 0% or less
+              // This helps diagnose when pricing is wrong
+              if (currentPrice > entryPrice && pnlPct <= 0) {
+                this.logger.warn(
+                  `[PositionTracker] ⚠️ P&L calculation anomaly: tokenId=${tokenId.slice(0, 16)}..., entry=${entryPrice}, current=${currentPrice}, pnlPct=${pnlPct.toFixed(2)}%`,
+                );
+              }
+
+              // Log significant profits at DEBUG level for monitoring
+              if (pnlPct >= 10 && !finalRedeemable) {
+                this.logger.debug(
+                  `[PositionTracker] 💰 High profit position: ${side} entry=${(entryPrice * 100).toFixed(1)}¢ → current=${(currentPrice * 100).toFixed(1)}¢ = +${pnlPct.toFixed(1)}% ($${pnlUsd.toFixed(2)})`,
+                );
+              }
 
               // Fetch market end time for active positions (needed for near-close hedging)
               // Skip for redeemable positions since they're already resolved
