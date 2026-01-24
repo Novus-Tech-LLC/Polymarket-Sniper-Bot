@@ -165,11 +165,31 @@ export const executeRelayerTxs = async (params: {
   params.logger.info(
     `[Relayer] Executing ${txs.length} tx(s) desc=${params.description}`,
   );
-  const response = await client.execute(txs, params.description);
+
+  let response;
+  try {
+    response = await client.execute(txs, params.description);
+  } catch (executeErr) {
+    const errMsg =
+      executeErr instanceof Error ? executeErr.message : String(executeErr);
+    params.logger.error(`[Relayer] SDK execute() failed: ${errMsg}`);
+    throw new Error(`Relayer SDK execute failed: ${errMsg}`);
+  }
+
   params.logger.info(
     `[Relayer] Submitted relayer_tx_id=${response.transactionID} state=${response.state} hash=${response.transactionHash ?? "n/a"}`,
   );
-  const result = await response.wait();
+
+  let result;
+  try {
+    result = await response.wait();
+  } catch (waitErr) {
+    const errMsg =
+      waitErr instanceof Error ? waitErr.message : String(waitErr);
+    params.logger.error(`[Relayer] SDK wait() failed: ${errMsg}`);
+    throw new Error(`Relayer SDK wait failed: ${errMsg}`);
+  }
+
   if (!result) {
     params.logger.warn("[Relayer] Transaction did not reach a final state.");
     return {
