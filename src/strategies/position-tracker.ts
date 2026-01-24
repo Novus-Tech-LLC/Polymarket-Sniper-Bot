@@ -585,6 +585,72 @@ export class PositionTracker {
   }
 
   /**
+   * Threshold for excluding positions near resolution (price >= 90¢).
+   * These positions are likely to resolve soon and should not be sold for liquidity.
+   */
+  private static readonly NEAR_RESOLUTION_THRESHOLD = 0.9;
+
+  /**
+   * Get positions that are candidates for profit-based liquidation to free up funds.
+   * Used by Smart Hedging to sell *profitable* positions (lowest profit first) when
+   * wallet balance is insufficient for hedging, before resorting to selling losing positions.
+   *
+   * Returns active, non-redeemable, **profitable** positions sorted by lowest profit
+   * (pnlPct ascending), excluding:
+   * - Positions near resolution (currentPrice >= 0.9)
+   * - Positions without a valid side
+   * - Positions failing the minimum hold time gate
+   *
+   * @param minProfitPct - Minimum profit percentage to consider (default: 0 = any profit)
+   * @param minHoldSeconds - Minimum hold time in seconds before a position can be sold (default: 60)
+   * @returns Array of profitable positions suitable for liquidation, sorted by lowest profit first
+   */
+  getProfitLiquidationCandidates(
+    minProfitPct = 0,
+    minHoldSeconds = DEFAULT_LIQUIDATION_MIN_HOLD_SECONDS,
+  ): Position[] {
+    const now = Date.now();
+
+    return (
+      this.getActiveProfitablePositions()
+        .filter((pos) => {
+          // Must have valid side info for selling
+          if (!pos.side || pos.side.trim() === "") {
+            return false;
+          }
+
+          // Must meet minimum profit threshold
+          if (pos.pnlPct < minProfitPct) {
+            return false;
+          }
+
+          // Exclude positions near resolution (price >= 90¢)
+          // These are likely to resolve soon and should be held for redemption
+          if (pos.currentPrice >= PositionTracker.NEAR_RESOLUTION_THRESHOLD) {
+            return false;
+          }
+
+          // Must have been held for minimum time (prevent immediate sells on new positions)
+          const entryTime = this.getPositionEntryTime(
+            pos.marketId,
+            pos.tokenId,
+          );
+          if (entryTime) {
+            const holdSeconds = (now - entryTime) / 1000;
+            if (holdSeconds < minHoldSeconds) {
+              return false;
+            }
+          }
+          // If no entry time, be conservative and include it (may be externally acquired)
+
+          return true;
+        })
+        // Sort by lowest profit first (ascending pnlPct) - sell smallest winners first
+        .sort((a, b) => a.pnlPct - b.pnlPct)
+    );
+  }
+
+  /**
    * Get a summary of position counts for logging
    * Provides consistent breakdown across all strategies
    */

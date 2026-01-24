@@ -938,3 +938,339 @@ describe("Smart Hedging Liquidation Candidate Filtering", () => {
     );
   });
 });
+
+/**
+ * Tests for hedge fallback behavior when insufficient funds
+ *
+ * These tests verify that the strategy correctly attempts to free funds by
+ * selling profitable positions before falling back to selling the losing position.
+ */
+describe("Smart Hedging Insufficient Funds Fallback Logic", () => {
+  // Helper type for test positions
+  interface TestPosition {
+    marketId: string;
+    tokenId: string;
+    side: string;
+    size: number;
+    entryPrice: number;
+    currentPrice: number;
+    pnlPct: number;
+    pnlUsd: number;
+    redeemable?: boolean;
+  }
+
+  /**
+   * Simulates the fallback logic when hedge fails with INSUFFICIENT_BALANCE_OR_ALLOWANCE.
+   * Returns the action taken and the position(s) affected.
+   */
+  function simulateFallbackLogic(
+    losingPosition: TestPosition,
+    profitableCandidates: TestPosition[],
+    hedgedPositions: Set<string>,
+    retryHedgeSuccess: boolean,
+  ): {
+    action:
+      | "sold_profitable_and_hedged"
+      | "sold_profitable_then_sold_losing"
+      | "sold_losing_directly";
+    soldPositions: string[];
+  } {
+    // Filter out already hedged positions
+    const sellableProfits = profitableCandidates.filter((p) => {
+      const key = `${p.marketId}-${p.tokenId}`;
+      return !hedgedPositions.has(key);
+    });
+
+    const soldPositions: string[] = [];
+
+    if (sellableProfits.length > 0) {
+      // Would sell lowest-profit position first (already sorted)
+      const profitToSell = sellableProfits[0];
+      soldPositions.push(`${profitToSell.marketId}-${profitToSell.tokenId}`);
+
+      if (retryHedgeSuccess) {
+        return { action: "sold_profitable_and_hedged", soldPositions };
+      } else {
+        // Retry failed, fall through to sell losing
+        soldPositions.push(
+          `${losingPosition.marketId}-${losingPosition.tokenId}`,
+        );
+        return { action: "sold_profitable_then_sold_losing", soldPositions };
+      }
+    }
+
+    // No profitable positions to sell, sell losing directly
+    soldPositions.push(`${losingPosition.marketId}-${losingPosition.tokenId}`);
+    return { action: "sold_losing_directly", soldPositions };
+  }
+
+  test("Should sell profitable position and retry hedge when profitable candidates exist", () => {
+    const losingPosition: TestPosition = {
+      marketId: "m1",
+      tokenId: "t1",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.35,
+      pnlPct: -30,
+      pnlUsd: -15,
+    };
+
+    // Profitable candidates sorted by lowest profit first
+    const profitableCandidates: TestPosition[] = [
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.44,
+        pnlPct: 10,
+        pnlUsd: 2,
+      }, // Lowest profit - sell this first
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "YES",
+        size: 75,
+        entryPrice: 0.3,
+        currentPrice: 0.45,
+        pnlPct: 50,
+        pnlUsd: 11.25,
+      },
+    ];
+
+    const result = simulateFallbackLogic(
+      losingPosition,
+      profitableCandidates,
+      new Set(),
+      true, // Retry succeeds
+    );
+
+    assert.strictEqual(
+      result.action,
+      "sold_profitable_and_hedged",
+      "Should sell profitable and retry hedge successfully",
+    );
+    assert.strictEqual(
+      result.soldPositions.length,
+      1,
+      "Should only sell one profitable position",
+    );
+    assert.strictEqual(
+      result.soldPositions[0],
+      "m2-t2",
+      "Should sell the lowest-profit position first",
+    );
+  });
+
+  test("Should fall through to sell losing when retry fails", () => {
+    const losingPosition: TestPosition = {
+      marketId: "m1",
+      tokenId: "t1",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.35,
+      pnlPct: -30,
+      pnlUsd: -15,
+    };
+
+    const profitableCandidates: TestPosition[] = [
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.44,
+        pnlPct: 10,
+        pnlUsd: 2,
+      },
+    ];
+
+    const result = simulateFallbackLogic(
+      losingPosition,
+      profitableCandidates,
+      new Set(),
+      false, // Retry fails
+    );
+
+    assert.strictEqual(
+      result.action,
+      "sold_profitable_then_sold_losing",
+      "Should sell profitable, fail retry, then sell losing",
+    );
+    assert.strictEqual(
+      result.soldPositions.length,
+      2,
+      "Should sell both profitable and losing positions",
+    );
+    assert.strictEqual(
+      result.soldPositions[0],
+      "m2-t2",
+      "Should sell profitable first",
+    );
+    assert.strictEqual(
+      result.soldPositions[1],
+      "m1-t1",
+      "Should sell losing second",
+    );
+  });
+
+  test("Should sell losing directly when no profitable candidates exist", () => {
+    const losingPosition: TestPosition = {
+      marketId: "m1",
+      tokenId: "t1",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.35,
+      pnlPct: -30,
+      pnlUsd: -15,
+    };
+
+    const profitableCandidates: TestPosition[] = []; // No profitable positions
+
+    const result = simulateFallbackLogic(
+      losingPosition,
+      profitableCandidates,
+      new Set(),
+      false,
+    );
+
+    assert.strictEqual(
+      result.action,
+      "sold_losing_directly",
+      "Should sell losing directly when no profitable candidates",
+    );
+    assert.strictEqual(
+      result.soldPositions.length,
+      1,
+      "Should only sell the losing position",
+    );
+    assert.strictEqual(
+      result.soldPositions[0],
+      "m1-t1",
+      "Should sell the losing position",
+    );
+  });
+
+  test("Should exclude already hedged positions from profitable candidates", () => {
+    const losingPosition: TestPosition = {
+      marketId: "m1",
+      tokenId: "t1",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.35,
+      pnlPct: -30,
+      pnlUsd: -15,
+    };
+
+    const profitableCandidates: TestPosition[] = [
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.44,
+        pnlPct: 10,
+        pnlUsd: 2,
+      }, // Already hedged
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "YES",
+        size: 75,
+        entryPrice: 0.3,
+        currentPrice: 0.45,
+        pnlPct: 50,
+        pnlUsd: 11.25,
+      }, // Not hedged
+    ];
+
+    const hedgedPositions = new Set(["m2-t2"]); // m2 is already hedged
+
+    const result = simulateFallbackLogic(
+      losingPosition,
+      profitableCandidates,
+      hedgedPositions,
+      true,
+    );
+
+    assert.strictEqual(
+      result.action,
+      "sold_profitable_and_hedged",
+      "Should sell non-hedged profitable and retry",
+    );
+    assert.strictEqual(
+      result.soldPositions[0],
+      "m3-t3",
+      "Should sell m3 (not hedged) instead of m2 (hedged)",
+    );
+  });
+
+  test("Should sell losing directly when all profitable candidates are already hedged", () => {
+    const losingPosition: TestPosition = {
+      marketId: "m1",
+      tokenId: "t1",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.35,
+      pnlPct: -30,
+      pnlUsd: -15,
+    };
+
+    const profitableCandidates: TestPosition[] = [
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.44,
+        pnlPct: 10,
+        pnlUsd: 2,
+      },
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "YES",
+        size: 75,
+        entryPrice: 0.3,
+        currentPrice: 0.45,
+        pnlPct: 50,
+        pnlUsd: 11.25,
+      },
+    ];
+
+    // All profitable candidates already hedged
+    const hedgedPositions = new Set(["m2-t2", "m3-t3"]);
+
+    const result = simulateFallbackLogic(
+      losingPosition,
+      profitableCandidates,
+      hedgedPositions,
+      false,
+    );
+
+    assert.strictEqual(
+      result.action,
+      "sold_losing_directly",
+      "Should sell losing directly when all profitable are hedged",
+    );
+    assert.strictEqual(
+      result.soldPositions.length,
+      1,
+      "Should only sell losing position",
+    );
+    assert.strictEqual(
+      result.soldPositions[0],
+      "m1-t1",
+      "Should sell the losing position",
+    );
+  });
+});

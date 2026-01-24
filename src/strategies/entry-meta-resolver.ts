@@ -116,7 +116,8 @@ export class EntryMetaResolver {
     this.apiTimeoutMs = config.apiTimeoutMs ?? 10_000; // 10 seconds
     this.maxPagesPerToken = config.maxPagesPerToken ?? 10;
     this.tradesPerPage = config.tradesPerPage ?? 500;
-    this.useLastAcquiredForTimeHeld = config.useLastAcquiredForTimeHeld ?? false;
+    this.useLastAcquiredForTimeHeld =
+      config.useLastAcquiredForTimeHeld ?? false;
   }
 
   /**
