@@ -234,22 +234,37 @@ export class SimpleSmartHedgingStrategy {
 
       // Skip if not losing enough
       if (position.pnlPct > -this.config.triggerLossPct) {
+        // Only log for positions with meaningful loss (>5%) to reduce noise
+        if (position.pnlPct < -5) {
+          this.logger.debug(
+            `[SimpleHedging] 📋 Skip hedge (loss trigger): ${position.side} position pnlPct=${position.pnlPct.toFixed(1)}% > trigger=-${this.config.triggerLossPct}%`,
+          );
+        }
         continue;
       }
 
       // Skip if entry price too high (not risky tier)
       if (position.entryPrice >= this.config.maxEntryPrice) {
+        this.logger.debug(
+          `[SimpleHedging] 📋 Skip hedge (entry price gate): ${position.side} entryPrice=${(position.entryPrice * 100).toFixed(0)}¢ >= maxEntryPrice=${(this.config.maxEntryPrice * 100).toFixed(0)}¢`,
+        );
         continue;
       }
 
       // Skip if no side defined (can't hedge without knowing the outcome)
       const side = position.side?.toUpperCase();
       if (!side || side.trim() === "") {
+        this.logger.debug(
+          `[SimpleHedging] 📋 Skip hedge (no side): position tokenId=${position.tokenId.slice(0, 16)}... has no side defined`,
+        );
         continue;
       }
 
       // Skip resolved positions
       if (position.redeemable) {
+        this.logger.debug(
+          `[SimpleHedging] 📋 Skip hedge (redeemable): ${position.side} position already redeemable`,
+        );
         continue;
       }
 
@@ -378,6 +393,87 @@ export class SimpleSmartHedgingStrategy {
         // Add to hedged positions to prevent future attempts (will be redeemed instead)
         this.hedgedPositions.add(key);
         continue;
+      }
+
+      // === REASON-AWARE HEDGE FALLBACK ===
+      // When hedge fails due to insufficient funds, try to free funds by selling
+      // profitable positions (lowest profit first), then retry the hedge once.
+      // Only sell the losing position as a last resort.
+      if (hedgeResult.reason === "INSUFFICIENT_BALANCE_OR_ALLOWANCE") {
+        this.logger.info(
+          `[SimpleHedging] 💰 Hedge failed (insufficient funds) - attempting to free funds by selling profitable positions`,
+        );
+
+        // Get profitable positions sorted by lowest profit first (sell smallest winners first)
+        const profitCandidates =
+          this.positionTracker.getProfitLiquidationCandidates(
+            0, // Any profit
+            this.config.minHoldSeconds,
+          );
+
+        // Filter out positions we've already hedged
+        const sellableProfits = profitCandidates.filter((p) => {
+          const k = `${p.marketId}-${p.tokenId}`;
+          return !this.hedgedPositions.has(k);
+        });
+
+        let freedFunds = false;
+        if (sellableProfits.length > 0) {
+          // Sell the lowest-profit profitable position first
+          const profitToSell = sellableProfits[0];
+          this.logger.info(
+            `[SimpleHedging] 🔄 Selling profitable position to free funds: ${profitToSell.side} +${profitToSell.pnlPct.toFixed(1)}% ($${(profitToSell.size * profitToSell.currentPrice).toFixed(2)})`,
+          );
+
+          const soldProfit = await this.sellPosition(profitToSell);
+          if (soldProfit) {
+            freedFunds = true;
+            actionsCount++;
+            // Mark as hedged to prevent future attempts on this position
+            this.hedgedPositions.add(
+              `${profitToSell.marketId}-${profitToSell.tokenId}`,
+            );
+          } else {
+            this.logger.warn(
+              `[SimpleHedging] ⚠️ Failed to sell profitable position for fund release`,
+            );
+          }
+        } else {
+          this.logger.debug(
+            `[SimpleHedging] 📋 No profitable positions available to sell for fund release`,
+          );
+        }
+
+        // Retry hedge once if we freed some funds
+        if (freedFunds) {
+          this.logger.info(
+            `[SimpleHedging] 🔄 Retrying hedge after freeing funds...`,
+          );
+
+          const retryResult = await this.executeHedge(position);
+          if (retryResult.success) {
+            actionsCount++;
+            this.hedgedPositions.add(key);
+            continue;
+          }
+
+          this.logger.warn(
+            `[SimpleHedging] ⚠️ Hedge retry failed (${retryResult.reason}) - will sell losing position as last resort`,
+          );
+        }
+
+        // Fall through to selling the losing position as last resort
+      }
+
+      // Log specific hedge failure reasons for visibility
+      if (
+        hedgeResult.reason === "TOO_EXPENSIVE" ||
+        hedgeResult.reason === "NO_OPPOSITE_TOKEN" ||
+        hedgeResult.reason === "NO_LIQUIDITY"
+      ) {
+        this.logger.info(
+          `[SimpleHedging] 📋 Hedge skip reason: ${hedgeResult.reason} - will liquidate losing position instead`,
+        );
       }
 
       // Hedge failed - liquidate to stop bleeding

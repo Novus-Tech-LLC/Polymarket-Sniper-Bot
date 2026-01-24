@@ -150,7 +150,11 @@ describe("EntryMetaResolver Position Reconstruction", () => {
       1700000000 * 1000,
       "lastAcquiredAt should be trade timestamp",
     );
-    assert.strictEqual(result.timeHeldSec, 3600, "timeHeldSec should be 1 hour");
+    assert.strictEqual(
+      result.timeHeldSec,
+      3600,
+      "timeHeldSec should be 1 hour",
+    );
   });
 
   test("Multiple BUY trades calculate weighted average correctly", () => {
@@ -161,7 +165,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.50, // 50¢
+        price: 0.5, // 50¢
       },
       {
         timestamp: 1700001000, // 1000 seconds later
@@ -169,7 +173,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.70, // 70¢
+        price: 0.7, // 70¢
       },
     ];
 
@@ -204,7 +208,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.60, // 60¢
+        price: 0.6, // 60¢
       },
       {
         timestamp: 1700001000,
@@ -212,7 +216,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "SELL",
         size: 30, // Sell 30 shares
-        price: 0.70, // Price doesn't affect remaining avg
+        price: 0.7, // Price doesn't affect remaining avg
       },
     ];
 
@@ -220,7 +224,11 @@ describe("EntryMetaResolver Position Reconstruction", () => {
     const result = reconstructPositionFromTrades(trades, now);
 
     assert.ok(result, "Should return entry meta");
-    assert.strictEqual(result.remainingShares, 70, "Should have 70 shares left");
+    assert.strictEqual(
+      result.remainingShares,
+      70,
+      "Should have 70 shares left",
+    );
     // Avg entry price stays at 60¢ (weighted average doesn't change with sells)
     assert.strictEqual(
       result.avgEntryPriceCents,
@@ -243,7 +251,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.50, // 50¢
+        price: 0.5, // 50¢
       },
       {
         timestamp: 1700001000,
@@ -251,7 +259,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.70, // 70¢
+        price: 0.7, // 70¢
       },
       {
         timestamp: 1700002000,
@@ -259,7 +267,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "SELL",
         size: 50, // Sell 50 shares
-        price: 0.80, // Exit price (doesn't affect remaining avg)
+        price: 0.8, // Exit price (doesn't affect remaining avg)
       },
     ];
 
@@ -267,7 +275,11 @@ describe("EntryMetaResolver Position Reconstruction", () => {
     const result = reconstructPositionFromTrades(trades, now);
 
     assert.ok(result, "Should return entry meta");
-    assert.strictEqual(result.remainingShares, 150, "Should have 150 shares left");
+    assert.strictEqual(
+      result.remainingShares,
+      150,
+      "Should have 150 shares left",
+    );
     // Weighted average: (100 * 0.50 + 100 * 0.70) / 200 = 0.60
     // After selling 50 at avg 0.60: (200 * 0.60 - 50 * 0.60) / 150 = 0.60
     assert.strictEqual(
@@ -295,7 +307,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.60,
+        price: 0.6,
       },
       {
         timestamp: 1700001000,
@@ -303,13 +315,17 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "SELL",
         size: 100, // Full sell
-        price: 0.70,
+        price: 0.7,
       },
     ];
 
     const result = reconstructPositionFromTrades(trades);
 
-    assert.strictEqual(result, null, "Should return null when position is closed");
+    assert.strictEqual(
+      result,
+      null,
+      "Should return null when position is closed",
+    );
   });
 
   test("Full SELL then new BUY starts fresh position", () => {
@@ -320,7 +336,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.50, // Old position at 50¢
+        price: 0.5, // Old position at 50¢
       },
       {
         timestamp: 1700001000,
@@ -328,7 +344,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "SELL",
         size: 100, // Full sell
-        price: 0.60,
+        price: 0.6,
       },
       {
         timestamp: 1700002000, // New buy starts fresh position
@@ -336,7 +352,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 50,
-        price: 0.80, // New position at 80¢
+        price: 0.8, // New position at 80¢
       },
     ];
 
@@ -447,7 +463,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: -0.10, // Invalid - negative price
+        price: -0.1, // Invalid - negative price
       },
       {
         timestamp: 1700002000,
@@ -455,7 +471,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "token-1",
         side: "BUY",
         size: 50,
-        price: 0.70, // Valid
+        price: 0.7, // Valid
       },
     ];
 
@@ -463,7 +479,11 @@ describe("EntryMetaResolver Position Reconstruction", () => {
     const result = reconstructPositionFromTrades(trades, now);
 
     assert.ok(result, "Should return entry meta for valid trade");
-    assert.strictEqual(result.remainingShares, 50, "Should only count valid trade");
+    assert.strictEqual(
+      result.remainingShares,
+      50,
+      "Should only count valid trade",
+    );
     assert.strictEqual(
       result.avgEntryPriceCents,
       70,
@@ -481,7 +501,7 @@ describe("EntryMetaResolver Position Reconstruction", () => {
         asset: "over-token-123", // Over token
         side: "BUY",
         size: 100,
-        price: 0.40, // 40¢
+        price: 0.4, // 40¢
       },
     ];
 
@@ -535,7 +555,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "SELL",
         size: 100,
-        price: 0.70,
+        price: 0.7,
       },
     ];
 
@@ -555,7 +575,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.60,
+        price: 0.6,
       },
       {
         timestamp: 1700001000,
@@ -563,7 +583,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "SELL",
         size: 150, // Try to sell more than owned
-        price: 0.70,
+        price: 0.7,
       },
     ];
 
@@ -584,7 +604,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.60,
+        price: 0.6,
       },
       {
         timestamp: 1700001000,
@@ -592,7 +612,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "SELL",
         size: 99.99999, // Near-complete sell leaving dust-level remainder (~0.00001 shares)
-        price: 0.70,
+        price: 0.7,
       },
     ];
 
@@ -614,7 +634,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "BUY",
         size: 50,
-        price: 0.70,
+        price: 0.7,
       },
       {
         timestamp: 1700000000, // First
@@ -622,7 +642,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "BUY",
         size: 100,
-        price: 0.50,
+        price: 0.5,
       },
       {
         timestamp: 1700001000, // Second (SELL)
@@ -630,7 +650,7 @@ describe("EntryMetaResolver Edge Cases", () => {
         asset: "token-1",
         side: "SELL",
         size: 50,
-        price: 0.60,
+        price: 0.6,
       },
     ];
 

@@ -372,7 +372,8 @@ export class ScalpTakeProfitStrategy {
 
     // CRITICAL: Get positions enriched with entry metadata from trade history API
     // This provides accurate timeHeldSec that survives container restarts
-    const enrichedPositions = await this.positionTracker.enrichPositionsWithEntryMeta();
+    const enrichedPositions =
+      await this.positionTracker.enrichPositionsWithEntryMeta();
     const positions = this.positionTracker.getPositions();
     let scalpedCount = 0;
     const now = Date.now();
@@ -431,13 +432,17 @@ export class ScalpTakeProfitStrategy {
         for (const p of profitable.slice(0, 10)) {
           // Top 10
           // Find enriched position to get timeHeldSec from trade history
-          const enriched = enrichedPositions.find(ep => ep.tokenId === p.tokenId);
-          const holdMin = enriched?.timeHeldSec !== undefined
-            ? Math.round(enriched.timeHeldSec / 60)
-            : "?";
-          const entryPriceCents = enriched?.avgEntryPriceCents !== undefined
-            ? enriched.avgEntryPriceCents.toFixed(1)
-            : (p.entryPrice * 100).toFixed(1);
+          const enriched = enrichedPositions.find(
+            (ep) => ep.tokenId === p.tokenId,
+          );
+          const holdMin =
+            enriched?.timeHeldSec !== undefined
+              ? Math.round(enriched.timeHeldSec / 60)
+              : "?";
+          const entryPriceCents =
+            enriched?.avgEntryPriceCents !== undefined
+              ? enriched.avgEntryPriceCents.toFixed(1)
+              : (p.entryPrice * 100).toFixed(1);
           this.logger.debug(
             `[ScalpTakeProfit] 💰 ${p.tokenId.slice(0, 12)}... +${p.pnlPct.toFixed(1)}% ($${p.pnlUsd.toFixed(2)}) | ` +
               `entry=${entryPriceCents}¢ current=${(p.currentPrice * 100).toFixed(1)}¢ | ` +
@@ -464,10 +469,13 @@ export class ScalpTakeProfitStrategy {
             .slice(0, 5)
             .map((p) => {
               // Find enriched position to get timeHeldSec from trade history
-              const enriched = enrichedPositions.find(ep => ep.tokenId === p.tokenId);
-              const holdMin = enriched?.timeHeldSec !== undefined
-                ? Math.round(enriched.timeHeldSec / 60)
-                : "?";
+              const enriched = enrichedPositions.find(
+                (ep) => ep.tokenId === p.tokenId,
+              );
+              const holdMin =
+                enriched?.timeHeldSec !== undefined
+                  ? Math.round(enriched.timeHeldSec / 60)
+                  : "?";
               return `${p.tokenId.slice(0, 8)}...+${p.pnlPct.toFixed(1)}%/$${p.pnlUsd.toFixed(2)} (${holdMin}min)`;
             })
             .join(", ") +
@@ -616,7 +624,10 @@ export class ScalpTakeProfitStrategy {
     }
 
     // Log if we couldn't get trade history time (important diagnostic)
-    if (!hasTradeHistoryTime && holdMinutes < ScalpTakeProfitStrategy.NO_ENTRY_TIME_HOLD_MINUTES) {
+    if (
+      !hasTradeHistoryTime &&
+      holdMinutes < ScalpTakeProfitStrategy.NO_ENTRY_TIME_HOLD_MINUTES
+    ) {
       this.logger.debug(
         `[ScalpTakeProfit] Position ${position.tokenId.slice(0, 8)}... using FALLBACK entry time (container uptime). ` +
           `Trade history not available - timeHeldSec may be inaccurate after restarts.`,

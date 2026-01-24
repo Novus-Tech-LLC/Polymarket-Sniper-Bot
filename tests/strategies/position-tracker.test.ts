@@ -2067,3 +2067,524 @@ describe("PositionTracker Active/Resolved Count Accounting", () => {
     assert.strictEqual(activeLosing.length, 1, "Should have 1 active losing");
   });
 });
+
+/**
+ * Tests for getProfitLiquidationCandidates logic
+ * Verifies that profitable positions are correctly filtered and sorted for
+ * selling to free up funds when hedging fails due to insufficient balance.
+ */
+describe("PositionTracker.getProfitLiquidationCandidates Logic", () => {
+  // Near-resolution threshold (matches private constant in position-tracker.ts)
+  const NEAR_RESOLUTION_THRESHOLD = 0.9;
+
+  // Helper type for test positions
+  interface TestProfitPosition {
+    marketId: string;
+    tokenId: string;
+    side: string;
+    size: number;
+    entryPrice: number;
+    currentPrice: number;
+    pnlPct: number;
+    pnlUsd: number;
+    redeemable?: boolean;
+  }
+
+  /**
+   * Helper function that simulates the getProfitLiquidationCandidates logic.
+   * This mirrors the actual implementation to ensure consistency with the code.
+   */
+  function filterProfitCandidates(
+    positions: TestProfitPosition[],
+    entryTimes: Map<string, number>,
+    config: {
+      minProfitPct: number;
+      minHoldSeconds: number;
+    },
+  ): TestProfitPosition[] {
+    const now = Date.now();
+
+    return (
+      positions
+        .filter((pos) => {
+          // Must be active (not redeemable)
+          if (pos.redeemable) return false;
+
+          // Must be profitable
+          if (pos.pnlPct <= 0) return false;
+
+          // Must have valid side info for selling
+          if (!pos.side || pos.side.trim() === "") return false;
+
+          // Must meet minimum profit threshold
+          if (pos.pnlPct < config.minProfitPct) return false;
+
+          // Exclude positions near resolution (price >= 90¢)
+          if (pos.currentPrice >= NEAR_RESOLUTION_THRESHOLD) return false;
+
+          // Must have been held for minimum time
+          const key = `${pos.marketId}-${pos.tokenId}`;
+          const entryTime = entryTimes.get(key);
+          if (entryTime) {
+            const holdSeconds = (now - entryTime) / 1000;
+            if (holdSeconds < config.minHoldSeconds) return false;
+          }
+
+          return true;
+        })
+        // Sort by lowest profit first (ascending pnlPct)
+        .sort((a, b) => a.pnlPct - b.pnlPct)
+    );
+  }
+
+  test("Returns only profitable positions (pnlPct > 0)", () => {
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.6,
+        pnlPct: 20,
+        pnlUsd: 10,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.3,
+        pnlPct: -25,
+        pnlUsd: -5,
+      },
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "YES",
+        size: 75,
+        entryPrice: 0.3,
+        currentPrice: 0.3,
+        pnlPct: 0,
+        pnlUsd: 0,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    positions.forEach((p) =>
+      entryTimes.set(`${p.marketId}-${p.tokenId}`, Date.now() - 300000),
+    );
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 0,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should return only profitable positions",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m1",
+      "Should include the profitable position",
+    );
+  });
+
+  test("Excludes positions near resolution (currentPrice >= 0.9)", () => {
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.85,
+        currentPrice: 0.92,
+        pnlPct: 8.2,
+        pnlUsd: 7,
+      }, // Near resolution
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.55,
+        pnlPct: 37.5,
+        pnlUsd: 7.5,
+      }, // Not near resolution
+    ];
+    const entryTimes = new Map<string, number>();
+    positions.forEach((p) =>
+      entryTimes.set(`${p.marketId}-${p.tokenId}`, Date.now() - 300000),
+    );
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 0,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should exclude position near resolution",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include position not near resolution",
+    );
+  });
+
+  test("Excludes positions without valid side", () => {
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.6,
+        pnlPct: 20,
+        pnlUsd: 10,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "YES",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.5,
+        pnlPct: 25,
+        pnlUsd: 5,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    positions.forEach((p) =>
+      entryTimes.set(`${p.marketId}-${p.tokenId}`, Date.now() - 300000),
+    );
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 0,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should exclude position without side",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include position with valid side",
+    );
+  });
+
+  test("Excludes redeemable positions", () => {
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.8,
+        pnlPct: 60,
+        pnlUsd: 30,
+        redeemable: true,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.3,
+        currentPrice: 0.4,
+        pnlPct: 33.3,
+        pnlUsd: 5,
+        redeemable: false,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    positions.forEach((p) =>
+      entryTimes.set(`${p.marketId}-${p.tokenId}`, Date.now() - 300000),
+    );
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 0,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should exclude redeemable position",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include non-redeemable position",
+    );
+  });
+
+  test("Excludes positions below minProfitPct threshold", () => {
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.52,
+        pnlPct: 4,
+        pnlUsd: 2,
+      }, // Below 5% threshold
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.3,
+        currentPrice: 0.36,
+        pnlPct: 20,
+        pnlUsd: 3,
+      }, // Above 5% threshold
+    ];
+    const entryTimes = new Map<string, number>();
+    positions.forEach((p) =>
+      entryTimes.set(`${p.marketId}-${p.tokenId}`, Date.now() - 300000),
+    );
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 5,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should exclude position below profit threshold",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include position above profit threshold",
+    );
+  });
+
+  test("Excludes positions failing min hold time", () => {
+    const now = Date.now();
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.6,
+        pnlPct: 20,
+        pnlUsd: 10,
+      }, // Held only 30s
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.5,
+        pnlPct: 25,
+        pnlUsd: 5,
+      }, // Held 5 min
+    ];
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", now - 30000); // 30 seconds ago
+    entryTimes.set("m2-t2", now - 300000); // 5 minutes ago
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 0,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(
+      candidates.length,
+      1,
+      "Should exclude position not held long enough",
+    );
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "Should include position held long enough",
+    );
+  });
+
+  test("Sorts by lowest profit first (ascending pnlPct)", () => {
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.75,
+        pnlPct: 50,
+        pnlUsd: 25,
+      },
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "NO",
+        size: 50,
+        entryPrice: 0.4,
+        currentPrice: 0.44,
+        pnlPct: 10,
+        pnlUsd: 2,
+      },
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "YES",
+        size: 75,
+        entryPrice: 0.3,
+        currentPrice: 0.39,
+        pnlPct: 30,
+        pnlUsd: 6.75,
+      },
+    ];
+    const entryTimes = new Map<string, number>();
+    positions.forEach((p) =>
+      entryTimes.set(`${p.marketId}-${p.tokenId}`, Date.now() - 300000),
+    );
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 0,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(candidates.length, 3, "Should return all 3 positions");
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m2",
+      "First should be lowest profit (10%)",
+    );
+    assert.strictEqual(
+      candidates[1].marketId,
+      "m3",
+      "Second should be middle profit (30%)",
+    );
+    assert.strictEqual(
+      candidates[2].marketId,
+      "m1",
+      "Third should be highest profit (50%)",
+    );
+  });
+
+  test("Combined filters work correctly", () => {
+    const now = Date.now();
+    const positions: TestProfitPosition[] = [
+      {
+        marketId: "m1",
+        tokenId: "t1",
+        side: "YES",
+        size: 100,
+        entryPrice: 0.5,
+        currentPrice: 0.6,
+        pnlPct: 20,
+        pnlUsd: 10,
+      }, // VALID - should be included
+      {
+        marketId: "m2",
+        tokenId: "t2",
+        side: "",
+        size: 50,
+        entryPrice: 0.3,
+        currentPrice: 0.4,
+        pnlPct: 33,
+        pnlUsd: 5,
+      }, // Invalid: no side
+      {
+        marketId: "m3",
+        tokenId: "t3",
+        side: "NO",
+        size: 75,
+        entryPrice: 0.85,
+        currentPrice: 0.95,
+        pnlPct: 11.8,
+        pnlUsd: 7.5,
+      }, // Invalid: near resolution
+      {
+        marketId: "m4",
+        tokenId: "t4",
+        side: "YES",
+        size: 60,
+        entryPrice: 0.4,
+        currentPrice: 0.3,
+        pnlPct: -25,
+        pnlUsd: -6,
+      }, // Invalid: losing
+      {
+        marketId: "m5",
+        tokenId: "t5",
+        side: "NO",
+        size: 80,
+        entryPrice: 0.5,
+        currentPrice: 0.55,
+        pnlPct: 10,
+        pnlUsd: 4,
+        redeemable: true,
+      }, // Invalid: redeemable
+      {
+        marketId: "m6",
+        tokenId: "t6",
+        side: "YES",
+        size: 90,
+        entryPrice: 0.3,
+        currentPrice: 0.42,
+        pnlPct: 40,
+        pnlUsd: 10.8,
+      }, // Invalid: held too short
+      {
+        marketId: "m7",
+        tokenId: "t7",
+        side: "NO",
+        size: 40,
+        entryPrice: 0.45,
+        currentPrice: 0.5,
+        pnlPct: 11.1,
+        pnlUsd: 2,
+      }, // VALID - should be included
+    ];
+
+    const entryTimes = new Map<string, number>();
+    entryTimes.set("m1-t1", now - 300000); // 5 min ago - valid
+    entryTimes.set("m2-t2", now - 300000);
+    entryTimes.set("m3-t3", now - 300000);
+    entryTimes.set("m4-t4", now - 300000);
+    entryTimes.set("m5-t5", now - 300000);
+    entryTimes.set("m6-t6", now - 30000); // 30s ago - too short
+    entryTimes.set("m7-t7", now - 300000); // 5 min ago - valid
+
+    const candidates = filterProfitCandidates(positions, entryTimes, {
+      minProfitPct: 0,
+      minHoldSeconds: 60,
+    });
+
+    assert.strictEqual(
+      candidates.length,
+      2,
+      "Should return only 2 valid positions",
+    );
+    // Should be sorted by lowest profit first
+    assert.strictEqual(
+      candidates[0].marketId,
+      "m7",
+      "First should be m7 (11.1% profit)",
+    );
+    assert.strictEqual(
+      candidates[1].marketId,
+      "m1",
+      "Second should be m1 (20% profit)",
+    );
+  });
+});
