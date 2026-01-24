@@ -296,6 +296,59 @@ export class PositionTracker {
   }
 
   /**
+   * Get only active (non-redeemable) positions
+   * Use this for strategies that can only trade on open markets (scalping, selling, etc.)
+   */
+  getActivePositions(): Position[] {
+    return this.getPositions().filter((pos) => !pos.redeemable);
+  }
+
+  /**
+   * Get active positions that are profitable (pnlPct > 0)
+   * This is the source of truth for scalping candidates
+   */
+  getActiveProfitablePositions(): Position[] {
+    return this.getActivePositions().filter((pos) => pos.pnlPct > 0);
+  }
+
+  /**
+   * Get active positions above a profit threshold
+   * Use this for scalping with minimum profit requirements
+   */
+  getActivePositionsAboveTarget(targetPct: number): Position[] {
+    return this.getActivePositions().filter((pos) => pos.pnlPct >= targetPct);
+  }
+
+  /**
+   * Get a summary of position counts for logging
+   * Provides consistent breakdown across all strategies
+   */
+  getPositionSummary(): {
+    total: number;
+    active: number;
+    redeemable: number;
+    activeProfitable: number;
+    activeLosing: number;
+    activeBreakeven: number;
+  } {
+    const positions = this.getPositions();
+    const active = positions.filter((p) => !p.redeemable);
+    const redeemable = positions.filter((p) => p.redeemable);
+    const activeProfitable = active.filter((p) => p.pnlPct > 0);
+    const activeLosing = active.filter((p) => p.pnlPct < 0);
+    const activeBreakeven = active.filter((p) => p.pnlPct === 0);
+
+    return {
+      total: positions.length,
+      active: active.length,
+      redeemable: redeemable.length,
+      activeProfitable: activeProfitable.length,
+      activeLosing: activeLosing.length,
+      activeBreakeven: activeBreakeven.length,
+    };
+  }
+
+  /**
    * Fetch positions from Polymarket API
    * Fetches user positions from Data API and enriches with current prices
    */
@@ -683,15 +736,17 @@ export class PositionTracker {
         // P&L summary logging with rate-limiting to avoid log spam
         // Sort by P&L% descending to show most profitable first
         const sortedByPnl = [...positions].sort((a, b) => b.pnlPct - a.pnlPct);
-        const profitable = sortedByPnl.filter((p) => p.pnlPct > 0);
         const redeemablePositions = sortedByPnl.filter((p) => p.redeemable);
-        const losing = sortedByPnl.filter((p) => p.pnlPct < 0 && !p.redeemable);
+        // Active positions = non-redeemable (can be traded/scalped)
+        const activePositions = sortedByPnl.filter((p) => !p.redeemable);
+        const activeProfitable = activePositions.filter((p) => p.pnlPct > 0);
+        const activeLosing = activePositions.filter((p) => p.pnlPct < 0);
 
         // Rate-limit: log at most once per minute or when counts change
         const now = Date.now();
         const countsChanged =
-          this.lastLoggedPnlCounts.profitable !== profitable.length ||
-          this.lastLoggedPnlCounts.losing !== losing.length ||
+          this.lastLoggedPnlCounts.profitable !== activeProfitable.length ||
+          this.lastLoggedPnlCounts.losing !== activeLosing.length ||
           this.lastLoggedPnlCounts.redeemable !== redeemablePositions.length;
         const shouldLogPnlSummary =
           countsChanged ||
@@ -700,25 +755,20 @@ export class PositionTracker {
         if (shouldLogPnlSummary) {
           this.lastPnlSummaryLogAt = now;
           this.lastLoggedPnlCounts = {
-            profitable: profitable.length,
-            losing: losing.length,
+            profitable: activeProfitable.length,
+            losing: activeLosing.length,
             redeemable: redeemablePositions.length,
           };
 
-          // Log summary at DEBUG level (INFO only if there are redeemable positions)
-          if (redeemablePositions.length > 0) {
-            this.logger.info(
-              `[PositionTracker] 📊 P&L Summary: ${profitable.length} profitable, ${losing.length} losing, ${redeemablePositions.length} redeemable`,
-            );
-          } else {
-            this.logger.debug(
-              `[PositionTracker] 📊 P&L Summary: ${profitable.length} profitable, ${losing.length} losing, ${redeemablePositions.length} redeemable`,
-            );
-          }
+          // Log summary showing ACTIVE positions breakdown (what scalping/selling strategies care about)
+          // This should now match what ScalpTakeProfit reports
+          this.logger.info(
+            `[PositionTracker] 📊 P&L Summary: ACTIVE: ${activeProfitable.length} profitable, ${activeLosing.length} losing | REDEEMABLE: ${redeemablePositions.length}`,
+          );
 
-          // Log profitable positions at DEBUG level
-          if (profitable.length > 0) {
-            const profitSummary = profitable
+          // Log active profitable positions at DEBUG level (scalping candidates)
+          if (activeProfitable.length > 0) {
+            const profitSummary = activeProfitable
               .slice(0, 10) // Top 10 profitable
               .map(
                 (p) =>
@@ -726,7 +776,7 @@ export class PositionTracker {
               )
               .join(", ");
             this.logger.debug(
-              `[PositionTracker] 💰 Profitable (${profitable.length}): ${profitSummary}${profitable.length > 10 ? "..." : ""}`,
+              `[PositionTracker] 💰 Active Profitable (${activeProfitable.length}): ${profitSummary}${activeProfitable.length > 10 ? "..." : ""}`,
             );
           }
 

@@ -343,15 +343,16 @@ export class ScalpTakeProfitStrategy {
     // Update price history for all positions
     await this.updatePriceHistory(positions);
 
-    // Calculate position summaries
-    const activePositions = positions.filter((p) => !p.redeemable);
-    const profitable = activePositions.filter((p) => p.pnlPct > 0);
+    // Use PositionTracker as the source of truth for position summaries
+    // This ensures consistent reporting across all strategies
+    const activePositions = this.positionTracker.getActivePositions();
+    const profitable = this.positionTracker.getActiveProfitablePositions();
     const losing = activePositions.filter((p) => p.pnlPct < 0);
-    const targetProfit = activePositions.filter(
-      (p) => p.pnlPct >= this.config.targetProfitPct,
+    const targetProfit = this.positionTracker.getActivePositionsAboveTarget(
+      this.config.targetProfitPct,
     );
-    const minProfit = activePositions.filter(
-      (p) => p.pnlPct >= this.config.minProfitPct,
+    const minProfit = this.positionTracker.getActivePositionsAboveTarget(
+      this.config.minProfitPct,
     );
 
     // Rate-limited logging: log summary at most once per minute or when counts change significantly
@@ -414,8 +415,8 @@ export class ScalpTakeProfitStrategy {
     }
 
     // Log highly profitable positions that should be candidates for scalping
-    const highlyProfitable = activePositions.filter(
-      (p) => p.pnlPct >= this.config.targetProfitPct,
+    const highlyProfitable = this.positionTracker.getActivePositionsAboveTarget(
+      this.config.targetProfitPct,
     );
     if (highlyProfitable.length > 0) {
       this.logger.info(
