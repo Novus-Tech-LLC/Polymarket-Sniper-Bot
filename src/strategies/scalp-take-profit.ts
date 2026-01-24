@@ -344,6 +344,13 @@ export const CIRCUIT_BREAKER_COOLDOWNS_MS = [
 ];
 
 /**
+ * Window in which consecutive failures will escalate the cooldown.
+ * If the last failure was more than this long ago, reset failure count.
+ * Default: 2 hours (allows time for market conditions to change)
+ */
+export const CIRCUIT_BREAKER_ESCALATION_WINDOW_MS = 7_200_000; // 2 hours
+
+/**
  * Dust cooldown duration (10 minutes)
  */
 export const DUST_COOLDOWN_MS = 600_000;
@@ -1869,7 +1876,9 @@ export class ScalpTakeProfitStrategy {
       this.executionCircuitBreaker.delete(plan.tokenId);
     }
 
-    const bestBidCents = position.currentBidPrice * 100;
+    // At this point, currentBidPrice is guaranteed to exist and be > 0
+    // because validateOrderbookQuality() would have returned NO_EXECUTION_PRICE if not
+    const bestBidCents = position.currentBidPrice! * 100;
 
     // Update plan stage based on elapsed time
     this.updateExitPlanStage(plan, now);
@@ -1961,9 +1970,9 @@ export class ScalpTakeProfitStrategy {
 
     let failureCount = 1;
     if (existing) {
-      // If failure happened recently (within max cooldown), escalate
-      const recentFailureWindow = CIRCUIT_BREAKER_COOLDOWNS_MS[CIRCUIT_BREAKER_COOLDOWNS_MS.length - 1];
-      if (now - existing.lastFailureAtMs < recentFailureWindow) {
+      // If failure happened recently (within escalation window), escalate
+      // Using separate constant for clarity, not tied to cooldown values
+      if (now - existing.lastFailureAtMs < CIRCUIT_BREAKER_ESCALATION_WINDOW_MS) {
         failureCount = Math.min(existing.failureCount + 1, CIRCUIT_BREAKER_COOLDOWNS_MS.length);
       }
     }
@@ -2158,6 +2167,21 @@ export class ScalpTakeProfitStrategy {
         this.exitPlans.delete(tokenId);
       }
     }
+
+    // Clean up expired circuit breakers
+    const now = Date.now();
+    for (const [tokenId, entry] of this.executionCircuitBreaker.entries()) {
+      if (!currentTokenIds.has(tokenId) || entry.disabledUntilMs <= now) {
+        this.executionCircuitBreaker.delete(tokenId);
+      }
+    }
+
+    // Clean up expired dust cooldowns
+    for (const [tokenId, cooldownEnd] of this.dustCooldowns.entries()) {
+      if (!currentTokenIds.has(tokenId) || cooldownEnd <= now) {
+        this.dustCooldowns.delete(tokenId);
+      }
+    }
   }
 
   /**
@@ -2184,6 +2208,8 @@ export class ScalpTakeProfitStrategy {
     this.exitedPositions.clear();
     this.exitPlans.clear();
     this.skipLogTracker.clear();
+    this.executionCircuitBreaker.clear();
+    this.dustCooldowns.clear();
     this.stats = {
       scalpCount: 0,
       totalProfitUsd: 0,

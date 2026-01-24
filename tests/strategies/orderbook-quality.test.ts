@@ -4,6 +4,7 @@ import {
   validateOrderbookQuality,
   ORDERBOOK_QUALITY_THRESHOLDS,
   CIRCUIT_BREAKER_COOLDOWNS_MS,
+  CIRCUIT_BREAKER_ESCALATION_WINDOW_MS,
   DUST_COOLDOWN_MS,
   type OrderbookQualityStatus,
   type OrderbookQualityResult,
@@ -196,6 +197,11 @@ describe("Circuit Breaker Cooldowns", () => {
     const failureCount10 = 10;
     const cooldownMs10 = CIRCUIT_BREAKER_COOLDOWNS_MS[Math.min(failureCount10 - 1, CIRCUIT_BREAKER_COOLDOWNS_MS.length - 1)];
     assert.equal(cooldownMs10, 3_600_000);
+  });
+
+  test("escalation window is 2 hours", () => {
+    // Consecutive failures within this window will escalate cooldown
+    assert.equal(CIRCUIT_BREAKER_ESCALATION_WINDOW_MS, 7_200_000); // 2 hours
   });
 });
 
