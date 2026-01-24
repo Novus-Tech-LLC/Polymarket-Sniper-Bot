@@ -48,7 +48,7 @@ import type {
   Position,
   PortfolioSnapshot,
 } from "./position-tracker";
-import { postOrder } from "../utils/post-order.util";
+import { postOrder, OrderbookQualityError } from "../utils/post-order.util";
 import {
   LogDeduper,
   SkipReasonAggregator,
@@ -1693,6 +1693,27 @@ export class ScalpTakeProfitStrategy {
       );
       return false;
     } catch (err) {
+      // === ORDERBOOK QUALITY ERROR HANDLING ===
+      // If the error is due to corrupted/invalid orderbook data, handle it gracefully:
+      // - Update the circuit breaker for this token
+      // - Log a rate-limited warning (not an error)
+      // - Return false to trigger retry logic in executeExitPlan
+      if (err instanceof OrderbookQualityError) {
+        // Update circuit breaker using the quality result from the error
+        const now = Date.now();
+        this.updateCircuitBreaker(position.tokenId, err.qualityResult, now);
+
+        // Rate-limited logging - don't spam for repeated failures on the same token
+        if (this.logDeduper.shouldLog(`ScalpExit:QUALITY_ERROR:${position.tokenId}`, 30_000)) {
+          this.logger.warn(
+            `[ScalpTakeProfit] ⚠️ Orderbook quality error (entering cooldown): ` +
+              `status=${err.qualityResult.status} tokenId=${position.tokenId.slice(0, 12)}... ` +
+              `reason: ${err.qualityResult.reason}`,
+          );
+        }
+        return false;
+      }
+
       // Include full position context for troubleshooting price protection and other errors
       // NOTE: Exit plans persist in memory (this.exitPlans Map) so errors may repeat until
       // the position exits or the plan is abandoned. Container restarts clear plans but

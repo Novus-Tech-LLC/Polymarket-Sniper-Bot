@@ -20,6 +20,10 @@ import {
   markMarketBuyCompleted,
 } from "./funds-allowance.util";
 import { isLiveTradingEnabled } from "./live-trading.util";
+import {
+  validateOrderbookQuality,
+  type OrderbookQualityResult,
+} from "../strategies/scalp-take-profit";
 
 // On-chain trading support
 import type { Wallet } from "ethers";
@@ -35,6 +39,32 @@ export type OrderOutcome = "YES" | "NO";
  * Default: 0.10 (10¢) - only blocks extreme loser positions
  */
 export const GLOBAL_MIN_BUY_PRICE = 0.1;
+
+/**
+ * Error class for INVALID_BOOK or EXEC_PRICE_UNTRUSTED orderbook quality issues.
+ * This error is thrown when the orderbook data is corrupted/untrusted, not when
+ * the price simply doesn't meet the acceptable threshold.
+ *
+ * Callers can catch this error to:
+ * 1. Enter circuit breaker cooldown for the tokenId
+ * 2. Classify the failure as "corrupted data" vs "legitimate price protection"
+ * 3. Avoid logging as a generic "scalp failed" error
+ */
+export class OrderbookQualityError extends Error {
+  public readonly qualityResult: OrderbookQualityResult;
+  public readonly tokenId: string;
+
+  constructor(
+    message: string,
+    qualityResult: OrderbookQualityResult,
+    tokenId: string,
+  ) {
+    super(message);
+    this.name = "OrderbookQualityError";
+    this.qualityResult = qualityResult;
+    this.tokenId = tokenId;
+  }
+}
 
 /**
  * Price protection validation result
@@ -551,6 +581,31 @@ async function postOrderClobInner(
   const bestBid = orderBook.bids?.[0] ? parseFloat(orderBook.bids[0].price) : null;
   const bestAsk = orderBook.asks?.[0] ? parseFloat(orderBook.asks[0].price) : null;
 
+  // === ORDERBOOK QUALITY CHECK (before price protection) ===
+  // Check for corrupted/invalid orderbook data FIRST.
+  // If the orderbook is invalid (e.g., bestBid=0.01, bestAsk=0.99),
+  // throw OrderbookQualityError instead of a generic price protection error.
+  // This allows callers to distinguish between:
+  // - "corrupted data, need circuit breaker" (OrderbookQualityError)
+  // - "legitimate price too low" (regular Error from price protection)
+  //
+  // For SELL orders, use minAcceptablePrice as reference (represents expected price)
+  // For BUY orders, use maxAcceptablePrice as reference (represents expected price)
+  const referencePrice = side === "SELL" ? minAcceptablePrice : maxAcceptablePrice;
+  const orderbookQuality = validateOrderbookQuality(bestBid, bestAsk, referencePrice);
+
+  if (orderbookQuality.status !== "VALID") {
+    const errorMessage =
+      `[CLOB] ORDERBOOK_QUALITY_FAILURE: ${orderbookQuality.status} for tokenId=${tokenId.slice(0, 12)}... ` +
+      `bestBid=${bestBid !== null ? (bestBid * 100).toFixed(1) + "¢" : "null"} ` +
+      `bestAsk=${bestAsk !== null ? (bestAsk * 100).toFixed(1) + "¢" : "null"} ` +
+      `referencePrice=${referencePrice !== undefined ? (referencePrice * 100).toFixed(1) + "¢" : "N/A"} ` +
+      `reason: ${orderbookQuality.reason ?? "unknown"}`;
+
+    logger.warn(errorMessage);
+    throw new OrderbookQualityError(errorMessage, orderbookQuality, tokenId);
+  }
+
   // Use the new validatePriceProtection helper for correct side-aware validation
   const priceProtection = validatePriceProtection({
     side,
@@ -562,16 +617,15 @@ async function postOrderClobInner(
   });
 
   if (!priceProtection.valid) {
-    // Log diagnostics with actionable context for debugging price protection failures
-    // NOTE: Price protection errors often occur when orderbook liquidity is poor (wide spread,
-    // stale quotes) or the token has low activity. The error will repeat on each exit attempt
-    // until market conditions improve or the exit plan escalates to FORCE stage.
-    // If this persists after container restart, it means the position still exists and the
-    // exit ladder is re-created when profitable positions are detected.
+    // Price protection failed with VALID orderbook - this is a legitimate price issue.
+    // NOTE: This error may repeat during exit plan execution until:
+    // 1. Market conditions improve (bestBid rises above minAcceptable)
+    // 2. Exit plan escalates to FORCE stage (exits at any price)
+    // 3. Exit plan is abandoned after max attempts
     logger.warn(
-      `[CLOB] Price protection failed: ${priceProtection.error} ` +
+      `[CLOB] Price protection failed (valid book): ${priceProtection.error} ` +
         `diagnostics=${JSON.stringify(priceProtection.diagnostics)} ` +
-        `(This error repeats while exit plan is active. Will escalate to FORCE stage after window expires.)`,
+        `(Will retry until FORCE stage or conditions improve)`,
     );
     throw new Error(priceProtection.error ?? "Price protection failed");
   }

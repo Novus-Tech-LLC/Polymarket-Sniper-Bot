@@ -9,6 +9,7 @@ import {
   type OrderbookQualityStatus,
   type OrderbookQualityResult,
 } from "../../src/strategies/scalp-take-profit";
+import { OrderbookQualityError } from "../../src/utils/post-order.util";
 
 // === ORDERBOOK QUALITY VALIDATION TESTS ===
 
@@ -236,5 +237,96 @@ describe("Edge Cases", () => {
     // bestBid=1¢ with no dataApiPrice for comparison
     // Not INVALID_BOOK (ask not > 95¢), not EXEC_PRICE_UNTRUSTED (no reference)
     assert.equal(result.status, "VALID");
+  });
+});
+
+// === ORDERBOOK QUALITY ERROR CLASS TESTS ===
+
+describe("OrderbookQualityError", () => {
+  test("should be an instance of Error", () => {
+    const qualityResult: OrderbookQualityResult = {
+      status: "INVALID_BOOK",
+      reason: "Extreme spread",
+      diagnostics: {
+        bestBid: 0.01,
+        bestAsk: 0.99,
+      },
+    };
+
+    const error = new OrderbookQualityError(
+      "Test error message",
+      qualityResult,
+      "test-token-id",
+    );
+
+    assert.ok(error instanceof Error);
+    assert.ok(error instanceof OrderbookQualityError);
+  });
+
+  test("should store quality result and tokenId", () => {
+    const qualityResult: OrderbookQualityResult = {
+      status: "INVALID_BOOK",
+      reason: "Wide spread: bid=1.0¢ ask=99.0¢",
+      diagnostics: {
+        bestBid: 0.01,
+        bestAsk: 0.99,
+        dataApiPrice: 0.62,
+      },
+    };
+
+    const tokenId = "0x1234567890abcdef";
+    const error = new OrderbookQualityError(
+      "Orderbook quality error",
+      qualityResult,
+      tokenId,
+    );
+
+    assert.equal(error.qualityResult, qualityResult);
+    assert.equal(error.tokenId, tokenId);
+    assert.equal(error.qualityResult.status, "INVALID_BOOK");
+    assert.equal(error.name, "OrderbookQualityError");
+  });
+
+  test("should have correct message", () => {
+    const qualityResult: OrderbookQualityResult = {
+      status: "EXEC_PRICE_UNTRUSTED",
+      reason: "Price deviation too large",
+      diagnostics: {
+        bestBid: 0.25,
+        bestAsk: 0.30,
+        dataApiPrice: 0.60,
+        priceDeviation: 0.35,
+      },
+    };
+
+    const message = "CLOB orderbook quality failure: EXEC_PRICE_UNTRUSTED";
+    const error = new OrderbookQualityError(message, qualityResult, "token123");
+
+    assert.equal(error.message, message);
+  });
+
+  test("can be used with instanceof for error handling", () => {
+    const qualityResult: OrderbookQualityResult = {
+      status: "NO_EXECUTION_PRICE",
+      reason: "No bestBid available from orderbook",
+      diagnostics: {
+        bestBid: null,
+        bestAsk: 0.65,
+      },
+    };
+
+    const error = new OrderbookQualityError("No bid", qualityResult, "token456");
+
+    // Simulate catch block usage
+    try {
+      throw error;
+    } catch (err) {
+      if (err instanceof OrderbookQualityError) {
+        assert.equal(err.qualityResult.status, "NO_EXECUTION_PRICE");
+        assert.equal(err.tokenId, "token456");
+      } else {
+        assert.fail("Should have caught OrderbookQualityError");
+      }
+    }
   });
 });
