@@ -81,6 +81,11 @@ export class PositionTracker {
   private static readonly RESOLVED_PRICE_HIGH_THRESHOLD = 0.99;
   private static readonly RESOLVED_PRICE_LOW_THRESHOLD = 0.01;
 
+  // Rate-limit P&L summary logging to avoid log spam (refreshes every 5s)
+  private lastPnlSummaryLogAt = 0;
+  private lastLoggedPnlCounts = { profitable: 0, losing: 0, redeemable: 0 };
+  private static readonly PNL_SUMMARY_LOG_INTERVAL_MS = 60_000; // Log at most once per minute
+
   constructor(config: PositionTrackerConfig) {
     this.client = config.client;
     this.logger = config.logger;
@@ -617,44 +622,69 @@ export class PositionTracker {
           );
         }
 
-        // CRITICAL: Log position P&L summary for diagnostics
+        // P&L summary logging with rate-limiting to avoid log spam
         // Sort by P&L% descending to show most profitable first
         const sortedByPnl = [...positions].sort((a, b) => b.pnlPct - a.pnlPct);
         const profitable = sortedByPnl.filter((p) => p.pnlPct > 0);
         const redeemablePositions = sortedByPnl.filter((p) => p.redeemable);
         const losing = sortedByPnl.filter((p) => p.pnlPct < 0 && !p.redeemable);
 
-        // Always log P&L summary at INFO level so user can see their positions
-        this.logger.info(
-          `[PositionTracker] 📊 P&L Summary: ${profitable.length} profitable, ${losing.length} losing, ${redeemablePositions.length} redeemable`,
-        );
+        // Rate-limit: log at most once per minute or when counts change
+        const now = Date.now();
+        const countsChanged =
+          this.lastLoggedPnlCounts.profitable !== profitable.length ||
+          this.lastLoggedPnlCounts.losing !== losing.length ||
+          this.lastLoggedPnlCounts.redeemable !== redeemablePositions.length;
+        const shouldLogPnlSummary =
+          countsChanged ||
+          now - this.lastPnlSummaryLogAt >= PositionTracker.PNL_SUMMARY_LOG_INTERVAL_MS;
 
-        // Log profitable positions (most important for scalping/quick-flip)
-        if (profitable.length > 0) {
-          const profitSummary = profitable
-            .slice(0, 10) // Top 10 profitable
-            .map(
-              (p) =>
-                `${p.tokenId.slice(0, 8)}...+${p.pnlPct.toFixed(1)}%/$${p.pnlUsd.toFixed(2)}`,
-            )
-            .join(", ");
-          this.logger.info(
-            `[PositionTracker] 💰 Profitable (${profitable.length}): ${profitSummary}${profitable.length > 10 ? "..." : ""}`,
-          );
-        }
+        if (shouldLogPnlSummary) {
+          this.lastPnlSummaryLogAt = now;
+          this.lastLoggedPnlCounts = {
+            profitable: profitable.length,
+            losing: losing.length,
+            redeemable: redeemablePositions.length,
+          };
 
-        // Log redeemable positions (critical for redemption)
-        if (redeemablePositions.length > 0) {
-          const redeemSummary = redeemablePositions
-            .slice(0, 5)
-            .map(
-              (p) =>
-                `${p.tokenId.slice(0, 8)}...(${p.currentPrice > 0 ? "WIN" : "LOSS"})`,
-            )
-            .join(", ");
-          this.logger.info(
-            `[PositionTracker] 🎯 Redeemable (${redeemablePositions.length}): ${redeemSummary}${redeemablePositions.length > 5 ? "..." : ""}`,
-          );
+          // Log summary at DEBUG level (INFO only if there are redeemable positions)
+          if (redeemablePositions.length > 0) {
+            this.logger.info(
+              `[PositionTracker] 📊 P&L Summary: ${profitable.length} profitable, ${losing.length} losing, ${redeemablePositions.length} redeemable`,
+            );
+          } else {
+            this.logger.debug(
+              `[PositionTracker] 📊 P&L Summary: ${profitable.length} profitable, ${losing.length} losing, ${redeemablePositions.length} redeemable`,
+            );
+          }
+
+          // Log profitable positions at DEBUG level
+          if (profitable.length > 0) {
+            const profitSummary = profitable
+              .slice(0, 10) // Top 10 profitable
+              .map(
+                (p) =>
+                  `${p.tokenId.slice(0, 8)}...+${p.pnlPct.toFixed(1)}%/$${p.pnlUsd.toFixed(2)}`,
+              )
+              .join(", ");
+            this.logger.debug(
+              `[PositionTracker] 💰 Profitable (${profitable.length}): ${profitSummary}${profitable.length > 10 ? "..." : ""}`,
+            );
+          }
+
+          // Log redeemable positions at INFO level (critical for redemption)
+          if (redeemablePositions.length > 0) {
+            const redeemSummary = redeemablePositions
+              .slice(0, 5)
+              .map(
+                (p) =>
+                  `${p.tokenId.slice(0, 8)}...(${p.currentPrice > 0 ? "WIN" : "LOSS"})`,
+              )
+              .join(", ");
+            this.logger.info(
+              `[PositionTracker] 🎯 Redeemable (${redeemablePositions.length}): ${redeemSummary}${redeemablePositions.length > 5 ? "..." : ""}`,
+            );
+          }
         }
       }
 

@@ -398,16 +398,21 @@ export class OrderSubmissionController {
     if (params.tokenId && params.side) {
       const hardCooldownKey = `${params.tokenId}:${params.side}`;
       const hardCooldownUntil = this.hardCooldownCache.get(hardCooldownKey);
-      if (hardCooldownUntil && params.now < hardCooldownUntil) {
-        const remainingSec = Math.ceil((hardCooldownUntil - params.now) / 1000);
-        params.logger.warn(
-          `[CLOB] Order skipped (COOLDOWN_ACTIVE): ${params.side} on token ${params.tokenId.slice(0, 8)}... blocked for ${remainingSec}s (server-imposed cooldown)`,
-        );
-        return {
-          status: "skipped",
-          reason: "COOLDOWN_ACTIVE",
-          blockedUntil: hardCooldownUntil,
-        };
+      if (hardCooldownUntil) {
+        if (params.now < hardCooldownUntil) {
+          const remainingSec = Math.ceil((hardCooldownUntil - params.now) / 1000);
+          params.logger.warn(
+            `[CLOB] Order skipped (COOLDOWN_ACTIVE): ${params.side} on token ${params.tokenId.slice(0, 8)}... blocked for ${remainingSec}s (server-imposed cooldown)`,
+          );
+          return {
+            status: "skipped",
+            reason: "COOLDOWN_ACTIVE",
+            blockedUntil: hardCooldownUntil,
+          };
+        } else {
+          // Cooldown expired - clean up the entry
+          this.hardCooldownCache.delete(hardCooldownKey);
+        }
       }
     }
 
@@ -724,26 +729,29 @@ function extractCooldownUntil(response: unknown): number | undefined {
     };
   } | null;
 
+  // Helper to parse and normalize the value
+  // Values < 1e12 are assumed to be in seconds, otherwise milliseconds
+  const parseValue = (value: number | string | undefined): number | undefined => {
+    if (value === undefined) return undefined;
+    const parsed = typeof value === "string" ? parseInt(value, 10) : value;
+    if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+    // Normalize: if value looks like seconds (< year 2001 in ms), convert to ms
+    return parsed < 1e12 ? parsed * 1000 : parsed;
+  };
+
   // Check direct field
-  const directValue = candidate?.cooldownUntil ?? candidate?.cooldown_until;
+  const directValue = parseValue(candidate?.cooldownUntil ?? candidate?.cooldown_until);
   if (directValue !== undefined) {
-    const parsed =
-      typeof directValue === "string" ? parseInt(directValue, 10) : directValue;
-    if (Number.isFinite(parsed) && parsed > Date.now()) {
-      return parsed;
-    }
+    return directValue;
   }
 
   // Check nested response.data field
-  const nestedValue =
+  const nestedValue = parseValue(
     candidate?.response?.data?.cooldownUntil ??
-    candidate?.response?.data?.cooldown_until;
+    candidate?.response?.data?.cooldown_until
+  );
   if (nestedValue !== undefined) {
-    const parsed =
-      typeof nestedValue === "string" ? parseInt(nestedValue, 10) : nestedValue;
-    if (Number.isFinite(parsed) && parsed > Date.now()) {
-      return parsed;
-    }
+    return nestedValue;
   }
 
   return undefined;

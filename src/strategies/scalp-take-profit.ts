@@ -300,6 +300,11 @@ export class ScalpTakeProfitStrategy {
     avgHoldMinutes: 0,
   };
 
+  // Rate-limit logging: track last summary log time and counts
+  private lastSummaryLogAt = 0;
+  private lastLoggedCounts = { profitable: 0, losing: 0, total: 0 };
+  private static readonly SUMMARY_LOG_INTERVAL_MS = 60_000; // Log summary at most once per minute
+
   constructor(config: {
     client: ClobClient;
     logger: ConsoleLogger;
@@ -334,7 +339,7 @@ export class ScalpTakeProfitStrategy {
     // Update price history for all positions
     await this.updatePriceHistory(positions);
 
-    // ALWAYS log position summary at INFO level for diagnostics
+    // Calculate position summaries
     const activePositions = positions.filter((p) => !p.redeemable);
     const profitable = activePositions.filter((p) => p.pnlPct > 0);
     const losing = activePositions.filter((p) => p.pnlPct < 0);
@@ -345,27 +350,53 @@ export class ScalpTakeProfitStrategy {
       (p) => p.pnlPct >= this.config.minProfitPct,
     );
 
-    // Always log summary so user can see what positions exist
-    this.logger.info(
-      `[ScalpTakeProfit] 📊 Active positions: ${activePositions.length} total | ` +
-      `${profitable.length} profitable (>0%) | ${losing.length} losing | ` +
-      `${minProfit.length} >= min ${this.config.minProfitPct}% | ` +
-      `${targetProfit.length} >= target ${this.config.targetProfitPct}%`,
-    );
+    // Rate-limited logging: log summary at most once per minute or when counts change significantly
+    const countsChanged =
+      this.lastLoggedCounts.profitable !== profitable.length ||
+      this.lastLoggedCounts.losing !== losing.length ||
+      this.lastLoggedCounts.total !== activePositions.length;
+    const shouldLogSummary =
+      countsChanged ||
+      now - this.lastSummaryLogAt >= ScalpTakeProfitStrategy.SUMMARY_LOG_INTERVAL_MS;
 
-    // Log each profitable position with details
-    if (profitable.length > 0) {
-      for (const p of profitable.slice(0, 10)) { // Top 10
-        const entryTime = this.positionTracker.getPositionEntryTime(p.marketId, p.tokenId);
-        const holdMin = entryTime ? Math.round((now - entryTime) / 60000) : "?";
+    if (shouldLogSummary) {
+      this.lastSummaryLogAt = now;
+      this.lastLoggedCounts = {
+        profitable: profitable.length,
+        losing: losing.length,
+        total: activePositions.length,
+      };
+
+      // Log summary at DEBUG level (use INFO only when there are actionable positions at target)
+      if (targetProfit.length > 0) {
         this.logger.info(
-          `[ScalpTakeProfit] 💰 ${p.tokenId.slice(0, 12)}... +${p.pnlPct.toFixed(1)}% ($${p.pnlUsd.toFixed(2)}) | ` +
-          `entry=${(p.entryPrice * 100).toFixed(1)}¢ current=${(p.currentPrice * 100).toFixed(1)}¢ | ` +
-          `held=${holdMin}min | size=${p.size.toFixed(2)}`,
+          `[ScalpTakeProfit] 📊 Active positions: ${activePositions.length} total | ` +
+          `${profitable.length} profitable (>0%) | ${losing.length} losing | ` +
+          `${targetProfit.length} >= target ${this.config.targetProfitPct}%`,
+        );
+      } else {
+        this.logger.debug(
+          `[ScalpTakeProfit] 📊 Active positions: ${activePositions.length} total | ` +
+          `${profitable.length} profitable (>0%) | ${losing.length} losing | ` +
+          `${minProfit.length} >= min ${this.config.minProfitPct}% | ` +
+          `${targetProfit.length} >= target ${this.config.targetProfitPct}%`,
         );
       }
-      if (profitable.length > 10) {
-        this.logger.info(`[ScalpTakeProfit] ... and ${profitable.length - 10} more profitable positions`);
+
+      // Log profitable positions at DEBUG level
+      if (profitable.length > 0) {
+        for (const p of profitable.slice(0, 10)) { // Top 10
+          const entryTime = this.positionTracker.getPositionEntryTime(p.marketId, p.tokenId);
+          const holdMin = entryTime ? Math.round((now - entryTime) / 60000) : "?";
+          this.logger.debug(
+            `[ScalpTakeProfit] 💰 ${p.tokenId.slice(0, 12)}... +${p.pnlPct.toFixed(1)}% ($${p.pnlUsd.toFixed(2)}) | ` +
+            `entry=${(p.entryPrice * 100).toFixed(1)}¢ current=${(p.currentPrice * 100).toFixed(1)}¢ | ` +
+            `held=${holdMin}min | size=${p.size.toFixed(2)}`,
+          );
+        }
+        if (profitable.length > 10) {
+          this.logger.debug(`[ScalpTakeProfit] ... and ${profitable.length - 10} more profitable positions`);
+        }
       }
     }
 
@@ -383,10 +414,16 @@ export class ScalpTakeProfitStrategy {
         continue;
       }
 
-      // EARLY SKIP: Skip positions in the red (negative profit) - this is a profit-taking strategy
-      // These positions should be handled by Smart Hedging or Universal Stop-Loss, not ScalpTakeProfit
-      // This avoids unnecessary debug logging and evaluateScalpExit() processing for losing positions
-      if (position.pnlPct < 0) {
+      // Check if this is a low-price position that needs special handling
+      // Low-price positions can intentionally exit at small losses after lowPriceMaxHoldMinutes
+      const isLowPricePosition =
+        this.config.lowPriceThreshold > 0 &&
+        position.entryPrice <= this.config.lowPriceThreshold;
+
+      // EARLY SKIP: Skip positions in the red (negative profit) - UNLESS it's a low-price position
+      // Low-price positions have time-limit logic that can exit at small losses
+      // Regular losing positions should be handled by Smart Hedging or Universal Stop-Loss
+      if (position.pnlPct < 0 && !isLowPricePosition) {
         continue;
       }
 
