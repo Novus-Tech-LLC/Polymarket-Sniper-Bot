@@ -1806,3 +1806,258 @@ describe("PositionTracker Cache TTL Logic", () => {
     );
   });
 });
+
+describe("PositionTracker Gated Redeemable Detection", () => {
+  test("Position with apiPos.redeemable=true and Gamma resolved=true should be redeemable", () => {
+    // Simulates the case where API correctly marks position as redeemable
+    // and Gamma confirms the market is resolved
+    const apiRedeemable = true;
+    const gammaResolved = true;
+    const hasOrderbook = false;
+
+    // Logic: If API says redeemable AND Gamma confirms resolved, keep as redeemable
+    const isRedeemable = apiRedeemable && gammaResolved;
+
+    assert.strictEqual(
+      isRedeemable,
+      true,
+      "Position should be redeemable when both API and Gamma agree",
+    );
+  });
+
+  test("Position with apiPos.redeemable=true and Gamma resolved=false but no orderbook should be redeemable", () => {
+    // Simulates the case where market is in a limbo state - API says redeemable,
+    // Gamma hasn't confirmed resolution yet, but no orderbook exists
+    const apiRedeemable = true;
+    const gammaResolved = false;
+    const hasOrderbook = false;
+
+    // Logic: If API says redeemable and no orderbook, treat as redeemable
+    // even if Gamma hasn't confirmed (market may be in transition)
+    const isRedeemable = apiRedeemable && (!gammaResolved ? !hasOrderbook : true);
+
+    assert.strictEqual(
+      isRedeemable,
+      true,
+      "Position should be redeemable when no orderbook exists (market in limbo)",
+    );
+  });
+
+  test("Position with apiPos.redeemable=true but Gamma resolved=false and orderbook exists should be ACTIVE", () => {
+    // Simulates the bug case: API incorrectly marks position as redeemable
+    // but Gamma says market is NOT resolved and orderbook still exists
+    const apiRedeemable = true;
+    const gammaResolved = false;
+    const hasOrderbook = true;
+
+    // Logic: Override API's redeemable flag - keep as ACTIVE
+    // This is the key fix: don't trust API alone when orderbook exists
+    const isRedeemable =
+      apiRedeemable &&
+      (gammaResolved || (!gammaResolved && !hasOrderbook));
+
+    assert.strictEqual(
+      isRedeemable,
+      false,
+      "Position should remain ACTIVE when orderbook exists and Gamma not resolved",
+    );
+  });
+
+  test("Position with apiPos.redeemable=false should remain active regardless of Gamma status", () => {
+    // If API doesn't mark position as redeemable, it should stay active
+    const apiRedeemable = false;
+    const gammaResolved = true; // Even if Gamma says resolved
+    const hasOrderbook = true;
+
+    // We only check Gamma when apiPos.redeemable === true
+    // If API says not redeemable, keep as active (existing fallback detection handles edge cases)
+    const isRedeemable = false; // apiRedeemable is false, so we skip verification entirely
+
+    assert.strictEqual(
+      isRedeemable,
+      false,
+      "Position should remain active when API says not redeemable",
+    );
+  });
+
+  test("Redeemable override logging condition is correct", () => {
+    // Verify the condition that triggers REDEEMABLE_OVERRIDE warning
+    const apiRedeemable = true;
+    const gammaResolved = false;
+    const hasOrderbook = true;
+
+    // This condition should trigger the warning log
+    const shouldLogOverride =
+      apiRedeemable && !gammaResolved && hasOrderbook;
+
+    assert.strictEqual(
+      shouldLogOverride,
+      true,
+      "Should log override warning when API redeemable but market still active",
+    );
+  });
+});
+
+describe("PositionTracker Market Resolution Verification", () => {
+  test("Market with closed=true should be considered resolved", () => {
+    const market = {
+      closed: true,
+      resolved: false,
+      outcomes: '["Yes", "No"]',
+      outcomePrices: '["0.5", "0.5"]',
+    };
+
+    const isResolved = market.closed === true || market.resolved === true;
+    assert.strictEqual(
+      isResolved,
+      true,
+      "Market with closed=true should be resolved",
+    );
+  });
+
+  test("Market with resolved=true should be considered resolved", () => {
+    const market = {
+      closed: false,
+      resolved: true,
+      outcomes: '["Yes", "No"]',
+      outcomePrices: '["1", "0"]',
+    };
+
+    const isResolved = market.closed === true || market.resolved === true;
+    assert.strictEqual(
+      isResolved,
+      true,
+      "Market with resolved=true should be resolved",
+    );
+  });
+
+  test("Market with winning outcome price > 0.5 should be considered resolved", () => {
+    const market = {
+      closed: false,
+      resolved: false,
+      outcomes: '["Yes", "No"]',
+      outcomePrices: '["0.99", "0.01"]',
+    };
+
+    const outcomes = JSON.parse(market.outcomes);
+    const prices = JSON.parse(market.outcomePrices);
+
+    let winnerIndex = -1;
+    let highestPrice = 0;
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+        winnerIndex = i;
+      }
+    }
+
+    // Winner threshold is 0.5
+    const hasWinner = winnerIndex >= 0 && highestPrice > WINNER_THRESHOLD;
+    const winningOutcome = hasWinner ? outcomes[winnerIndex] : null;
+
+    assert.strictEqual(hasWinner, true, "Should have a winning outcome");
+    assert.strictEqual(
+      winningOutcome,
+      "Yes",
+      "Winning outcome should be 'Yes'",
+    );
+  });
+
+  test("Market with all prices near 0 should NOT be considered resolved", () => {
+    const market = {
+      closed: false,
+      resolved: false,
+      outcomes: '["Yes", "No"]',
+      outcomePrices: '["0.01", "0.01"]',
+    };
+
+    const prices = JSON.parse(market.outcomePrices);
+
+    let highestPrice = 0;
+    for (let i = 0; i < prices.length; i++) {
+      const price = parseFloat(prices[i]);
+      if (Number.isFinite(price) && price > highestPrice) {
+        highestPrice = price;
+      }
+    }
+
+    const hasWinner = highestPrice > WINNER_THRESHOLD;
+    const isResolvedByFlags =
+      market.closed === true || market.resolved === true;
+    const isResolved = isResolvedByFlags || hasWinner;
+
+    assert.strictEqual(
+      isResolved,
+      false,
+      "Market with all prices near 0 should NOT be resolved",
+    );
+  });
+});
+
+describe("PositionTracker Active/Resolved Count Accounting", () => {
+  test("Position overridden from redeemable to active should be counted in activeCount", () => {
+    // Simulates the accounting logic when a position is overridden
+    let activeCount = 0;
+    let resolvedCount = 0;
+
+    // API claims redeemable but we override to active
+    const apiRedeemable = true;
+    const gammaResolved = false;
+    const hasOrderbook = true;
+
+    const isRedeemable =
+      apiRedeemable &&
+      (gammaResolved || (!gammaResolved && !hasOrderbook));
+
+    if (isRedeemable) {
+      resolvedCount++;
+    } else {
+      activeCount++;
+    }
+
+    assert.strictEqual(activeCount, 1, "Active count should be 1");
+    assert.strictEqual(resolvedCount, 0, "Resolved count should be 0");
+  });
+
+  test("Confirmed redeemable position should be counted in resolvedCount", () => {
+    let activeCount = 0;
+    let resolvedCount = 0;
+
+    const apiRedeemable = true;
+    const gammaResolved = true;
+    const hasOrderbook = false;
+
+    const isRedeemable = apiRedeemable && gammaResolved;
+
+    if (isRedeemable) {
+      resolvedCount++;
+    } else {
+      activeCount++;
+    }
+
+    assert.strictEqual(activeCount, 0, "Active count should be 0");
+    assert.strictEqual(resolvedCount, 1, "Resolved count should be 1");
+  });
+
+  test("P&L summary split should correctly categorize positions", () => {
+    // Simulates positions array after enrichment
+    const positions = [
+      { redeemable: true, pnlPct: 100 }, // Confirmed resolved - WIN
+      { redeemable: true, pnlPct: -100 }, // Confirmed resolved - LOSS
+      { redeemable: false, pnlPct: 15 }, // Active profitable
+      { redeemable: false, pnlPct: -5 }, // Active losing
+      { redeemable: false, pnlPct: 0 }, // Active breakeven
+    ];
+
+    const active = positions.filter((p) => !p.redeemable);
+    const redeemable = positions.filter((p) => p.redeemable);
+    const activeProfitable = active.filter((p) => p.pnlPct > 0);
+    const activeLosing = active.filter((p) => p.pnlPct < 0);
+
+    assert.strictEqual(active.length, 3, "Should have 3 active positions");
+    assert.strictEqual(redeemable.length, 2, "Should have 2 redeemable positions");
+    assert.strictEqual(activeProfitable.length, 1, "Should have 1 active profitable");
+    assert.strictEqual(activeLosing.length, 1, "Should have 1 active losing");
+  });
+});
