@@ -280,6 +280,10 @@ export class ScalpTakeProfitStrategy {
   private positionTracker: PositionTracker;
   private config: ScalpTakeProfitConfig;
 
+  // === SINGLE-FLIGHT GUARD ===
+  // Prevents concurrent execution if called multiple times
+  private inFlight = false;
+
   // Track price history for momentum analysis
   // Key: tokenId, Value: array of price history entries
   private priceHistory: Map<string, PriceHistoryEntry[]> = new Map();
@@ -311,7 +315,10 @@ export class ScalpTakeProfitStrategy {
    * 1. Haven't logged for this position in last SKIP_LOG_COOLDOWN_MS, OR
    * 2. P&L has changed by more than SKIP_LOG_HYSTERESIS_PCT since last log
    */
-  private skipLogTracker: Map<string, { lastLogAt: number; lastPnlPct: number }> = new Map();
+  private skipLogTracker: Map<
+    string,
+    { lastLogAt: number; lastPnlPct: number }
+  > = new Map();
   private static readonly SKIP_LOG_COOLDOWN_MS = 30_000; // Only log skip reason once per 30 seconds per position
   private static readonly SKIP_LOG_HYSTERESIS_PCT = 2.0; // Log again if P&L changes by more than 2%
 
@@ -341,12 +348,32 @@ export class ScalpTakeProfitStrategy {
   /**
    * Execute the scalp take-profit strategy
    * Returns number of positions scalped
+   *
+   * SINGLE-FLIGHT: Skips if already running (returns 0)
    */
   async execute(): Promise<number> {
     if (!this.config.enabled) {
       return 0;
     }
 
+    // Single-flight guard: prevent concurrent execution
+    if (this.inFlight) {
+      this.logger.debug("[ScalpTakeProfit] Skipped - already in flight");
+      return 0;
+    }
+
+    this.inFlight = true;
+    try {
+      return await this.executeInternal();
+    } finally {
+      this.inFlight = false;
+    }
+  }
+
+  /**
+   * Internal execution logic (called by execute() with in-flight guard)
+   */
+  private async executeInternal(): Promise<number> {
     const positions = this.positionTracker.getPositions();
     let scalpedCount = 0;
     const now = Date.now();
@@ -483,7 +510,7 @@ export class ScalpTakeProfitStrategy {
         if (this.shouldLogSkip(positionKey, position.pnlPct)) {
           this.logger.debug(
             `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: NO_BID - missing bid price, P&L unreliable ` +
-            `(entry=${(position.entryPrice * 100).toFixed(1)}¢, current=${(position.currentPrice * 100).toFixed(1)}¢)`,
+              `(entry=${(position.entryPrice * 100).toFixed(1)}¢, current=${(position.currentPrice * 100).toFixed(1)}¢)`,
           );
           this.recordSkipLog(positionKey, position.pnlPct);
         }
@@ -529,10 +556,10 @@ export class ScalpTakeProfitStrategy {
         scalpedCount++;
         this.exitedPositions.add(positionKey);
         this.updateStats(position);
-        
+
         // Clear skip log tracker since position is now exited
         this.skipLogTracker.delete(positionKey);
-        
+
         // Invalidate orderbook cache for this token to ensure fresh data on next refresh
         this.positionTracker.invalidateOrderbookCache(position.tokenId);
       }
@@ -1038,23 +1065,26 @@ export class ScalpTakeProfitStrategy {
   private shouldLogSkip(positionKey: string, currentPnlPct: number): boolean {
     const tracker = this.skipLogTracker.get(positionKey);
     const now = Date.now();
-    
+
     if (!tracker) {
       // Never logged for this position
       return true;
     }
-    
+
     // Check cooldown
-    if (now - tracker.lastLogAt >= ScalpTakeProfitStrategy.SKIP_LOG_COOLDOWN_MS) {
+    if (
+      now - tracker.lastLogAt >=
+      ScalpTakeProfitStrategy.SKIP_LOG_COOLDOWN_MS
+    ) {
       return true;
     }
-    
+
     // Check P&L change threshold (hysteresis)
     const pnlChange = Math.abs(currentPnlPct - tracker.lastPnlPct);
     if (pnlChange >= ScalpTakeProfitStrategy.SKIP_LOG_HYSTERESIS_PCT) {
       return true;
     }
-    
+
     return false;
   }
 

@@ -147,6 +147,10 @@ export class SimpleSmartHedgingStrategy {
   private positionTracker: PositionTracker;
   private config: SimpleSmartHedgingConfig;
 
+  // === SINGLE-FLIGHT GUARD ===
+  // Prevents concurrent execution if called multiple times
+  private inFlight = false;
+
   // Track what we've already hedged to avoid double-hedging
   private hedgedPositions: Set<string> = new Set();
 
@@ -173,12 +177,32 @@ export class SimpleSmartHedgingStrategy {
 
   /**
    * Execute the strategy - find losing positions and hedge them
+   *
+   * SINGLE-FLIGHT: Skips if already running (returns 0)
    */
   async execute(): Promise<number> {
     if (!this.config.enabled) {
       return 0;
     }
 
+    // Single-flight guard: prevent concurrent execution
+    if (this.inFlight) {
+      this.logger.debug("[SimpleHedging] Skipped - already in flight");
+      return 0;
+    }
+
+    this.inFlight = true;
+    try {
+      return await this.executeInternal();
+    } finally {
+      this.inFlight = false;
+    }
+  }
+
+  /**
+   * Internal execution logic (called by execute() with in-flight guard)
+   */
+  private async executeInternal(): Promise<number> {
     // Clean up expired cooldown entries periodically to prevent memory leaks
     this.cleanupExpiredCooldowns();
 
