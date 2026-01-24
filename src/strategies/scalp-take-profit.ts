@@ -22,13 +22,16 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
-import type { PositionTracker, Position } from "./position-tracker";
+import type {
+  PositionTracker,
+  Position,
+  PortfolioSnapshot,
+} from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
 import {
   LogDeduper,
   SkipReasonAggregator,
   SKIP_LOG_TTL_MS,
-  HEARTBEAT_INTERVAL_MS,
   TOKEN_ID_DISPLAY_LENGTH,
 } from "../utils/log-deduper.util";
 
@@ -377,49 +380,124 @@ export class ScalpTakeProfitStrategy {
    * container uptime. Previously, after container restarts, the "time held" clock
    * would reset and the scalper would miss valid take-profit opportunities.
    * Now we derive entry timestamps from actual trade history, which survives restarts.
+   *
+   * SNAPSHOT-DRIVEN EXECUTION (Jan 2025 Refactor):
+   * This method now accepts a PortfolioSnapshot from the orchestrator.
+   * It MUST use snapshot.activePositions, NOT call positionTracker methods directly.
+   * This ensures all strategies operate on the same consistent data per cycle.
+   *
+   * @param snapshot Optional PortfolioSnapshot from orchestrator. If not provided,
+   *                 falls back to positionTracker.getSnapshot() for backward compatibility.
    */
-  async execute(): Promise<number> {
+  async execute(snapshot?: PortfolioSnapshot): Promise<number> {
     if (!this.config.enabled) {
       return 0;
     }
+
+    // === SNAPSHOT RESOLUTION ===
+    // Prefer snapshot passed from orchestrator, fall back to positionTracker.getSnapshot()
+    const effectiveSnapshot = snapshot ?? this.positionTracker.getSnapshot();
 
     // CRITICAL: Get positions enriched with entry metadata from trade history API
     // This provides accurate timeHeldSec that survives container restarts
     const enrichedPositions =
       await this.positionTracker.enrichPositionsWithEntryMeta();
-    const positions = this.positionTracker.getPositions();
     let scalpedCount = 0;
     const now = Date.now();
 
+    // Use snapshot for position data if available, otherwise fall back to positionTracker
+    // This ensures we use the same data that PositionTracker computed
+    let activePositions: readonly Position[];
+    let profitable: Position[];
+    let losing: Position[];
+    let targetProfit: Position[];
+    let minProfit: Position[];
+    let holdingAddress: string | null;
+
+    if (effectiveSnapshot) {
+      // SNAPSHOT-DRIVEN: Use immutable snapshot data (preferred)
+      activePositions = effectiveSnapshot.activePositions;
+      holdingAddress = effectiveSnapshot.addressUsed;
+
+      // Compute derived arrays from snapshot (cannot call positionTracker for these)
+      profitable = activePositions.filter((p) => p.pnlPct > 0) as Position[];
+      losing = activePositions.filter((p) => p.pnlPct < 0) as Position[];
+      targetProfit = activePositions.filter(
+        (p) => p.pnlPct >= this.config.targetProfitPct,
+      ) as Position[];
+      minProfit = activePositions.filter(
+        (p) => p.pnlPct >= this.config.minProfitPct,
+      ) as Position[];
+
+      // === BUG DETECTION: Verify snapshot consistency ===
+      // If snapshot says activeTotal > 0 but we see 0, that's a BUG
+      if (
+        effectiveSnapshot.summary.activeTotal > 0 &&
+        activePositions.length === 0
+      ) {
+        this.logger.error(
+          `[ScalpTakeProfit] BUG DETECTED: cycleId=${effectiveSnapshot.cycleId} ` +
+            `addressUsed=${holdingAddress} ` +
+            `snapshot.summary.activeTotal=${effectiveSnapshot.summary.activeTotal} ` +
+            `but activePositions.length=0. ` +
+            `First 3 summary: prof=${effectiveSnapshot.summary.prof} ` +
+            `lose=${effectiveSnapshot.summary.lose} ` +
+            `unknown=${effectiveSnapshot.summary.unknown}`,
+        );
+      }
+    } else {
+      // FALLBACK: No snapshot available, use positionTracker methods (legacy path)
+      this.logger.warn(
+        `[ScalpTakeProfit] No snapshot available, falling back to positionTracker methods`,
+      );
+      activePositions = this.positionTracker.getActivePositions();
+      profitable = this.positionTracker.getActiveProfitablePositions();
+      losing = this.positionTracker.getActiveLosingPositions();
+      targetProfit = this.positionTracker.getActivePositionsAboveTarget(
+        this.config.targetProfitPct,
+      );
+      minProfit = this.positionTracker.getActivePositionsAboveTarget(
+        this.config.minProfitPct,
+      );
+      holdingAddress = this.positionTracker.getHoldingAddress();
+    }
+
     // Update price history for all positions
-    await this.updatePriceHistory(positions);
+    // Note: Create mutable copy since activePositions may be readonly from snapshot
+    await this.updatePriceHistory(Array.from(activePositions));
 
-    // Use PositionTracker as the source of truth for position summaries
-    // This ensures consistent reporting across all strategies
-    const activePositions = this.positionTracker.getActivePositions();
-    const profitable = this.positionTracker.getActiveProfitablePositions();
-    const losing = this.positionTracker.getActiveLosingPositions();
-    const targetProfit = this.positionTracker.getActivePositionsAboveTarget(
-      this.config.targetProfitPct,
-    );
-    const minProfit = this.positionTracker.getActivePositionsAboveTarget(
-      this.config.minProfitPct,
-    );
+    // DIAGNOSTIC: Log active_count with filtering step counts (requirement #3)
+    // Log filter steps: start -> afterStateFilter -> afterPnlTrusted -> afterThreshold
+    const afterStateFilter = activePositions.length; // Already filtered to ACTIVE
+    const afterPnlTrusted = activePositions.filter((p) => p.pnlTrusted).length;
+    const afterThreshold = activePositions.filter(
+      (p) => p.pnlTrusted && p.pnlPct >= this.config.minProfitPct,
+    ).length;
 
-    // DIAGNOSTIC: Log active_count (requirement #6)
-    // If 0, also log chosenAddress and raw_total to confirm upstream data
-    const holdingAddress = this.positionTracker.getHoldingAddress();
-    
     // Log active_count with diagnostics if 0
     if (activePositions.length === 0) {
-      // Only fetch all positions when we need to diagnose the zero count case
+      // Get raw total for diagnostic
       const allPositions = this.positionTracker.getPositions();
       this.logger.info(
-        `[ScalpTakeProfit] active_count=0 (chosenAddress=${holdingAddress ?? "unknown"} raw_total=${allPositions.length})`,
+        `[ScalpTakeProfit] active_count=0 ` +
+          `(cycleId=${effectiveSnapshot?.cycleId ?? "none"} ` +
+          `chosenAddress=${holdingAddress ?? "unknown"} ` +
+          `raw_total=${allPositions.length} ` +
+          `start=${allPositions.length} afterStateFilter=${afterStateFilter} ` +
+          `afterPnlTrusted=${afterPnlTrusted} afterThreshold=${afterThreshold})`,
       );
-    } else if (this.logDeduper.shouldLog("ScalpTakeProfit:active_count", SKIP_LOG_TTL_MS, String(activePositions.length))) {
+    } else if (
+      this.logDeduper.shouldLog(
+        "ScalpTakeProfit:active_count",
+        SKIP_LOG_TTL_MS,
+        String(activePositions.length),
+      )
+    ) {
       this.logger.debug(
-        `[ScalpTakeProfit] active_count=${activePositions.length}`,
+        `[ScalpTakeProfit] active_count=${activePositions.length} ` +
+          `(cycleId=${effectiveSnapshot?.cycleId ?? "none"} ` +
+          `start=${activePositions.length} afterPnlTrusted=${afterPnlTrusted} ` +
+          `afterThreshold=${afterThreshold})`,
       );
     }
 
@@ -489,9 +567,8 @@ export class ScalpTakeProfitStrategy {
 
     // Log highly profitable positions that should be candidates for scalping
     // CRITICAL: Uses timeHeldSec from trade history API, not container uptime
-    const highlyProfitable = this.positionTracker.getActivePositionsAboveTarget(
-      this.config.targetProfitPct,
-    );
+    // Use targetProfit from snapshot instead of calling positionTracker
+    const highlyProfitable = targetProfit;
     if (highlyProfitable.length > 0) {
       this.logger.info(
         `[ScalpTakeProfit] 🎯 ${highlyProfitable.length} position(s) at/above target profit (${this.config.targetProfitPct}%): ` +
