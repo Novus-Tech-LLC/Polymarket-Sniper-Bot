@@ -76,7 +76,7 @@ export const createRelayerContext = (params: {
     // Only log this message once to avoid duplicate logs in mode=both
     if (!relayerDisabledLogged) {
       params.logger?.info(
-        "[Relayer] Neither SIGNER_URL nor builder credentials provided; relayer disabled.",
+        "[Relayer] Relayer disabled. To enable gasless approvals, set POLY_BUILDER_API_KEY, POLY_BUILDER_API_SECRET, and POLY_BUILDER_API_PASSPHRASE (see docs/CREDENTIALS_EXPLAINED.md).",
       );
       relayerDisabledLogged = true;
     }
