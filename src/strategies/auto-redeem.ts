@@ -687,10 +687,25 @@ export class AutoRedeemStrategy {
 
       // Step 2: Build the redeemPositions call data
       // Index sets in CTF are powers of 2: outcome 0 = 1, outcome 1 = 2, outcome 2 = 4, etc.
-      // Generate index sets for up to 16 outcomes (covers any Polymarket market)
-      // The CTF contract safely ignores index sets you don't hold tokens for
-      const indexSets = Array.from({ length: 16 }, (_, i) => Math.pow(2, i));
-      // Results in: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
+      // Use the actual outcome slot count to avoid "invalid index set" reverts on non-binary markets.
+      // The CTF contract safely ignores index sets you don't hold tokens for.
+      const outcomeSlotCount = await this.fetchOutcomeSlotCount(
+        position.tokenId,
+        conditionId,
+      );
+      const safeOutcomeSlotCount =
+        outcomeSlotCount && outcomeSlotCount > 0 ? outcomeSlotCount : 2;
+
+      if (!outcomeSlotCount || outcomeSlotCount <= 0) {
+        this.logger.warn(
+          `[AutoRedeem] ⚠️ Unable to determine outcome slot count for market ${conditionId.slice(0, 16)}... - defaulting to 2 outcomes`,
+        );
+      }
+
+      const indexSets = Array.from(
+        { length: safeOutcomeSlotCount },
+        (_, i) => Math.pow(2, i),
+      );
       
       const ctfInterface = new Interface(CTF_ABI);
       const redeemData = ctfInterface.encodeFunctionData("redeemPositions", [
@@ -800,6 +815,64 @@ export class AutoRedeemStrategy {
         isNotResolvedYet: isNotResolvedYet,
       };
     }
+  }
+
+  /**
+   * Fetch the number of outcomes for a market so we can build valid index sets.
+   * Uses the Gamma API via the tokenId (same approach as outcome fetching).
+   */
+  private async fetchOutcomeSlotCount(
+    tokenId: string,
+    marketId: string,
+  ): Promise<number | null> {
+    if (!tokenId || typeof tokenId !== "string") {
+      return null;
+    }
+
+    try {
+      interface GammaMarketResponse {
+        outcomes?: string; // JSON string like '["Yes","No"]'
+        tokens?: Array<{ outcome?: string }>;
+      }
+
+      const encodedTokenId = encodeURIComponent(tokenId.trim());
+      const url = `${POLYMARKET_API.GAMMA_API_BASE_URL}/markets?clob_token_ids=${encodedTokenId}`;
+      const markets = await httpGet<GammaMarketResponse[]>(url, {
+        timeout: AutoRedeemStrategy.API_TIMEOUT_MS,
+      });
+
+      if (!markets || !Array.isArray(markets) || markets.length === 0) {
+        return null;
+      }
+
+      const market = markets[0];
+
+      if (market.outcomes) {
+        try {
+          const outcomes = JSON.parse(market.outcomes);
+          if (Array.isArray(outcomes) && outcomes.length > 0) {
+            return outcomes.length;
+          }
+        } catch (error) {
+          this.logger.debug(
+            `[AutoRedeem] Failed parsing outcomes for ${marketId.slice(0, 16)}...: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      if (market.tokens && Array.isArray(market.tokens)) {
+        const tokenCount = market.tokens.length;
+        if (tokenCount > 0) {
+          return tokenCount;
+        }
+      }
+    } catch (error) {
+      this.logger.debug(
+        `[AutoRedeem] Failed fetching outcomes for ${marketId.slice(0, 16)}...: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return null;
   }
 
   /**
