@@ -339,7 +339,7 @@ export class SimpleSmartHedgingStrategy {
    * 
    * @returns Object with success status and reason for failure
    *          - reason "MARKET_RESOLVED" means opposite side >= 95¢, skip liquidation
-   *          - reason "TOO_EXPENSIVE" means opposite side 90-95¢, try liquidation
+   *          - reason "TOO_EXPENSIVE" means opposite side >= 90¢ but < 95¢, try liquidation
    *          - other reasons indicate hedge attempt failed, try liquidation
    */
   private async executeHedge(position: Position): Promise<{ success: boolean; reason?: string }> {
