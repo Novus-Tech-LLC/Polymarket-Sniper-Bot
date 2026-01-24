@@ -18,7 +18,6 @@
 
 - 💵 **Auto-Redeem Positions** - Automatically claim resolved market positions (wins and losses) for USDC
 - ⛓️ **On-Chain Trading Mode** - Bypass CLOB API entirely and trade directly on Polygon blockchain
-- 🦀 **Rust SDK Integration** - Optional use of official Polymarket Rust SDK for more reliable authentication
 - 🧠 **Adaptive Learning System** - Learns from trade outcomes to prevent bad trades
 - 🔐 **Simplified Authentication** - Uses `createOrDeriveApiKey()` for clean credential management
 - 📊 **Clean Logging** - ✅ for success, ❌ for failures - easy to troubleshoot
@@ -190,45 +189,6 @@ POLY_CTF_EXCHANGE_ADDRESS=0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
 - **Only for development/testing of on-chain integration**
 - See `ONCHAIN_TRADING_IMPLEMENTATION.md` for completion roadmap
 
-## 🦀 Rust CLOB Bridge (New)
-
-For users experiencing persistent authentication issues with the JavaScript SDK, we now offer integration with the **official Polymarket Rust CLOB SDK** (`rs-clob-client`). This provides:
-
-- **More reliable authentication** - The Rust SDK handles CREATE2 address derivation correctly
-- **Auto-detection of signature type** - Tries all authentication modes automatically
-- **Cleaner error messages** - Structured diagnostic output
-- **Official SDK support** - Maintained by the Polymarket team
-
-### Using the Rust Auth Probe
-
-```bash
-# Build the Rust bridge (requires Rust 1.88+)
-npm run build:rust
-
-# Run the authentication probe
-npm run auth:probe:rust
-```
-
-The probe will try all authentication configurations and report which one works:
-
-```
-======================================================================
-✅ AUTHENTICATION SUCCESSFUL
-======================================================================
-
-Working Configuration:
-  Signature Type: GnosisSafe
-  Funder Address: 0x52d7008a5Cb5661dFed5573BB34E69772CDf0346
-
-Account Status:
-  Balance: 125.50 USDC
-  Allowance: unlimited
-
-Recommended Environment Variables:
-  POLYMARKET_SIGNATURE_TYPE=2
-  POLYMARKET_PROXY_ADDRESS=0x52d7008a5Cb5661dFed5573BB34E69772CDf0346
-```
-
 ## Contact
 
 | Platform    | Link                                                                                       |
@@ -253,7 +213,6 @@ Feel free to reach out for implementation assistance or integration support.
 - [Overview](#-overview)
 - [What's New](#-whats-new)
 - [On-Chain Trading Mode](#️-on-chain-trading-mode-new)
-- [Rust CLOB Bridge](#-rust-clob-bridge-new)
 - [Features](#-features)
 - [Adaptive Learning](#-adaptive-learning)
 - [Architecture](#-architecture)
@@ -363,17 +322,11 @@ polymarket-sniper-bot/
 │   │   └── simple-auth.ts # Simplified auth module
 │   ├── config/           # Configuration management
 │   ├── infrastructure/   # External service integrations
-│   ├── rust-bridge/      # Rust SDK integration
-│   │   ├── client.ts     # Bridge client
-│   │   └── adapter.ts    # ClobClient adapter
 │   ├── services/         # Core business logic
 │   └── utils/            # Utility functions
-├── rust-clob-bridge/     # Rust CLOB SDK wrapper
-│   ├── Cargo.toml        # Rust dependencies
-│   └── src/main.rs       # Bridge binary
 ├── docs/                 # Documentation
 ├── docker-compose.yml    # Docker Compose configuration
-├── Dockerfile           # Docker image definition (multi-stage with Rust)
+├── Dockerfile           # Docker image definition
 └── package.json         # Project dependencies
 ```
 

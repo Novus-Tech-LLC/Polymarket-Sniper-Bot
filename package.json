@@ -23,8 +23,6 @@
   ],
   "scripts": {
     "build": "tsc",
-    "build:rust": "cd rust-clob-bridge && cargo build --release",
-    "build:all": "npm run build:rust && npm run build",
     "start": "node dist/app/main.js",
     "dev": "ts-node src/app/main.ts",
     "lint": "eslint .",

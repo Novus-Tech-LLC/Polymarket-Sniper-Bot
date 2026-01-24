@@ -12,10 +12,6 @@ dist/
 build/
 *.tsbuildinfo
 
-# Rust build artifacts
-target/
-rust-clob-bridge/target/
-
 # Environment variables
 .env
 .env.local
