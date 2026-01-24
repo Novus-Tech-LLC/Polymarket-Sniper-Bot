@@ -1,7 +1,10 @@
 import type { ClobClient } from "@polymarket/clob-client";
 import type { ConsoleLogger } from "../utils/logger.util";
+import { Contract, type Wallet } from "ethers";
 import { httpGet } from "../utils/fetch-data.util";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
+import { resolvePolymarketContracts } from "../polymarket/contracts";
+import { CTF_ABI } from "../trading/exchange-abi";
 import { EntryMetaResolver } from "./entry-meta-resolver";
 import {
   LogDeduper,
@@ -2641,22 +2644,67 @@ export class PositionTracker {
                     `[PositionTracker] price_near_resolution tokenId=${tokenId.slice(0, 16)}... price=${(currentPrice * 100).toFixed(2)}¢ but redeemable=false, keeping ACTIVE`,
                   );
 
-                  // Check Gamma for market closed status (NOT redeemable)
-                  // This helps strategies know to stop trading, but position is NOT redeemable yet
-                  const cached = this.outcomeCache.get(tokenId);
-                  if (cached?.status === "RESOLVED") {
-                    // Gamma previously said this market is resolved
-                    // Mark as CLOSED_NOT_REDEEMABLE (trading should stop, but NOT redeemable)
-                    positionState = "CLOSED_NOT_REDEEMABLE";
-                    marketClosed = true;
-                    this.logger.debug(
-                      `[PositionTracker] state=CLOSED_NOT_REDEEMABLE tokenId=${tokenId.slice(0, 16)}... (Gamma cached resolved, Data-API not redeemable yet)`,
-                    );
+                  // === ON-CHAIN REDEEMABLE CHECK ===
+                  // When position has:
+                  // 1. Price near 100¢ (or 0¢) - suggesting resolution
+                  // 2. NO_BOOK status (no orderbook bids) - can't sell via SellEarly
+                  // 3. Data-API hasn't flagged as redeemable yet
+                  //
+                  // Check on-chain payoutDenominator to confirm if actually redeemable.
+                  // This fixes the gap where high-profit positions at 100¢ get stuck.
+                  const hasNoBids =
+                    positionStatus === "NO_BOOK" ||
+                    bestBidPrice === undefined ||
+                    bestBidPrice === 0;
+
+                  if (hasNoBids && marketId) {
+                    // Condition: price at 99%+, no bids available, check on-chain
+                    const isOnChainResolved =
+                      await this.checkOnChainRedeemable(marketId);
+
+                    if (isOnChainResolved) {
+                      // On-chain confirms resolved - promote to REDEEMABLE
+                      positionState = "REDEEMABLE";
+                      redeemableProofSource = "ONCHAIN_DENOM";
+                      finalRedeemable = true;
+
+                      // Set appropriate current price for winner/loser
+                      // Price >= 99¢ means winner, price <= 1¢ means loser
+                      if (
+                        currentPrice >=
+                        PositionTracker.RESOLVED_PRICE_HIGH_THRESHOLD
+                      ) {
+                        currentPrice = 1.0; // Winner
+                      } else {
+                        currentPrice = 0.0; // Loser
+                      }
+
+                      this.logger.info(
+                        `[PositionTracker] 🎯 ONCHAIN_DENOM: promote->REDEEMABLE tokenId=${tokenId.slice(0, 16)}... ` +
+                          `(price=${(currentPrice * 100).toFixed(1)}¢, no_bids=true, on-chain payoutDenominator > 0)`,
+                      );
+                    }
+                  }
+
+                  // If not promoted to REDEEMABLE via on-chain, check Gamma for market closed status
+                  if (!finalRedeemable) {
+                    // Check Gamma for market closed status (NOT redeemable)
+                    // This helps strategies know to stop trading, but position is NOT redeemable yet
+                    const cached = this.outcomeCache.get(tokenId);
+                    if (cached?.status === "RESOLVED") {
+                      // Gamma previously said this market is resolved
+                      // Mark as CLOSED_NOT_REDEEMABLE (trading should stop, but NOT redeemable)
+                      positionState = "CLOSED_NOT_REDEEMABLE";
+                      marketClosed = true;
+                      this.logger.debug(
+                        `[PositionTracker] state=CLOSED_NOT_REDEEMABLE tokenId=${tokenId.slice(0, 16)}... (Gamma cached resolved, Data-API not redeemable yet)`,
+                      );
+                    }
                   }
                 }
 
                 // Position stays ACTIVE (or CLOSED_NOT_REDEEMABLE if Gamma says closed)
-                // It is NEVER promoted to REDEEMABLE without Data-API flag
+                // unless promoted to REDEEMABLE via ONCHAIN_DENOM check above
               }
 
               // === MULTI-SOURCE P&L PIPELINE ===
@@ -3142,6 +3190,110 @@ export class PositionTracker {
     }
     const parsed = typeof value === "string" ? parseFloat(value) : value;
     return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  // Cache for on-chain payoutDenominator checks to avoid repeated RPC calls
+  private payoutDenominatorCache: Map<
+    string,
+    { denominator: bigint; checkedAt: number }
+  > = new Map();
+  private static readonly PAYOUT_DENOM_CACHE_TTL_MS = 300_000; // 5 minutes (resolved markets won't change)
+
+  /**
+   * Check on-chain payoutDenominator for a conditionId.
+   * Returns true if payoutDenominator > 0, indicating the market is resolved on-chain.
+   *
+   * This is used as a fallback when:
+   * 1. Data-API hasn't marked position as redeemable yet
+   * 2. Position has price near 100¢ or 0¢ (suggesting resolution)
+   * 3. No orderbook/bids available (can't sell via SellEarly)
+   *
+   * @param conditionId - The conditionId (same as marketId in Polymarket)
+   * @returns true if resolved on-chain (payoutDenominator > 0), false otherwise
+   */
+  private async checkOnChainRedeemable(conditionId: string): Promise<boolean> {
+    // Validate conditionId format (bytes32)
+    if (
+      !conditionId?.startsWith("0x") ||
+      conditionId.length !== 66 // 0x + 64 hex chars
+    ) {
+      return false;
+    }
+
+    // Check cache first
+    const cached = this.payoutDenominatorCache.get(conditionId);
+    const now = Date.now();
+    if (
+      cached &&
+      now - cached.checkedAt < PositionTracker.PAYOUT_DENOM_CACHE_TTL_MS
+    ) {
+      return cached.denominator > 0n;
+    }
+
+    try {
+      // Get wallet from CLOB client
+      const wallet = (this.client as { wallet?: Wallet }).wallet;
+      if (!wallet?.provider) {
+        // No wallet/provider available, can't check on-chain
+        return false;
+      }
+
+      // Get CTF contract address
+      const contracts = resolvePolymarketContracts();
+      const ctfAddress = contracts.ctfAddress;
+      if (!ctfAddress) {
+        return false;
+      }
+
+      // Create CTF contract instance (read-only, using provider)
+      const ctfContract = new Contract(ctfAddress, CTF_ABI, wallet.provider);
+
+      // Call payoutDenominator view function
+      const denominator = (await ctfContract.payoutDenominator(
+        conditionId,
+      )) as bigint;
+
+      // Cache the result
+      this.payoutDenominatorCache.set(conditionId, {
+        denominator,
+        checkedAt: now,
+      });
+
+      // Clean up old cache entries if needed
+      if (
+        this.payoutDenominatorCache.size >
+        PositionTracker.MAX_OUTCOME_CACHE_ENTRIES
+      ) {
+        const entriesToDelete: string[] = [];
+        for (const [key, entry] of this.payoutDenominatorCache) {
+          if (
+            now - entry.checkedAt >
+            PositionTracker.PAYOUT_DENOM_CACHE_TTL_MS * 2
+          ) {
+            entriesToDelete.push(key);
+          }
+        }
+        for (const key of entriesToDelete) {
+          this.payoutDenominatorCache.delete(key);
+        }
+      }
+
+      if (denominator > 0n) {
+        this.logger.info(
+          `[PositionTracker] 🔗 ON-CHAIN RESOLVED: conditionId=${conditionId.slice(0, 16)}... payoutDenominator=${denominator}`,
+        );
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      // Log at debug level - RPC errors are expected for some conditions
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(
+        `[PositionTracker] checkOnChainRedeemable failed for ${conditionId.slice(0, 16)}...: ${errMsg}`,
+      );
+      return false;
+    }
   }
 
   /**

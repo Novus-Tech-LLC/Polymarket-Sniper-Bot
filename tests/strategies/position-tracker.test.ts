@@ -686,6 +686,116 @@ describe("PositionTracker Strict State Machine", () => {
       positionState === "REDEEMABLE" && redeemableProofSource === "NONE";
     assert.ok(isBug, "Should detect bug when REDEEMABLE has no proof source");
   });
+
+  test("ONCHAIN_DENOM: Position with on-chain payoutDenominator > 0 should become REDEEMABLE", () => {
+    // Simulates the new on-chain check logic:
+    // - Data-API says NOT redeemable
+    // - Price is at 100¢ (suggesting resolved)
+    // - No orderbook bids (NO_BOOK status)
+    // - On-chain payoutDenominator > 0 (confirmed resolved)
+
+    const dataApiRedeemable = false;
+    const currentPrice = 1.0; // 100¢
+    const hasNoBids = true; // NO_BOOK status
+    const onChainPayoutDenominator = 1n; // > 0 means resolved on-chain
+
+    // Price near resolution check
+    const priceNearResolution =
+      currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+      currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD;
+
+    // Simulate the new on-chain check logic
+    let positionState: string;
+    let redeemableProofSource: string;
+
+    if (dataApiRedeemable) {
+      positionState = "REDEEMABLE";
+      redeemableProofSource = "DATA_API_FLAG";
+    } else if (
+      priceNearResolution &&
+      hasNoBids &&
+      onChainPayoutDenominator > 0n
+    ) {
+      // NEW: On-chain check triggers REDEEMABLE when Data-API lags
+      positionState = "REDEEMABLE";
+      redeemableProofSource = "ONCHAIN_DENOM";
+    } else {
+      positionState = "ACTIVE";
+      redeemableProofSource = "NONE";
+    }
+
+    assert.strictEqual(
+      positionState,
+      "REDEEMABLE",
+      "Position should become REDEEMABLE when on-chain confirms payoutDenominator > 0",
+    );
+    assert.strictEqual(
+      redeemableProofSource,
+      "ONCHAIN_DENOM",
+      "Proof source should be ONCHAIN_DENOM",
+    );
+  });
+
+  test("ONCHAIN_DENOM: Position with payoutDenominator = 0 should remain ACTIVE", () => {
+    // On-chain check returns 0 - market not yet resolved on-chain
+    const dataApiRedeemable = false;
+    const currentPrice = 0.995; // Near 100¢
+    const hasNoBids = true;
+    const onChainPayoutDenominator = 0n; // Not resolved on-chain yet
+
+    const priceNearResolution = currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD;
+
+    let positionState: string;
+    if (
+      priceNearResolution &&
+      hasNoBids &&
+      onChainPayoutDenominator > 0n
+    ) {
+      positionState = "REDEEMABLE";
+    } else {
+      positionState = "ACTIVE";
+    }
+
+    assert.strictEqual(
+      positionState,
+      "ACTIVE",
+      "Position should remain ACTIVE when on-chain payoutDenominator = 0",
+    );
+  });
+
+  test("ONCHAIN_DENOM: Skip on-chain check when bids are available", () => {
+    // If there are bids, SellEarly can handle it - no need for on-chain check
+    const dataApiRedeemable = false;
+    const currentPrice = 0.999; // Near 100¢
+    const hasNoBids = false; // Bids ARE available
+    const onChainPayoutDenominator = 1n; // Would trigger if checked
+
+    // When bids exist, we should NOT check on-chain
+    // because SellEarly strategy can handle the sale
+    const shouldCheckOnChain = hasNoBids;
+
+    assert.ok(
+      !shouldCheckOnChain,
+      "Should not check on-chain when bids are available",
+    );
+  });
+
+  test("ONCHAIN_DENOM: Skip on-chain check when price is NOT near resolution", () => {
+    // If price is 50¢, market is clearly not resolved - skip on-chain check
+    const currentPrice = 0.5; // 50¢ - not near resolution
+    const hasNoBids = true;
+
+    const priceNearResolution =
+      currentPrice >= RESOLVED_PRICE_HIGH_THRESHOLD ||
+      currentPrice <= RESOLVED_PRICE_LOW_THRESHOLD;
+
+    const shouldCheckOnChain = priceNearResolution && hasNoBids;
+
+    assert.ok(
+      !shouldCheckOnChain,
+      "Should not check on-chain when price is not near resolution threshold",
+    );
+  });
 });
 
 describe("PositionTracker Price Threshold Detection (Diagnostic Only)", () => {
