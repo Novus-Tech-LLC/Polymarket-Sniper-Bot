@@ -288,6 +288,18 @@ export class SellEarlyStrategy {
       return null;
     }
 
+    // === EXECUTION STATUS CHECK (Jan 2025 - Handle NOT_TRADABLE_ON_CLOB) ===
+    // If position has executionStatus set, use it to skip non-tradable positions.
+    // This handles orderbook 404, empty book, and other CLOB unavailability scenarios.
+    if (position.executionStatus === "NOT_TRADABLE_ON_CLOB" || position.executionStatus === "EXECUTION_BLOCKED") {
+      skipReasons.noBid++;
+      this.logSkipOnce(
+        "NOT_TRADABLE",
+        `[SellEarly] skip tokenId=${tokenIdShort}... reason=NOT_TRADABLE_ON_CLOB (bookStatus=${position.bookStatus ?? "unknown"})`,
+      );
+      return null;
+    }
+
     // === BID PRICE CHECK ===
     if (position.currentBidPrice === undefined) {
       skipReasons.noBid++;

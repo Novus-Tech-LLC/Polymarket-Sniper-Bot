@@ -287,6 +287,14 @@ export class SmartHedgingStrategy {
         continue;
       }
 
+      // === EXECUTION STATUS CHECK (Jan 2025 - Handle NOT_TRADABLE_ON_CLOB) ===
+      // If position has executionStatus set to NOT_TRADABLE_ON_CLOB, skip hedging/liquidation.
+      // This handles orderbook 404, empty book, and other CLOB unavailability scenarios.
+      if (position.executionStatus === "NOT_TRADABLE_ON_CLOB" || position.executionStatus === "EXECUTION_BLOCKED") {
+        skipAggregator.add(tokenIdShort, "not_tradable");
+        continue;
+      }
+
       // Skip if not losing enough
       if (position.pnlPct > -this.config.triggerLossPct) {
         skipAggregator.add(tokenIdShort, "loss_below_trigger");
