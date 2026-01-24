@@ -59,6 +59,13 @@ import {
 import { RiskManager, createRiskManager } from "./risk-manager";
 import { PnLLedger } from "./pnl-ledger";
 import type { RelayerContext } from "../polymarket/relayer";
+import {
+  DynamicReservesController,
+  createDynamicReservesController,
+  type DynamicReservesConfig,
+  type ReservePlan,
+  type WalletBalances,
+} from "../risk";
 
 const POSITION_REFRESH_MS = 5000; // 5 seconds
 const EXECUTION_INTERVAL_MS = 2000; // 2 seconds
@@ -76,6 +83,9 @@ export interface OrchestratorConfig {
   autoRedeemConfig?: Partial<AutoRedeemConfig>;
   sellEarlyConfig?: Partial<SellEarlyConfig>;
   stopLossConfig?: Partial<UniversalStopLossConfig>;
+  dynamicReservesConfig?: Partial<DynamicReservesConfig>;
+  /** Wallet balance fetcher for dynamic reserves (optional - if not provided, reserves are disabled) */
+  getWalletBalances?: () => Promise<WalletBalances>;
 }
 
 export class Orchestrator {
@@ -84,6 +94,8 @@ export class Orchestrator {
   private positionTracker: PositionTracker;
   private riskManager: RiskManager;
   private pnlLedger: PnLLedger;
+  private dynamicReserves: DynamicReservesController;
+  private getWalletBalances?: () => Promise<WalletBalances>;
 
   // All strategies
   private sellEarlyStrategy: SellEarlyStrategy;
@@ -117,6 +129,10 @@ export class Orchestrator {
   // Track last logged slow strategies for change detection
   private lastSlowStrategiesFingerprint = "";
 
+  // === CURRENT RESERVE PLAN ===
+  // Computed once per cycle and passed to strategies that need it
+  private currentReservePlan: ReservePlan | null = null;
+
   constructor(config: OrchestratorConfig) {
     this.client = config.client;
     this.logger = config.logger;
@@ -141,6 +157,14 @@ export class Orchestrator {
       logger: config.logger,
       refreshIntervalMs: POSITION_REFRESH_MS,
     });
+
+    // Initialize Dynamic Reserves Controller
+    // Aligns hedgeCapUsd with SMART_HEDGING_ABSOLUTE_MAX_USD (or DEFAULT_RESERVES_CONFIG default)
+    this.dynamicReserves = createDynamicReservesController(this.logger, {
+      hedgeCapUsd: config.hedgingConfig?.absoluteMaxUsd,
+      ...config.dynamicReservesConfig,
+    });
+    this.getWalletBalances = config.getWalletBalances;
 
     // === INITIALIZE ALL STRATEGIES ===
 
@@ -356,6 +380,24 @@ export class Orchestrator {
         return;
       }
 
+      // Phase 1.5: Compute reserve plan for this cycle
+      // This gates BUY strategies when reserves are insufficient
+      if (this.getWalletBalances) {
+        try {
+          const balances = await this.getWalletBalances();
+          this.currentReservePlan = this.dynamicReserves.computeReservePlan(
+            snapshot,
+            balances,
+          );
+        } catch (err) {
+          this.logger.debug(
+            `[Orchestrator] Failed to compute reserve plan: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          // Continue without reserve gating if balance fetch fails
+          this.currentReservePlan = null;
+        }
+      }
+
       // Phase 2: Capital efficiency and redemption
       // 1. SellEarly - CAPITAL EFFICIENCY - sell near-$1 ACTIVE positions before redemption
       await this.runStrategyTimed(
@@ -396,9 +438,11 @@ export class Orchestrator {
       );
 
       // 6. Endgame Sweep - buy high-confidence positions (85-99¢)
+      // Pass reserve plan for RISK_OFF gating (blocks BUYs when reserves insufficient)
       await this.runStrategyTimed(
         "Endgame",
-        () => this.endgameStrategy.execute(),
+        () =>
+          this.endgameStrategy.execute(this.currentReservePlan ?? undefined),
         strategyTimings,
       );
 
@@ -519,6 +563,17 @@ export class Orchestrator {
 
   getPnLLedger(): PnLLedger {
     return this.pnlLedger;
+  }
+
+  getDynamicReserves(): DynamicReservesController {
+    return this.dynamicReserves;
+  }
+
+  /**
+   * Get the current reserve plan (computed once per cycle)
+   */
+  getCurrentReservePlan(): ReservePlan | null {
+    return this.currentReservePlan;
   }
 }
 
