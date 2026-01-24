@@ -28,6 +28,15 @@ export type PnLClassification =
   | "UNKNOWN";     // pnlTrusted === false (missing cost basis or mark price)
 
 /**
+ * Source of P&L data indicating where the values came from.
+ * Used to understand data quality and debugging.
+ */
+export type PnLSource = 
+  | "DATA_API"           // P&L from Data API (cashPnl, percentPnl) - matches UI
+  | "EXECUTABLE_BOOK"    // P&L computed from CLOB best bid (executable mark)
+  | "FALLBACK";          // P&L from fallback price API (less accurate)
+
+/**
  * Cached outcome data for a tokenId
  * Used to prevent redundant Gamma API calls and log spam
  */
@@ -170,6 +179,41 @@ export interface Position {
    * Used for debugging to prove the data is not stale.
    */
   entryMetaCacheAgeMs?: number;
+
+  // === DATA-API P&L FIELDS (UI-TRUTH) ===
+  // These fields come directly from Polymarket Data API /positions endpoint
+  // and represent what the Polymarket UI shows to users.
+
+  /**
+   * Source of P&L values - indicates where pnlPct and pnlUsd came from.
+   * - DATA_API: Direct from Data API (matches Polymarket UI)
+   * - EXECUTABLE_BOOK: Computed from CLOB best bid (more accurate for execution)
+   * - FALLBACK: Computed from fallback price API (least accurate)
+   */
+  pnlSource?: PnLSource;
+
+  /**
+   * P&L values from Data API (when available).
+   * These match what Polymarket UI shows and should be treated as UI-truth.
+   */
+  dataApiPnlUsd?: number;     // cashPnl from Data API
+  dataApiPnlPct?: number;     // percentPnl from Data API
+  dataApiCurPrice?: number;   // curPrice from Data API (current market price)
+  dataApiCurrentValue?: number; // currentValue from Data API (size * curPrice)
+  dataApiInitialValue?: number; // initialValue from Data API (size * avgPrice)
+
+  /**
+   * Executable P&L computed from CLOB orderbook (optional enhancement).
+   * Uses best bid for selling positions - what we can actually realize.
+   */
+  executablePnlUsd?: number;
+  executableMarkCents?: number;
+
+  /**
+   * The conditionId (market identifier) from Data API.
+   * Distinct from marketId which may be the same but tracked separately.
+   */
+  conditionId?: string;
 }
 
 // Price display constants
@@ -217,6 +261,12 @@ export class PositionTracker {
   // Flag to track whether historical entry times have been loaded from API
   // This prevents immediate sells on container restart by ensuring we know actual entry times
   private historicalEntryTimesLoaded: boolean = false;
+
+  // === PROXY WALLET / HOLDING ADDRESS RESOLUTION ===
+  // Positions are held by proxy wallet, not EOA. Cache the resolved holding address.
+  private cachedHoldingAddress: string | null = null;
+  private holdingAddressCacheMs = 0;
+  private static readonly HOLDING_ADDRESS_CACHE_TTL_MS = 300_000; // 5 minutes TTL
 
   // Cache market end times (Unix timestamp ms). Market end times are fetched from Gamma API
   // and cached to avoid redundant API calls on every 30-second refresh cycle.
@@ -336,6 +386,99 @@ export class PositionTracker {
       tradesPerPage: 500,
       useLastAcquiredForTimeHeld: false, // Use firstAcquiredAt by default
     });
+  }
+
+  /**
+   * Resolve the holding address for positions.
+   * 
+   * On Polymarket, positions and USDC are held by a PROXY WALLET, not the EOA.
+   * This method fetches the proxy wallet address from the Gamma public profile API
+   * and uses it as the holding address for all position fetching.
+   * 
+   * NON-NEGOTIABLE RULE #1: Address correctness (proxy-first)
+   * - Determine holding address every refresh
+   * - Call Gamma public profile endpoint to fetch proxy wallet for EOA
+   * - holdingAddress = proxyAddress ?? wallet.address
+   * 
+   * @returns The holding address (proxy wallet if available, otherwise EOA)
+   */
+  async resolveHoldingAddress(): Promise<string> {
+    const { resolveSignerAddress } = await import("../utils/funds-allowance.util");
+    const signerAddress = resolveSignerAddress(this.client);
+
+    // Validate signer address
+    const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(signerAddress);
+    if (!isValidAddress) {
+      this.logger.warn(
+        `[PositionTracker] Invalid signer address "${signerAddress}" - cannot resolve holding address`,
+      );
+      return signerAddress; // Return as-is (will fail downstream)
+    }
+
+    // Check cache
+    const now = Date.now();
+    if (
+      this.cachedHoldingAddress &&
+      now - this.holdingAddressCacheMs < PositionTracker.HOLDING_ADDRESS_CACHE_TTL_MS
+    ) {
+      return this.cachedHoldingAddress;
+    }
+
+    try {
+      // Fetch proxy wallet from Gamma public profile API
+      interface ProfileResponse {
+        proxyWallet?: string;
+      }
+
+      const profileUrl = `${POLYMARKET_API.GAMMA_API_BASE_URL}/public-profile?address=${encodeURIComponent(signerAddress)}`;
+      const profile = await httpGet<ProfileResponse>(profileUrl, {
+        timeout: PositionTracker.API_TIMEOUT_MS,
+      });
+
+      const proxyWallet = profile?.proxyWallet;
+      const isValidProxy = proxyWallet && /^0x[a-fA-F0-9]{40}$/.test(proxyWallet);
+
+      if (isValidProxy) {
+        // Cache and use proxy wallet
+        this.cachedHoldingAddress = proxyWallet;
+        this.holdingAddressCacheMs = now;
+
+        // Log only on first resolution or change
+        if (this.logDeduper.shouldLog("Tracker:holding_address", HEARTBEAT_INTERVAL_MS, proxyWallet)) {
+          this.logger.info(
+            `[PositionTracker] Resolved holding address: proxy=${proxyWallet.slice(0, 10)}... (EOA=${signerAddress.slice(0, 10)}...)`,
+          );
+        }
+        return proxyWallet;
+      }
+
+      // No proxy wallet found - use EOA
+      this.cachedHoldingAddress = signerAddress;
+      this.holdingAddressCacheMs = now;
+
+      if (this.logDeduper.shouldLog("Tracker:holding_address_eoa", HEARTBEAT_INTERVAL_MS)) {
+        this.logger.debug(
+          `[PositionTracker] No proxy wallet found, using EOA: ${signerAddress.slice(0, 10)}...`,
+        );
+      }
+      return signerAddress;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(
+        `[PositionTracker] Failed to fetch proxy wallet, using EOA: ${errMsg}`,
+      );
+
+      // Fall back to EOA but don't cache on error (retry next time)
+      return this.cachedHoldingAddress ?? signerAddress;
+    }
+  }
+
+  /**
+   * Get the current holding address (cached).
+   * Returns null if not yet resolved.
+   */
+  getHoldingAddress(): string | null {
+    return this.cachedHoldingAddress;
   }
 
   /**
@@ -900,30 +1043,47 @@ export class PositionTracker {
    * - Batches Gamma API calls for outcome fetching (reduces per-token requests)
    * - Uses outcomeCache with TTL management
    * - Logs only on state changes (prevents log spam)
+   * 
+   * DATA-API-DRIVEN P&L (Jan 2025 Refactor):
+   * - Uses Data API P&L fields (cashPnl, percentPnl, currentValue, curPrice) as primary source
+   * - These fields match what Polymarket UI shows to users (UI-truth)
+   * - CLOB orderbook is used for executable mark (what we can actually sell at)
+   * - pnlSource indicates where P&L values came from
    */
   private async fetchPositionsFromAPI(): Promise<Position[]> {
     try {
-      // Import required utilities
-      const { httpGet } = await import("../utils/fetch-data.util");
-      const { POLYMARKET_API } =
-        await import("../constants/polymarket.constants");
-      const { resolveSignerAddress } =
-        await import("../utils/funds-allowance.util");
+      // STEP 1: Resolve holding address (proxy wallet preferred)
+      // NON-NEGOTIABLE RULE #1: Address correctness (proxy-first)
+      const holdingAddress = await this.resolveHoldingAddress();
 
-      // Get wallet address from client
-      const walletAddress = resolveSignerAddress(this.client);
+      // Validate holding address
+      const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(holdingAddress);
+      if (!isValidAddress) {
+        this.logger.error(
+          `[PositionTracker] Invalid holding address "${holdingAddress}" - cannot fetch positions`,
+        );
+        return [];
+      }
 
-      // Fetch positions from Data API
+      // Fetch positions from Data API using holding address
       // Updated Jan 2025 to match the current Data API positions response format.
       // Supports both the new format (introduced in late 2024) and the legacy format for backward compatibility.
       interface ApiPosition {
-        // New API format fields
+        // New API format fields (Jan 2025 Data API)
         asset?: string; // Token/asset identifier (replaces token_id/asset_id)
         conditionId?: string; // Market identifier (replaces market/id)
-        size?: string | number; // Position size
-        avgPrice?: string | number; // Average entry price (replaces initial_average_price)
+        size?: string | number; // Position size (shares)
+        avgPrice?: string | number; // Average entry price (0-1 scale)
         outcome?: string; // "YES" or "NO" outcome
         redeemable?: boolean; // True if market is resolved/closed (no orderbook available)
+
+        // === Data-API P&L fields (UI-TRUTH) ===
+        // These fields match what Polymarket UI shows
+        cashPnl?: string | number;      // Unrealized P&L in USD
+        percentPnl?: string | number;   // Unrealized P&L percentage
+        curPrice?: string | number;     // Current market price (0-1 scale)
+        currentValue?: string | number; // Current position value (size * curPrice)
+        initialValue?: string | number; // Initial cost (size * avgPrice)
 
         // Legacy fields for backwards compatibility
         id?: string;
@@ -936,14 +1096,14 @@ export class PositionTracker {
       }
 
       const apiPositions = await httpGet<ApiPosition[]>(
-        POLYMARKET_API.POSITIONS_ENDPOINT(walletAddress),
+        POLYMARKET_API.POSITIONS_ENDPOINT(holdingAddress),
         { timeout: PositionTracker.API_TIMEOUT_MS },
       );
 
       if (!apiPositions || apiPositions.length === 0) {
         // Rate-limit "no positions" log
         if (this.logDeduper.shouldLog("Tracker:no_positions", HEARTBEAT_INTERVAL_MS)) {
-          this.logger.debug("[PositionTracker] No positions found");
+          this.logger.debug(`[PositionTracker] No positions found for ${holdingAddress.slice(0, 10)}...`);
         }
         return [];
       }
@@ -952,7 +1112,7 @@ export class PositionTracker {
       const countFingerprint = String(apiPositions.length);
       if (this.logDeduper.shouldLog("Tracker:fetched_count", HEARTBEAT_INTERVAL_MS, countFingerprint)) {
         this.logger.debug(
-          `[PositionTracker] Fetched ${apiPositions.length} positions from API`,
+          `[PositionTracker] Fetched ${apiPositions.length} positions from Data API (addr=${holdingAddress.slice(0, 10)}...)`,
         );
       }
 
@@ -962,10 +1122,17 @@ export class PositionTracker {
         apiPos: ApiPosition;
         tokenId: string;
         marketId: string;
+        conditionId: string; // Store separately for clarity
         size: number;
         entryPrice: number;
         side: string;
         isRedeemable: boolean;
+        // Data-API P&L fields (may be undefined if not provided)
+        dataApiPnlUsd?: number;
+        dataApiPnlPct?: number;
+        dataApiCurPrice?: number;
+        dataApiCurrentValue?: number;
+        dataApiInitialValue?: number;
       }
 
       const parsedPositions: ParsedPosition[] = [];
@@ -1014,14 +1181,29 @@ export class PositionTracker {
         const side = sideValue.trim();
         const isRedeemable = apiPos.redeemable === true;
 
+        // Parse Data-API P&L fields (UI-truth)
+        // These fields match what Polymarket UI shows to users
+        const dataApiPnlUsd = this.parseNumericField(apiPos.cashPnl);
+        const dataApiPnlPct = this.parseNumericField(apiPos.percentPnl);
+        const dataApiCurPrice = this.parseNumericField(apiPos.curPrice);
+        const dataApiCurrentValue = this.parseNumericField(apiPos.currentValue);
+        const dataApiInitialValue = this.parseNumericField(apiPos.initialValue);
+
         parsedPositions.push({
           apiPos,
           tokenId,
           marketId,
+          conditionId: marketId, // Store conditionId explicitly (same as marketId from Data API)
           size,
           entryPrice,
           side,
           isRedeemable,
+          // Include Data-API P&L fields
+          dataApiPnlUsd,
+          dataApiPnlPct,
+          dataApiCurPrice,
+          dataApiCurrentValue,
+          dataApiInitialValue,
         });
 
         // Check if we need to fetch outcome from Gamma
@@ -1088,7 +1270,12 @@ export class PositionTracker {
         const batchResults = await Promise.allSettled(
           batch.map(async (parsed) => {
             try {
-              const { tokenId, marketId, size, entryPrice, side, apiPos } = parsed;
+              const { 
+                tokenId, marketId, conditionId, size, entryPrice, side, apiPos,
+                // Data-API P&L fields (UI-truth)
+                dataApiPnlUsd, dataApiPnlPct, dataApiCurPrice, 
+                dataApiCurrentValue, dataApiInitialValue,
+              } = parsed;
 
               // Skip orderbook fetch for resolved/closed markets (no orderbook available)
               let currentPrice: number;
@@ -1096,6 +1283,9 @@ export class PositionTracker {
               let bestAskPrice: number | undefined;
               let positionStatus: PositionStatus = "ACTIVE";
               let cacheAgeMs: number | undefined;
+              
+              // P&L source tracking: where did the P&L values come from?
+              let pnlSource: PnLSource = "FALLBACK";
               const apiRedeemable = apiPos.redeemable === true;
 
               // GATED REDEEMABLE DETECTION: Don't blindly trust apiPos.redeemable
@@ -1433,29 +1623,92 @@ export class PositionTracker {
                 }
               }
 
-              // Calculate P&L
-              const pnlUsd = (currentPrice - entryPrice) * size;
-              const pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+              // === MULTI-SOURCE P&L PIPELINE ===
+              // NON-NEGOTIABLE RULE #2: Use Data-API positions as canonical portfolio truth
+              // NON-NEGOTIABLE RULE #3: Only use CLOB orderbook to compute "executable" mark
+              //
+              // Priority order:
+              // 1. Data-API P&L fields (cashPnl, percentPnl) - UI-truth
+              // 2. CLOB orderbook best bid (executable mark)
+              // 3. Fallback price API (least accurate)
 
-              // === P&L TRUST DETERMINATION ===
-              // P&L is TRUSTED when we have:
-              // 1. Valid orderbook with actual bid price (not fallback)
-              // 2. Known entry price (from API)
-              // For redeemable positions, P&L is always trusted (settlement price is certain)
+              // Final P&L values to use
+              let pnlUsd: number;
+              let pnlPct: number;
+
+              // Executable P&L from CLOB (optional enhancement)
+              let executablePnlUsd: number | undefined;
+              let executableMarkCents: number | undefined;
+
+              // === SCENARIO 1: Data-API has P&L values (UI-TRUTH) ===
+              // This is the CANONICAL source that matches Polymarket UI
+              const hasDataApiPnl = dataApiPnlPct !== undefined && dataApiPnlUsd !== undefined;
+              
+              if (hasDataApiPnl && !finalRedeemable) {
+                // Use Data-API P&L as primary (matches UI)
+                pnlUsd = dataApiPnlUsd;
+                pnlPct = dataApiPnlPct;
+                pnlSource = "DATA_API";
+
+                // Use curPrice from Data-API as currentPrice if available
+                if (dataApiCurPrice !== undefined) {
+                  currentPrice = dataApiCurPrice;
+                }
+
+                // Additionally compute executable P&L from CLOB best bid (what we can actually sell at)
+                if (bestBidPrice !== undefined && bestBidPrice > 0) {
+                  executableMarkCents = bestBidPrice * 100;
+                  executablePnlUsd = (bestBidPrice - entryPrice) * size;
+                }
+              } else if (finalRedeemable) {
+                // Redeemable positions: P&L is settlement-based (100% certainty)
+                pnlUsd = (currentPrice - entryPrice) * size;
+                pnlPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
+                pnlSource = "DATA_API"; // Redeemable always trusted
+              } else if (bestBidPrice !== undefined && bestBidPrice > 0) {
+                // === SCENARIO 2: No Data-API P&L, but CLOB orderbook available ===
+                // Use CLOB best bid as mark price (executable P&L)
+                currentPrice = bestBidPrice;
+                pnlUsd = (currentPrice - entryPrice) * size;
+                pnlPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
+                pnlSource = "EXECUTABLE_BOOK";
+                executableMarkCents = bestBidPrice * 100;
+                executablePnlUsd = pnlUsd;
+              } else {
+                // === SCENARIO 3: Fallback - neither Data-API nor CLOB available ===
+                // Use fallback price (mid-price from /price endpoint)
+                pnlUsd = (currentPrice - entryPrice) * size;
+                pnlPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
+                pnlSource = "FALLBACK";
+              }
+
+              // === P&L TRUST DETERMINATION (UPDATED) ===
+              // NON-NEGOTIABLE RULE #3: If Data-API provides P&L, trust it even if CLOB book missing
+              // P&L is TRUSTED when:
+              // 1. Data-API has valid P&L values (pnlSource === "DATA_API")
+              // 2. CLOB orderbook has valid bid price (pnlSource === "EXECUTABLE_BOOK")
+              // 3. Position is redeemable (settlement price is certain)
               let pnlTrusted = true;
               let pnlUntrustedReason: string | undefined;
 
               if (finalRedeemable) {
-                // Redeemable positions have certain settlement prices
+                // Redeemable positions always trusted
                 pnlTrusted = true;
-              } else if (positionStatus === "NO_BOOK") {
-                // No orderbook available - mark price is from fallback/estimate
-                pnlTrusted = false;
-                pnlUntrustedReason = "NO_ORDERBOOK_BIDS";
-              } else if (bestBidPrice === undefined || bestBidPrice <= 0) {
-                // No valid bid price available
-                pnlTrusted = false;
-                pnlUntrustedReason = "NO_VALID_BID_PRICE";
+              } else if (pnlSource === "DATA_API") {
+                // Data-API P&L is trusted (matches UI)
+                pnlTrusted = true;
+              } else if (pnlSource === "EXECUTABLE_BOOK") {
+                // CLOB orderbook P&L is trusted (executable)
+                pnlTrusted = true;
+              } else if (pnlSource === "FALLBACK") {
+                // Fallback P&L is NOT trusted - no reliable mark price
+                // BUT: If Data-API provided curPrice or currentValue, we can still trust it
+                if (dataApiCurPrice !== undefined || dataApiCurrentValue !== undefined) {
+                  pnlTrusted = true; // Data-API provided some pricing info
+                } else {
+                  pnlTrusted = false;
+                  pnlUntrustedReason = "NO_ORDERBOOK_BIDS";
+                }
               }
 
               // === P&L CLASSIFICATION ===
@@ -1482,7 +1735,7 @@ export class PositionTracker {
               // Log significant profits at DEBUG level for monitoring
               if (pnlPct >= 10 && !finalRedeemable) {
                 this.logger.debug(
-                  `[PositionTracker] 💰 High profit position: ${side} entry=${(entryPrice * 100).toFixed(1)}¢ → current=${(currentPrice * 100).toFixed(1)}¢ = +${pnlPct.toFixed(1)}% ($${pnlUsd.toFixed(2)})`,
+                  `[PositionTracker] 💰 High profit position: ${side} entry=${(entryPrice * 100).toFixed(1)}¢ → current=${(currentPrice * 100).toFixed(1)}¢ = +${pnlPct.toFixed(1)}% ($${pnlUsd.toFixed(2)}) [source=${pnlSource}]`,
                 );
               }
 
@@ -1516,6 +1769,16 @@ export class PositionTracker {
                 currentAskPrice: bestAskPrice,
                 status: finalStatus,
                 cacheAgeMs,
+                // New Data-API fields
+                pnlSource,
+                dataApiPnlUsd,
+                dataApiPnlPct,
+                dataApiCurPrice,
+                dataApiCurrentValue,
+                dataApiInitialValue,
+                executablePnlUsd,
+                executableMarkCents,
+                conditionId,
               };
             } catch (err) {
               const reason = `Failed to enrich position: ${err instanceof Error ? err.message : String(err)}`;
@@ -1718,6 +1981,18 @@ export class PositionTracker {
     }
 
     return 0;
+  }
+
+  /**
+   * Parse a numeric field that may be string or number.
+   * Returns undefined if the field is not present or invalid.
+   */
+  private parseNumericField(value: string | number | undefined): number | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    const parsed = typeof value === "string" ? parseFloat(value) : value;
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
 
   /**
