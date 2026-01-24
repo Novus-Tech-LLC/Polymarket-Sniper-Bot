@@ -352,10 +352,18 @@ export class AutoRedeemStrategy {
             }
           } else if (isTrulyResolved) {
             // Truly resolved market - fallback sell won't work (no orderbook)
-            // Log why and suggest the issue might be with redemption parameters
+            // Log why and show when retry will happen
+            const remainingCooldown = Math.max(
+              0,
+              Math.ceil(
+                (AutoRedeemStrategy.FULL_RESET_COOLDOWN_MS -
+                  timeSinceLastAttempt) /
+                  60000,
+              ),
+            );
             this.logger.info(
               `[AutoRedeem] ⚠️ Market ${marketId.slice(0, 16)}... is RESOLVED but redemption failed ${attempts.failures}x. ` +
-                `Fallback sell not possible (no orderbook). Will retry redemption after full reset cooldown.`,
+                `Fallback sell not possible (no orderbook). Will retry redemption in ~${remainingCooldown}min.`,
             );
           } else {
             const nextRetryIn = Math.max(
@@ -458,8 +466,10 @@ export class AutoRedeemStrategy {
           // Mark entire market as redeemed (all positions for this market are now redeemed)
           this.redeemedMarkets.add(marketId);
           redeemedCount++;
+          // Show actual redeemed amount if available, otherwise show estimated value
+          const actualRedeemed = result.amountRedeemed ? `$${result.amountRedeemed}` : `~$${totalValueUsd.toFixed(2)}`;
           this.logger.info(
-            `[AutoRedeem] ✓ Successfully redeemed market ${marketId} (~$${totalValueUsd.toFixed(2)}) (tx: ${result.transactionHash})`,
+            `[AutoRedeem] ✓ Successfully redeemed market ${marketId} (${actualRedeemed}) (tx: ${result.transactionHash})`,
           );
         } else {
           // Check if this was a rate limit error - if so, set global pause
@@ -765,15 +775,44 @@ export class AutoRedeemStrategy {
             )) as bigint;
             const amountRedeemed = balanceAfter - balanceBefore;
             const amountRedeemedFormatted = formatUnits(amountRedeemed, 6);
+            
+            // Also check if token balance decreased (proves redemption executed)
+            const tokenBalanceAfter = (await ctfContract.balanceOf(
+              wallet.address,
+              tokenIdBigInt,
+            )) as bigint;
+            const tokensCleared = tokenBalance - tokenBalanceAfter;
 
-            this.logger.info(
-              `[AutoRedeem] ✅ Relayer redemption confirmed, redeemed $${amountRedeemedFormatted} USDC`,
-            );
+            // Provide clear feedback based on what actually happened
+            if (tokensCleared <= 0n) {
+              // Token balance didn't decrease - redemption may not have executed
+              const txLink = result.transactionHash 
+                ? `Verify tx on Polygonscan: https://polygonscan.com/tx/${result.transactionHash}`
+                : "No transaction hash available for verification.";
+              this.logger.warn(
+                `[AutoRedeem] ⚠️ Relayer tx confirmed (tx: ${result.transactionHash ?? "n/a"}) but token balance unchanged. ` +
+                  `Tokens before=${tokenBalance}, after=${tokenBalanceAfter}. Position may already be redeemed or tx reverted silently. ` +
+                  txLink,
+              );
+            } else if (amountRedeemed <= 0n) {
+              // Tokens cleared but $0 USDC - normal for losing position
+              this.logger.info(
+                `[AutoRedeem] ✅ Relayer redemption confirmed (tx: ${result.transactionHash ?? "n/a"}). ` +
+                  `Cleared ${tokensCleared} tokens, $0 USDC received - this is normal for losing positions (worthless shares). ` +
+                  `Position should clear from Polymarket within ~1-2 minutes.`,
+              );
+            } else {
+              // Winning position - funds received
+              this.logger.info(
+                `[AutoRedeem] ✅ Relayer redemption confirmed, redeemed $${amountRedeemedFormatted} USDC (tx: ${result.transactionHash ?? "n/a"}). ` +
+                  `Cleared ${tokensCleared} tokens. Funds are now in your wallet.`,
+              );
+            }
 
             return {
               tokenId: position.tokenId,
               marketId: position.marketId,
-              success: true,
+              success: tokensCleared > 0n, // Only mark success if tokens actually cleared
               transactionHash: result.transactionHash,
               amountRedeemed: amountRedeemedFormatted,
             };
@@ -847,21 +886,47 @@ export class AutoRedeemStrategy {
           };
         }
 
-        // Get USDC balance after redemption
+        // Verify redemption by checking both USDC balance AND token balance
         const balanceAfter = (await usdcContract.balanceOf(
           wallet.address,
         )) as bigint;
         const amountRedeemed = balanceAfter - balanceBefore;
         const amountRedeemedFormatted = formatUnits(amountRedeemed, 6);
+        
+        // Also check if token balance decreased (proves redemption executed)
+        const tokenBalanceAfter = (await ctfContract.balanceOf(
+          wallet.address,
+          tokenIdBigInt,
+        )) as bigint;
+        const tokensCleared = tokenBalance - tokenBalanceAfter;
 
-        this.logger.info(
-          `[AutoRedeem] Redemption confirmed in block ${receipt.blockNumber}, redeemed $${amountRedeemedFormatted} USDC`,
-        );
+        // Provide clear feedback based on what actually happened
+        if (tokensCleared <= 0n) {
+          // Token balance didn't decrease - redemption may not have executed
+          this.logger.warn(
+            `[AutoRedeem] ⚠️ Tx confirmed in block ${receipt.blockNumber} (tx: ${tx.hash}) but token balance unchanged. ` +
+              `Tokens before=${tokenBalance}, after=${tokenBalanceAfter}. Position may already be redeemed or tx reverted silently. ` +
+              `Verify tx on Polygonscan: https://polygonscan.com/tx/${tx.hash}`,
+          );
+        } else if (amountRedeemed <= 0n) {
+          // Tokens cleared but $0 USDC - normal for losing position
+          this.logger.info(
+            `[AutoRedeem] Redemption confirmed in block ${receipt.blockNumber} (tx: ${tx.hash}). ` +
+              `Cleared ${tokensCleared} tokens, $0 USDC received - this is normal for losing positions (worthless shares). ` +
+              `Position should clear from Polymarket within ~1-2 minutes.`,
+          );
+        } else {
+          // Winning position - funds received
+          this.logger.info(
+            `[AutoRedeem] Redemption confirmed in block ${receipt.blockNumber}, redeemed $${amountRedeemedFormatted} USDC (tx: ${tx.hash}). ` +
+              `Cleared ${tokensCleared} tokens. Funds are now in your wallet.`,
+          );
+        }
 
         return {
           tokenId: position.tokenId,
           marketId: position.marketId,
-          success: true,
+          success: tokensCleared > 0n, // Only mark success if tokens actually cleared
           transactionHash: tx.hash,
           amountRedeemed: amountRedeemedFormatted,
         };
