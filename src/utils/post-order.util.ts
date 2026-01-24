@@ -562,10 +562,16 @@ async function postOrderClobInner(
   });
 
   if (!priceProtection.valid) {
-    // Log diagnostics for debugging
+    // Log diagnostics with actionable context for debugging price protection failures
+    // NOTE: Price protection errors often occur when orderbook liquidity is poor (wide spread,
+    // stale quotes) or the token has low activity. The error will repeat on each exit attempt
+    // until market conditions improve or the exit plan escalates to FORCE stage.
+    // If this persists after container restart, it means the position still exists and the
+    // exit ladder is re-created when profitable positions are detected.
     logger.warn(
       `[CLOB] Price protection failed: ${priceProtection.error} ` +
-        `diagnostics=${JSON.stringify(priceProtection.diagnostics)}`,
+        `diagnostics=${JSON.stringify(priceProtection.diagnostics)} ` +
+        `(This error repeats while exit plan is active. Will escalate to FORCE stage after window expires.)`,
     );
     throw new Error(priceProtection.error ?? "Price protection failed");
   }

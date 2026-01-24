@@ -1668,12 +1668,33 @@ export class ScalpTakeProfitStrategy {
       }
 
       this.logger.warn(
-        `[ScalpTakeProfit] ⚠️ Scalp not filled: ${result.reason ?? "unknown"}`,
+        `[ScalpTakeProfit] ⚠️ Scalp not filled: ${result.reason ?? "unknown"} ` +
+          `position={tokenId=${position.tokenId.slice(0, 16)}..., marketId=${position.marketId.slice(0, 16)}..., ` +
+          `side=${position.side}, shares=${position.size.toFixed(4)}, entry=${(position.entryPrice * 100).toFixed(1)}¢, ` +
+          `currentBid=${position.currentBidPrice !== undefined ? (position.currentBidPrice * 100).toFixed(1) + "¢" : "N/A"}, ` +
+          `limit=${effectiveLimitCents.toFixed(1)}¢, notional=$${notionalUsd.toFixed(2)}}`,
       );
       return false;
     } catch (err) {
+      // Include full position context for troubleshooting price protection and other errors
+      // NOTE: Exit plans persist in memory (this.exitPlans Map) so errors may repeat until
+      // the position exits or the plan is abandoned. Container restarts clear plans but
+      // positions remain, causing new plans to be created on the next cycle.
+      const exitPlan = this.exitPlans.get(position.tokenId);
+      const exitPlanInfo = exitPlan
+        ? `stage=${exitPlan.stage}, attempts=${exitPlan.attempts}, elapsed=${Math.round((Date.now() - exitPlan.startedAtMs) / 1000)}s`
+        : "no active plan";
+      // Recalculate limit/notional for error logging (same logic as try block)
+      const errLimitCents = limitPriceCents ?? (position.currentBidPrice ?? position.currentPrice) * 100;
+      const errNotionalUsd = position.size * (errLimitCents / 100);
       this.logger.error(
-        `[ScalpTakeProfit] ❌ Scalp failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[ScalpTakeProfit] ❌ Scalp failed: ${err instanceof Error ? err.message : String(err)} ` +
+          `position={tokenId=${position.tokenId.slice(0, 16)}..., marketId=${position.marketId.slice(0, 16)}..., ` +
+          `side=${position.side}, shares=${position.size.toFixed(4)}, entry=${(position.entryPrice * 100).toFixed(1)}¢, ` +
+          `currentBid=${position.currentBidPrice !== undefined ? (position.currentBidPrice * 100).toFixed(1) + "¢" : "N/A"}, ` +
+          `currentAsk=${position.currentAskPrice !== undefined ? (position.currentAskPrice * 100).toFixed(1) + "¢" : "N/A"}, ` +
+          `limit=${errLimitCents.toFixed(1)}¢, notional=$${errNotionalUsd.toFixed(2)}} ` +
+          `exitPlan={${exitPlanInfo}}`,
       );
       return false;
     }
