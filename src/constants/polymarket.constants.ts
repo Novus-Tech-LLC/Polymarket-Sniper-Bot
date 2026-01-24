@@ -110,6 +110,9 @@ export const POLYMARKET_API = {
     `${POLYMARKET_API.DATA_API_BASE_URL}/activity?user=${user}`,
   POSITIONS_ENDPOINT: (user: string) =>
     `${POLYMARKET_API.DATA_API_BASE_URL}/positions?user=${user}`,
+  /** Trades API - User trade history with timestamps (more efficient than activity for BUY trades) */
+  TRADES_ENDPOINT: (user: string) =>
+    `${POLYMARKET_API.DATA_API_BASE_URL}/trades?user=${user}`,
 } as const;
 
 /**

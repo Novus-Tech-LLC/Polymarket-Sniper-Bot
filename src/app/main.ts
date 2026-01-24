@@ -132,6 +132,21 @@ async function main(): Promise<void> {
       stopLossConfig: {
         minHoldSeconds: strategyConfig.stopLossMinHoldSeconds,
       },
+      // Pass scalp take-profit config
+      scalpConfig: {
+        enabled: strategyConfig.scalpTakeProfitEnabled,
+        minHoldMinutes: strategyConfig.scalpMinHoldMinutes,
+        maxHoldMinutes: strategyConfig.scalpMaxHoldMinutes,
+        minProfitPct: strategyConfig.scalpMinProfitPct,
+        targetProfitPct: strategyConfig.scalpTargetProfitPct,
+        minProfitUsd: strategyConfig.scalpMinProfitUsd,
+        resolutionExclusionPrice: strategyConfig.scalpResolutionExclusionPrice,
+        suddenSpikeEnabled: strategyConfig.scalpSuddenSpikeEnabled,
+        suddenSpikeThresholdPct: strategyConfig.scalpSuddenSpikeThresholdPct,
+        suddenSpikeWindowMinutes: strategyConfig.scalpSuddenSpikeWindowMinutes,
+        lowPriceThreshold: strategyConfig.scalpLowPriceThreshold,
+        lowPriceMaxHoldMinutes: strategyConfig.scalpLowPriceMaxHoldMinutes,
+      },
     });
 
     await orchestrator.start();

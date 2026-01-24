@@ -65,6 +65,12 @@ export class PositionTracker {
   // API timeout constant for external API calls
   private static readonly API_TIMEOUT_MS = 10000; // 10 seconds
 
+  // Pagination settings for loading historical trade data from wallet
+  // PAGE_LIMIT: Maximum trades per API request (API max is 500)
+  // MAX_PAGES: Safety limit to prevent infinite loops (500 * 20 = 10,000 trades max)
+  private static readonly TRADES_PAGE_LIMIT = 500;
+  private static readonly TRADES_MAX_PAGES = 20;
+
   // Threshold for determining market winner from outcomePrices
   // Price > 0.5 indicates the likely winner in resolved markets
   private static readonly WINNER_THRESHOLD = 0.5;
@@ -958,13 +964,27 @@ export class PositionTracker {
   }
 
   /**
-   * Load historical entry times from the Polymarket activity API.
-   * This fetches the user's trade history and finds the earliest BUY timestamp
-   * for each position, which represents when the position was acquired.
+   * Load historical entry times from the Polymarket trades API.
+   * This fetches the user's BUY trade history from their wallet and finds the earliest
+   * BUY timestamp for each position, which represents when the position was acquired.
    *
    * This is critical for preventing mass sells on container restart - without
    * knowing when positions were actually bought, strategies might incorrectly
    * assume positions are "new" and trigger stop-loss or hedging immediately.
+   *
+   * IMPORTANT: This method paginates through the user's BUY trade history up to a
+   * configured safety cap (TRADES_MAX_PAGES, currently ~20 pages / ~10k trades)
+   * to find the earliest purchase date for each position. Without pagination, only
+   * the most recent trades would be fetched, causing older positions to use container
+   * start time (or first-seen time) instead of actual purchase date.
+   *
+   * If the safety cap is hit before the wallet's full history is exhausted, very old
+   * positions whose BUY trades fall before the earliest fetched page may not have an
+   * accurate historical entry time and will fall back to the tracker's default behavior
+   * (treating them as newly seen). A warning is logged when this occurs.
+   *
+   * Uses the /trades endpoint with side=BUY filter, which directly queries
+   * your wallet's purchase history on the blockchain up to the configured cap.
    */
   private async loadHistoricalEntryTimes(): Promise<void> {
     try {
@@ -984,13 +1004,13 @@ export class PositionTracker {
       }
 
       this.logger.info(
-        `[PositionTracker] Loading historical entry times from activity API for ${walletAddress.slice(0, 10)}...`,
+        `[PositionTracker] Loading purchase history from wallet ${walletAddress.slice(0, 10)}...`,
       );
 
-      // Fetch user's activity/trade history
-      interface ActivityItem {
-        type: string;
-        timestamp: number | string;
+      // Fetch user's BUY trades directly from the trades API
+      // This queries the wallet's trade history on the blockchain
+      interface TradeItem {
+        timestamp: number; // Unix timestamp in seconds
         conditionId: string; // Market ID
         asset: string; // Token ID
         side: string; // "BUY" or "SELL"
@@ -998,71 +1018,89 @@ export class PositionTracker {
         price: number;
       }
 
-      const activities = await httpGet<ActivityItem[]>(
-        POLYMARKET_API.ACTIVITY_ENDPOINT(walletAddress),
-        { timeout: PositionTracker.API_TIMEOUT_MS },
-      );
+      // Build a map of earliest BUY timestamp per token
+      // Key: "marketId-tokenId", Value: earliest BUY timestamp in ms
+      const earliestBuyTimes = new Map<string, number>();
+      let totalTrades = 0;
+      let offset = 0;
+      let pageCount = 0;
 
-      if (!activities || activities.length === 0) {
-        this.logger.info("[PositionTracker] No historical activities found");
+      // Paginate through all BUY trades from the wallet
+      while (pageCount < PositionTracker.TRADES_MAX_PAGES) {
+        pageCount++;
+
+        // Build URL with side=BUY filter and pagination
+        // TRADES_ENDPOINT already includes ?user=, so we use & for additional params
+        const tradesUrl = `${POLYMARKET_API.TRADES_ENDPOINT(walletAddress)}&side=BUY&limit=${PositionTracker.TRADES_PAGE_LIMIT}&offset=${offset}`;
+
+        const trades = await httpGet<TradeItem[]>(
+          tradesUrl,
+          { timeout: PositionTracker.API_TIMEOUT_MS },
+        );
+
+        // Stop if no more trades
+        if (!trades || trades.length === 0) {
+          break;
+        }
+
+        totalTrades += trades.length;
+
+        // Process each trade in this page
+        for (const trade of trades) {
+          const marketId = trade.conditionId;
+          const tokenId = trade.asset;
+
+          if (!marketId || !tokenId) {
+            continue;
+          }
+
+          const key = `${marketId}-${tokenId}`;
+
+          // Convert timestamp from seconds to milliseconds
+          // The trades API returns Unix timestamp in seconds
+          const timestamp = trade.timestamp * 1000;
+
+          // Skip trades with invalid timestamps
+          if (!Number.isFinite(timestamp) || timestamp <= 0) {
+            continue;
+          }
+
+          // Keep the earliest (oldest) BUY timestamp for each position
+          // This represents when you first purchased this position
+          const existing = earliestBuyTimes.get(key);
+          if (!existing || timestamp < existing) {
+            earliestBuyTimes.set(key, timestamp);
+          }
+        }
+
+        // If we got fewer results than requested, we've reached the end
+        if (trades.length < PositionTracker.TRADES_PAGE_LIMIT) {
+          break;
+        }
+
+        // Move to next page
+        offset += PositionTracker.TRADES_PAGE_LIMIT;
+      }
+
+      // Warn if we hit the max pages limit (may have truncated history)
+      if (
+        pageCount >= PositionTracker.TRADES_MAX_PAGES &&
+        totalTrades > 0 &&
+        totalTrades % PositionTracker.TRADES_PAGE_LIMIT === 0
+      ) {
+        this.logger.warn(
+          `[PositionTracker] ⚠️ Hit max pages limit (${PositionTracker.TRADES_MAX_PAGES} pages / ${totalTrades} trades). ` +
+            `Very old positions may not have accurate entry times. Consider increasing TRADES_MAX_PAGES if needed.`,
+        );
+      }
+
+      if (totalTrades === 0) {
+        this.logger.info("[PositionTracker] No purchase history found in wallet");
         this.historicalEntryTimesLoaded = true;
         return;
       }
 
-      // Build a map of earliest BUY timestamp per token
-      // Key: "marketId-tokenId", Value: earliest BUY timestamp in ms
-      const earliestBuyTimes = new Map<string, number>();
-      let buyCount = 0;
-
-      for (const activity of activities) {
-        // Only process BUY trades (these are when we acquired positions)
-        if (
-          activity.type !== "TRADE" ||
-          activity.side?.toUpperCase() !== "BUY"
-        ) {
-          continue;
-        }
-
-        const marketId = activity.conditionId;
-        const tokenId = activity.asset;
-
-        if (!marketId || !tokenId) {
-          continue;
-        }
-
-        const key = `${marketId}-${tokenId}`;
-
-        // Handle timestamp - check if it's in seconds or milliseconds
-        // Timestamps > 1e12 are already in milliseconds (year 2001+)
-        // Timestamps < 1e12 are in seconds and need conversion
-        let timestamp: number;
-        if (typeof activity.timestamp === "number") {
-          timestamp =
-            activity.timestamp > 1e12
-              ? activity.timestamp
-              : activity.timestamp * 1000;
-        } else {
-          timestamp = new Date(activity.timestamp).getTime();
-        }
-
-        // Skip activities with invalid timestamps (e.g., unparseable -> NaN)
-        // Storing NaN would cause downstream strategies to behave incorrectly
-        if (!Number.isFinite(timestamp)) {
-          continue;
-        }
-
-        // Keep the earliest (oldest) BUY timestamp
-        const existing = earliestBuyTimes.get(key);
-        if (!existing || timestamp < existing) {
-          // Only count as new BUY trade when adding a new position to the map
-          if (!existing) {
-            buyCount++;
-          }
-          earliestBuyTimes.set(key, timestamp);
-        }
-      }
-
-      // Populate positionEntryTimes with historical data
+      // Populate positionEntryTimes with historical data from wallet
       for (const [key, timestamp] of earliestBuyTimes) {
         // Only set if we don't already have an entry time
         // (shouldn't happen on startup, but be safe)
@@ -1073,14 +1111,28 @@ export class PositionTracker {
 
       this.historicalEntryTimesLoaded = true;
 
+      // Log summary with detailed info for debugging
       this.logger.info(
-        `[PositionTracker] ✅ Loaded ${earliestBuyTimes.size} historical entry times from ${activities.length} activities (${buyCount} unique positions)`,
+        `[PositionTracker] ✅ Loaded ${earliestBuyTimes.size} position purchase dates from ${totalTrades} wallet trades (${pageCount} page(s))`,
       );
+
+      // Log entry time range for debugging
+      if (earliestBuyTimes.size > 0) {
+        const entries = Array.from(earliestBuyTimes.entries());
+        const sorted = entries.sort((a, b) => a[1] - b[1]);
+        const oldest = sorted[0];
+        const newest = sorted[sorted.length - 1];
+        const oldestAge = Math.round((Date.now() - oldest[1]) / (60 * 1000));
+        const newestAge = Math.round((Date.now() - newest[1]) / (60 * 1000));
+        this.logger.info(
+          `[PositionTracker] 📅 Purchase dates range: oldest ${oldestAge}min ago, newest ${newestAge}min ago`,
+        );
+      }
     } catch (err) {
       // Log the error but don't fail - strategies will be conservative without historical data
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
-        `[PositionTracker] ⚠️ Could not load historical entry times: ${errMsg}`,
+        `[PositionTracker] ⚠️ Could not load purchase history from wallet: ${errMsg}`,
       );
       // Do not set historicalEntryTimesLoaded = true on error - strategies should remain conservative
       // Do not re-throw: callers should treat missing historical data as non-fatal

@@ -64,6 +64,18 @@ export type PostOrderInput = {
    */
   skipMinBuyPriceCheck?: boolean;
   /**
+   * Minimum buy price threshold. Set via MIN_BUY_PRICE env variable.
+   * Set to 0 to allow buying at any price (useful for scalping volatile low-price positions).
+   * If not provided, uses GLOBAL_MIN_BUY_PRICE constant (0.10 = 10¢) as fallback.
+   */
+  minBuyPrice?: number;
+  /**
+   * Low-price scalping threshold. Set via SCALP_LOW_PRICE_THRESHOLD env variable.
+   * If set > 0, allows buying at prices at or below this threshold (bypasses MIN_BUY_PRICE).
+   * Example: 0.20 means you can buy at 20¢ or below, and those positions get instant profit.
+   */
+  scalpLowPriceThreshold?: number;
+  /**
    * Skip the minimum order size check.
    * Use for liquidations/sells where we need to sell whatever position
    * size we have, even if it's below the normal minimum order size.
@@ -200,16 +212,26 @@ async function postOrderClob(
   // === GLOBAL MINIMUM BUY PRICE CHECK ===
   // Prevents buying extremely low-probability "loser" positions (e.g., 3¢)
   // This is a SAFETY NET that catches orders from any source (ARB, copy trading, etc.)
-  // Skip for legitimate hedge operations where buying at low prices is intentional.
+  // 
+  // EXCEPTION: If SCALP_LOW_PRICE_THRESHOLD is set, allow buys at or below that threshold.
+  // This enables scalping volatile low-price positions - one setting controls everything.
+  // Example: SCALP_LOW_PRICE_THRESHOLD=0.20 allows buying at 20¢ or below.
+  const effectiveMinBuyPrice = input.minBuyPrice ?? GLOBAL_MIN_BUY_PRICE;
+  const scalpThreshold = input.scalpLowPriceThreshold ?? 0;
+  
   if (
     side === "BUY" &&
     !input.skipMinBuyPriceCheck &&
-    maxAcceptablePrice !== undefined
+    maxAcceptablePrice !== undefined &&
+    effectiveMinBuyPrice > 0 // Skip check if minBuyPrice is 0 (uncapped)
   ) {
-    if (maxAcceptablePrice < GLOBAL_MIN_BUY_PRICE) {
+    // Allow buys at or below the scalp threshold (for low-price scalping)
+    const allowedByScalpThreshold = scalpThreshold > 0 && maxAcceptablePrice <= scalpThreshold;
+    
+    if (!allowedByScalpThreshold && maxAcceptablePrice < effectiveMinBuyPrice) {
       logger.warn(
-        `[CLOB] 🚫 Order blocked (LOSER_POSITION): BUY price ${(maxAcceptablePrice * 100).toFixed(1)}¢ < ${(GLOBAL_MIN_BUY_PRICE * 100).toFixed(0)}¢ min. ` +
-          `Positions this cheap are almost certain to lose. Token: ${tokenId.slice(0, 16)}...`,
+        `[CLOB] 🚫 Order blocked (LOSER_POSITION): BUY price ${(maxAcceptablePrice * 100).toFixed(1)}¢ < ${(effectiveMinBuyPrice * 100).toFixed(0)}¢ min. ` +
+          `Positions this cheap are almost certain to lose. Token: ${tokenId.slice(0, 16)}... (Set SCALP_LOW_PRICE_THRESHOLD to enable low-price scalping)`,
       );
       return {
         status: "skipped",

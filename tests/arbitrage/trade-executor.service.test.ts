@@ -506,3 +506,137 @@ test("frontrun allows BUY trade when price is above MIN_BUY_PRICE threshold", as
     "postOrder should be called for BUY orders above minimum price",
   );
 });
+
+test("frontrun allows low-price BUY when scalpLowPriceThreshold is set", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - SHOULD be called because scalpLowPriceThreshold allows it
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: {
+      ...baseEnv,
+      minBuyPrice: 0.50, // 50¢ minimum normally
+      scalpLowPriceThreshold: 0.20, // But allow scalping at ≤20¢
+    },
+    logger,
+  });
+
+  // Try to buy at 5¢ (0.05) - normally blocked by 50¢ minimum, but allowed by scalp threshold
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-scalp",
+    tokenId: "token-scalp",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.05, // 5¢ - below minBuyPrice (50¢) but within scalpLowPriceThreshold (20¢)
+    timestamp: Date.now(),
+  });
+
+  // Verify the order was allowed due to scalp threshold
+  assert.ok(
+    logs.some((line) => line.includes("Low-price scalp allowed")),
+    "Should log that low-price scalp is allowed",
+  );
+  assert.ok(
+    logs.some((line) => line.includes("5.0¢ ≤ 20¢ threshold")),
+    "Should show price is within scalp threshold",
+  );
+  assert.ok(
+    postOrderCalled,
+    "postOrder should be called when scalpLowPriceThreshold allows the buy",
+  );
+});
+
+test("frontrun blocks low-price BUY when price exceeds scalpLowPriceThreshold", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - should NOT be called
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: {
+      ...baseEnv,
+      minBuyPrice: 0.50, // 50¢ minimum
+      scalpLowPriceThreshold: 0.20, // Scalp threshold at 20¢
+    },
+    logger,
+  });
+
+  // Try to buy at 30¢ - above scalp threshold (20¢) but below minBuyPrice (50¢)
+  // This should be BLOCKED because 30¢ > 20¢ threshold, so it falls back to minBuyPrice check
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-mid",
+    tokenId: "token-mid",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.30, // 30¢ - above scalpLowPriceThreshold (20¢), below minBuyPrice (50¢)
+    timestamp: Date.now(),
+  });
+
+  // Verify the order was blocked
+  assert.ok(
+    logs.some((line) => line.includes("Skipping BUY - price 30.0¢ is below minimum 50.0¢")),
+    "Should be blocked by minBuyPrice since price exceeds scalpLowPriceThreshold",
+  );
+  assert.equal(
+    postOrderCalled,
+    false,
+    "postOrder should NOT be called when price exceeds scalp threshold and is below minBuyPrice",
+  );
+});
