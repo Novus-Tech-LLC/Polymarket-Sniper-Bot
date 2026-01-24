@@ -98,7 +98,27 @@ export class SimpleQuickFlipStrategy {
     const positions = this.positionTracker.getPositions();
     let soldCount = 0;
 
+    // Log position summary for diagnostics
+    const profitable = positions.filter((p) => p.pnlPct >= this.config.targetPct && !p.redeemable);
+    const redeemable = positions.filter((p) => p.redeemable);
+    if (profitable.length > 0 || positions.length > 0) {
+      this.logger.debug(
+        `[SimpleQuickFlip] 📊 Positions: ${positions.length} total, ${profitable.length} profitable (>=${this.config.targetPct}%), ${redeemable.length} redeemable`,
+      );
+    }
+    if (profitable.length > 0) {
+      this.logger.info(
+        `[SimpleQuickFlip] 💰 Found ${profitable.length} position(s) at target profit: ${profitable.map((p) => `${p.tokenId.slice(0, 8)}...+${p.pnlPct.toFixed(1)}%`).join(", ")}`,
+      );
+    }
+
     for (const position of positions) {
+      // STRATEGY GATE: Skip resolved positions - route to AutoRedeem only
+      // Resolved markets cannot be sold on the CLOB; they must be redeemed on-chain
+      if (position.redeemable) {
+        continue;
+      }
+
       // Skip if not profitable enough (based on mid-price from position tracker)
       if (position.pnlPct < this.config.targetPct) {
         continue;
@@ -106,6 +126,9 @@ export class SimpleQuickFlipStrategy {
 
       // Skip if profit too small in absolute terms
       if (position.pnlUsd < this.config.minProfitUsd) {
+        this.logger.debug(
+          `[SimpleQuickFlip] Skip ${position.tokenId.slice(0, 8)}...: profit $${position.pnlUsd.toFixed(2)} < min $${this.config.minProfitUsd}`,
+        );
         continue;
       }
 
@@ -114,16 +137,26 @@ export class SimpleQuickFlipStrategy {
         position.marketId,
         position.tokenId,
       );
+      
+      // If no entry time is available, check if position is clearly profitable
+      // For profitable positions, the hold time check is mainly to prevent immediate flip after buying
+      // If we don't know when we bought but the position is clearly profitable (>= target), allow selling
+      // This handles positions bought via on-chain wallet where historical data might be missing
       if (!entryTime) {
-        continue; // Don't know when we bought - skip
-      }
-
-      const holdSeconds = (Date.now() - entryTime) / 1000;
-      if (holdSeconds < this.config.minHoldSeconds) {
-        this.logger.debug(
-          `[SimpleQuickFlip] Hold ${holdSeconds.toFixed(0)}s < ${this.config.minHoldSeconds}s - waiting`,
+        // If position meets target profit AND minimum USD profit, allow it
+        // (We already checked pnlPct >= targetPct and pnlUsd >= minProfitUsd above)
+        this.logger.info(
+          `[SimpleQuickFlip] ℹ️ No entry time for profitable position (+${position.pnlPct.toFixed(1)}% / $${position.pnlUsd.toFixed(2)}), proceeding with sale`,
         );
-        continue;
+        // Fall through to sell - we already know it's profitable
+      } else {
+        const holdSeconds = (Date.now() - entryTime) / 1000;
+        if (holdSeconds < this.config.minHoldSeconds) {
+          this.logger.debug(
+            `[SimpleQuickFlip] Hold ${holdSeconds.toFixed(0)}s < ${this.config.minHoldSeconds}s - waiting`,
+          );
+          continue;
+        }
       }
 
       // CRITICAL: Verify profit at ACTUAL BID PRICE before selling

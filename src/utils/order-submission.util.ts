@@ -103,6 +103,13 @@ export class OrderSubmissionController {
    * independent of price/size - which prevents "order stacking".
    */
   private tokenSideLastSubmit = new Map<string, number>();
+  /**
+   * Hard cooldown cache per token_id + side
+   * When an order response includes cooldownUntil, we cache it and skip all
+   * subsequent order attempts for that token_id + side until expiry.
+   * Key format: `${tokenId}:${side}`
+   */
+  private hardCooldownCache = new Map<string, number>();
 
   constructor(settings: OrderSubmissionSettings) {
     this.settings = { ...settings };
@@ -238,6 +245,17 @@ export class OrderSubmissionController {
       const reason = normalizeReason(
         extractReason(response) || "order_rejected",
       );
+      
+      // Check for cooldownUntil in the response and cache it
+      const cooldownUntil = extractCooldownUntil(response);
+      if (cooldownUntil && params.tokenId && params.side) {
+        const cooldownKey = `${params.tokenId}:${params.side}`;
+        this.hardCooldownCache.set(cooldownKey, cooldownUntil);
+        params.logger.warn(
+          `[CLOB] Hard cooldown set: ${params.side} on token ${params.tokenId.slice(0, 8)}... until ${new Date(cooldownUntil).toISOString()}`,
+        );
+      }
+      
       if (statusCode === 400 && isBalanceOrAllowanceReason(reason)) {
         this.applyBalanceCooldown(
           now,
@@ -279,6 +297,17 @@ export class OrderSubmissionController {
       }
 
       const reason = normalizeReason(extractReason(error) || "request_error");
+      
+      // Check for cooldownUntil in the error response and cache it
+      const cooldownUntil = extractCooldownUntil(error);
+      if (cooldownUntil && params.tokenId && params.side) {
+        const cooldownKey = `${params.tokenId}:${params.side}`;
+        this.hardCooldownCache.set(cooldownKey, cooldownUntil);
+        params.logger.warn(
+          `[CLOB] Hard cooldown set: ${params.side} on token ${params.tokenId.slice(0, 8)}... until ${new Date(cooldownUntil).toISOString()}`,
+        );
+      }
+      
       if (statusCode === 400 && isBalanceOrAllowanceReason(reason)) {
         this.applyBalanceCooldown(
           now,
@@ -360,6 +389,31 @@ export class OrderSubmissionController {
         reason: "AUTH_BLOCK",
         blockedUntil: this.authBlockedUntil,
       };
+    }
+
+    // HARD COOLDOWN CHECK: Per token_id + side
+    // When an order response includes cooldownUntil, we cache it and skip all
+    // subsequent order attempts for that token_id + side until expiry.
+    // This is NOT skippable - even hedging/stop-loss must respect server-imposed cooldowns.
+    if (params.tokenId && params.side) {
+      const hardCooldownKey = `${params.tokenId}:${params.side}`;
+      const hardCooldownUntil = this.hardCooldownCache.get(hardCooldownKey);
+      if (hardCooldownUntil) {
+        if (params.now < hardCooldownUntil) {
+          const remainingSec = Math.ceil((hardCooldownUntil - params.now) / 1000);
+          params.logger.warn(
+            `[CLOB] Order skipped (COOLDOWN_ACTIVE): ${params.side} on token ${params.tokenId.slice(0, 8)}... blocked for ${remainingSec}s (server-imposed cooldown)`,
+          );
+          return {
+            status: "skipped",
+            reason: "COOLDOWN_ACTIVE",
+            blockedUntil: hardCooldownUntil,
+          };
+        } else {
+          // Cooldown expired - clean up the entry
+          this.hardCooldownCache.delete(hardCooldownKey);
+        }
+      }
     }
 
     // Token-level duplicate prevention check (price/size independent)
@@ -655,6 +709,52 @@ function isOrderAccepted(response: unknown): boolean {
     candidate?.order?.status ||
     candidate?.orderID,
   );
+}
+
+/**
+ * Extract cooldownUntil timestamp from an order response.
+ * The CLOB API may return a cooldownUntil field when orders are rejected
+ * due to rate limiting or other temporary restrictions.
+ * @returns Unix timestamp in milliseconds, or undefined if not present
+ */
+function extractCooldownUntil(response: unknown): number | undefined {
+  const candidate = response as {
+    cooldownUntil?: number | string;
+    cooldown_until?: number | string;
+    response?: {
+      data?: {
+        cooldownUntil?: number | string;
+        cooldown_until?: number | string;
+      };
+    };
+  } | null;
+
+  // Helper to parse and normalize the value
+  // Values < 1e12 are assumed to be in seconds, otherwise milliseconds
+  const parseValue = (value: number | string | undefined): number | undefined => {
+    if (value === undefined) return undefined;
+    const parsed = typeof value === "string" ? parseInt(value, 10) : value;
+    if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+    // Normalize: if value looks like seconds (< Sep 2001 in ms), convert to ms
+    return parsed < 1e12 ? parsed * 1000 : parsed;
+  };
+
+  // Check direct field
+  const directValue = parseValue(candidate?.cooldownUntil ?? candidate?.cooldown_until);
+  if (directValue !== undefined) {
+    return directValue;
+  }
+
+  // Check nested response.data field
+  const nestedValue = parseValue(
+    candidate?.response?.data?.cooldownUntil ??
+    candidate?.response?.data?.cooldown_until
+  );
+  if (nestedValue !== undefined) {
+    return nestedValue;
+  }
+
+  return undefined;
 }
 
 function isCloudflareBlocked(
