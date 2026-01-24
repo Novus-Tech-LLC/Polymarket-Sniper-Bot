@@ -542,5 +542,10 @@ async function postOrderClobInner(
     );
   }
 
-  return { status: "failed", reason: "order_incomplete" };
+  // Return partial fill information so callers can track that money was spent
+  return {
+    status: "failed",
+    reason: "order_incomplete",
+    filledAmountUsd: filledAmount > 0 ? filledAmount : undefined,
+  };
 }

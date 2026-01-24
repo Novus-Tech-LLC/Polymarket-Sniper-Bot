@@ -384,6 +384,20 @@ export class SmartHedgingStrategy {
         continue;
       }
 
+      // === PARTIAL FILL PROTECTION ===
+      // If money was spent on a partial fill, mark position as hedged to prevent
+      // re-hedging and exceeding SMART_HEDGING_ABSOLUTE_MAX_USD.
+      // This is critical: without this check, partial fills could trigger repeated
+      // hedge attempts, each spending money until the total far exceeds the limit.
+      if (hedgeResult.filledAmountUsd) {
+        this.logger.warn(
+          `[SmartHedging] 🛑 Partial hedge fill ($${hedgeResult.filledAmountUsd.toFixed(2)}) - marking position as hedged to prevent exceeding ABSOLUTE_MAX`,
+        );
+        this.hedgedPositions.add(key);
+        actionsCount++;
+        continue;
+      }
+
       // If market is essentially resolved (opposite side >= 95¢), skip liquidation
       // The position should be redeemed, not sold at a loss
       if (hedgeResult.reason === "MARKET_RESOLVED") {
@@ -457,6 +471,16 @@ export class SmartHedgingStrategy {
             continue;
           }
 
+          // Check for partial fill on retry - still mark as hedged to prevent exceeding limit
+          if (retryResult.filledAmountUsd) {
+            this.logger.warn(
+              `[SmartHedging] 🛑 Retry partial fill ($${retryResult.filledAmountUsd.toFixed(2)}) - marking position as hedged`,
+            );
+            this.hedgedPositions.add(key);
+            actionsCount++;
+            continue;
+          }
+
           this.logger.warn(
             `[SmartHedging] ⚠️ Hedge retry failed (${retryResult.reason}) - will sell losing position as last resort`,
           );
@@ -526,10 +550,11 @@ export class SmartHedgingStrategy {
    *          - reason "MARKET_RESOLVED" means opposite side >= 95¢, skip liquidation
    *          - reason "TOO_EXPENSIVE" means opposite side >= 90¢ but < 95¢, try liquidation
    *          - other reasons indicate hedge attempt failed, try liquidation
+   *          - filledAmountUsd: Amount spent on partial fills (prevents re-hedging if > 0)
    */
   private async executeHedge(
     position: Position,
-  ): Promise<{ success: boolean; reason?: string }> {
+  ): Promise<{ success: boolean; reason?: string; filledAmountUsd?: number }> {
     const currentSide = position.side?.toUpperCase();
 
     // Get the opposite token (works for any binary market)
@@ -641,6 +666,20 @@ export class SmartHedgingStrategy {
       if (result.status === "submitted") {
         this.logger.info(`[SmartHedging] ✅ Hedge executed successfully`);
         return { success: true };
+      }
+
+      // Check for partial fill - money was spent even though order didn't fully complete
+      const filledUsd = result.filledAmountUsd;
+      if (filledUsd && filledUsd > 0) {
+        this.logger.warn(
+          `[SmartHedging] ⚠️ Hedge partially filled: $${filledUsd.toFixed(2)} spent (order incomplete)`,
+        );
+        // Return partial fill info so caller can mark position as hedged
+        return {
+          success: false,
+          reason: result.reason ?? "ORDER_NOT_FILLED",
+          filledAmountUsd: filledUsd,
+        };
       }
 
       this.logger.warn(

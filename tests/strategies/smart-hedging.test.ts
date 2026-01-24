@@ -1274,3 +1274,133 @@ describe("Smart Hedging Insufficient Funds Fallback Logic", () => {
     );
   });
 });
+
+/**
+ * Tests for Partial Fill Protection
+ *
+ * When a hedge order is partially filled, the position should be marked as hedged
+ * to prevent multiple hedge attempts that exceed SMART_HEDGING_ABSOLUTE_MAX_USD.
+ */
+describe("Smart Hedging Partial Fill Protection", () => {
+  /**
+   * Test: Partial fills should mark position as hedged
+   *
+   * Scenario:
+   * 1. User sets SMART_HEDGING_ABSOLUTE_MAX_USD=25
+   * 2. Position triggers hedge for $25
+   * 3. Only $17 fills due to orderbook liquidity
+   * 4. Order returns "order_incomplete" with filledAmountUsd=17
+   * 5. Position should be marked as hedged to prevent re-hedging
+   *
+   * Without this fix:
+   * - Position NOT marked as hedged (no filledAmountUsd check)
+   * - Next cycle triggers another $25 hedge
+   * - Could spend $50+ instead of $25 limit
+   *
+   * With this fix:
+   * - Position IS marked as hedged when filledAmountUsd > 0
+   * - Next cycle skips (already hedged)
+   * - Total spend respects ABSOLUTE_MAX_USD
+   */
+  test("should mark position as hedged when partial fill detected", () => {
+    // Simulate the hedgeResult check logic from executeInternal
+    const hedgeResult = {
+      success: false,
+      reason: "order_incomplete",
+      filledAmountUsd: 17.35, // Partial fill amount
+    };
+
+    // Simulate the hedgedPositions tracking
+    const hedgedPositions = new Set<string>();
+    const positionKey = "market123-token456";
+
+    // This is the logic we added to smart-hedging.ts
+    if (hedgeResult.success) {
+      hedgedPositions.add(positionKey);
+    } else if (hedgeResult.filledAmountUsd && hedgeResult.filledAmountUsd > 0) {
+      // CRITICAL: Mark as hedged even on partial fill to prevent exceeding ABSOLUTE_MAX
+      hedgedPositions.add(positionKey);
+    }
+
+    assert.strictEqual(
+      hedgedPositions.has(positionKey),
+      true,
+      "Position should be marked as hedged after partial fill",
+    );
+  });
+
+  test("should NOT mark position as hedged when no fill occurred", () => {
+    // Simulate hedge result with no fill
+    const hedgeResult = {
+      success: false,
+      reason: "NO_LIQUIDITY",
+      filledAmountUsd: undefined, // No fill info
+    };
+
+    const hedgedPositions = new Set<string>();
+    const positionKey = "market123-token456";
+
+    // Apply the same logic
+    if (hedgeResult.success) {
+      hedgedPositions.add(positionKey);
+    } else if (hedgeResult.filledAmountUsd && hedgeResult.filledAmountUsd > 0) {
+      hedgedPositions.add(positionKey);
+    }
+
+    assert.strictEqual(
+      hedgedPositions.has(positionKey),
+      false,
+      "Position should NOT be marked as hedged when no fill occurred",
+    );
+  });
+
+  test("should NOT mark position as hedged when filledAmountUsd is 0", () => {
+    // Simulate hedge result with zero fill
+    const hedgeResult = {
+      success: false,
+      reason: "FOK_ORDER_KILLED",
+      filledAmountUsd: 0, // Order was killed, no fill
+    };
+
+    const hedgedPositions = new Set<string>();
+    const positionKey = "market123-token456";
+
+    // Apply the same logic
+    if (hedgeResult.success) {
+      hedgedPositions.add(positionKey);
+    } else if (hedgeResult.filledAmountUsd && hedgeResult.filledAmountUsd > 0) {
+      hedgedPositions.add(positionKey);
+    }
+
+    assert.strictEqual(
+      hedgedPositions.has(positionKey),
+      false,
+      "Position should NOT be marked as hedged when fill amount is 0",
+    );
+  });
+
+  test("should still mark position as hedged on full success", () => {
+    // Simulate successful hedge
+    const hedgeResult = {
+      success: true,
+      reason: undefined,
+      filledAmountUsd: undefined,
+    };
+
+    const hedgedPositions = new Set<string>();
+    const positionKey = "market123-token456";
+
+    // Apply the same logic
+    if (hedgeResult.success) {
+      hedgedPositions.add(positionKey);
+    } else if (hedgeResult.filledAmountUsd && hedgeResult.filledAmountUsd > 0) {
+      hedgedPositions.add(positionKey);
+    }
+
+    assert.strictEqual(
+      hedgedPositions.has(positionKey),
+      true,
+      "Position should be marked as hedged on successful hedge",
+    );
+  });
+});

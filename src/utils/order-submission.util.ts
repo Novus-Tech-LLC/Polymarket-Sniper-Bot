@@ -28,6 +28,13 @@ export type OrderSubmissionResult = {
     makingAmount: string;
     status?: string;
   };
+  /**
+   * Amount filled in USD for partial fills.
+   * Set when an order was partially filled but not fully completed.
+   * Used by strategies to track that money was spent even on incomplete orders.
+   * Only set when status === "failed" && reason === "order_incomplete".
+   */
+  filledAmountUsd?: number;
 };
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
