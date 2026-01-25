@@ -915,19 +915,46 @@ export class PositionTracker {
    * On startup, fetches historical entry times from the activity API to prevent
    * mass sells on container restart. Without historical data, we don't know when
    * positions were actually acquired and might trigger stop-loss/hedging immediately.
+   *
+   * OPTIMIZED STARTUP (Jan 2025):
+   * By default, we now:
+   * 1. Run refresh() FIRST to get current ACTIVE + REDEEMABLE positions
+   * 2. Load historical entry times ONLY for those active positions (much faster)
+   *
+   * The old full-history scan is gated behind LOAD_FULL_TRADE_HISTORY_ON_START=true
+   * for users who need it (e.g., very old positions or complete history).
+   *
+   * BACKWARD COMPATIBILITY NOTE:
+   * When LOAD_FULL_TRADE_HISTORY_ON_START=true, we maintain the legacy order:
+   * history first, then refresh(). This ensures identical behavior for users
+   * who enable the flag.
    */
   async start(): Promise<void> {
     this.logger.info("[PositionTracker] Starting position tracking");
 
-    // Fetch historical entry times from activity API on startup
-    // This runs synchronously on startup to ensure we have entry times before strategies run
-    // Note: loadHistoricalEntryTimes handles errors internally and does not throw
-    await this.loadHistoricalEntryTimes();
+    // Check config flag for startup behavior
+    const loadFullHistory =
+      process.env.LOAD_FULL_TRADE_HISTORY_ON_START?.toLowerCase() === "true";
+
+    // Legacy behavior: Load full wallet BUY history BEFORE refresh
+    // This maintains backward compatibility for users who enable the flag
+    if (loadFullHistory) {
+      this.logger.info(
+        "[PositionTracker] LOAD_FULL_TRADE_HISTORY_ON_START=true - loading full wallet trade history (legacy behavior)",
+      );
+      await this.loadHistoricalEntryTimes();
+    }
 
     // Start initial refresh synchronously to ensure positions are available before strategies run
     // This is critical - without positions loaded, strategies can't identify what to sell/redeem
     try {
       await this.refresh();
+
+      // Optimized path: Load entry times ONLY for active positions AFTER refresh
+      // This is much faster than the full-history scan
+      if (!loadFullHistory) {
+        await this.loadHistoricalEntryTimesForPositions();
+      }
 
       // Log positions without entry times (critical diagnostic)
       const positions = this.getPositions();
@@ -5110,6 +5137,125 @@ export class PositionTracker {
       );
       // Do not set historicalEntryTimesLoaded = true on error - strategies should remain conservative
       // Do not re-throw: callers should treat missing historical data as non-fatal
+    }
+  }
+
+  /**
+   * Load historical entry times ONLY for current active/redeemable positions.
+   *
+   * OPTIMIZED STARTUP (Jan 2025):
+   * Instead of loading the full wallet BUY history (which can be thousands of trades),
+   * this method uses EntryMetaResolver.resolveEntryMetaBatch to fetch trade history
+   * only for the tokenIds we currently hold.
+   *
+   * This is much faster than the full-history scan because:
+   * 1. We only query trades for active positions (typically 10-50 tokenIds)
+   * 2. EntryMetaResolver queries asset=tokenId directly (no filtering needed)
+   * 3. Each tokenId is queried independently with pagination limits
+   *
+   * Safety behavior is preserved:
+   * - If entry times aren't available, strategies remain conservative
+   * - historicalEntryTimesLoaded is only set to true on success
+   * - positionEntryTimes map is populated for successful lookups
+   */
+  private async loadHistoricalEntryTimesForPositions(): Promise<void> {
+    try {
+      const { resolveSignerAddress } =
+        await import("../utils/funds-allowance.util");
+      const walletAddress = resolveSignerAddress(this.client);
+
+      // Validate wallet address
+      const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(walletAddress);
+      if (!isValidAddress) {
+        this.logger.warn(
+          `[PositionTracker] ⚠️ Invalid wallet address "${walletAddress}" - cannot load historical entry times`,
+        );
+        return;
+      }
+
+      // Get current positions (ACTIVE + REDEEMABLE)
+      const positions = this.getPositions();
+      if (positions.length === 0) {
+        this.logger.info(
+          "[PositionTracker] No active positions found - skipping history load",
+        );
+        // Set flag to true because there's no history to load - this is intentional
+        // When there are no positions, strategies don't need entry times, so we're "done"
+        this.historicalEntryTimesLoaded = true;
+        return;
+      }
+
+      this.logger.info(
+        `[PositionTracker] Loading entry times for ${positions.length} active position(s)...`,
+      );
+
+      // Build list of positions to resolve
+      const positionsToResolve = positions.map((p) => ({
+        tokenId: p.tokenId,
+        marketId: p.marketId,
+      }));
+
+      // Use EntryMetaResolver to fetch trade history for each tokenId
+      const entryMetaMap = await this.entryMetaResolver.resolveEntryMetaBatch(
+        walletAddress,
+        positionsToResolve,
+      );
+
+      // Populate positionEntryTimes with historical data
+      let loadedCount = 0;
+      let skippedCount = 0;
+      let alreadyLoadedCount = 0;
+
+      for (const position of positions) {
+        const key = `${position.marketId}-${position.tokenId}`;
+        const entryMeta = entryMetaMap.get(position.tokenId);
+
+        if (entryMeta && entryMeta.firstAcquiredAt) {
+          // Only set if we don't already have an entry time
+          if (!this.positionEntryTimes.has(key)) {
+            this.positionEntryTimes.set(key, entryMeta.firstAcquiredAt);
+            loadedCount++;
+          } else {
+            alreadyLoadedCount++;
+          }
+        } else {
+          skippedCount++;
+        }
+      }
+
+      this.historicalEntryTimesLoaded = true;
+
+      // Log summary - updated to reflect "loaded history for N active positions"
+      const parts = [`✅ Loaded history for ${loadedCount} active position(s)`];
+      if (alreadyLoadedCount > 0) {
+        parts.push(`${alreadyLoadedCount} already had entry times`);
+      }
+      if (skippedCount > 0) {
+        parts.push(`${skippedCount} skipped (no trade history)`);
+      }
+      this.logger.info(`[PositionTracker] ${parts.join(", ")}`);
+
+      // Log entry time range for debugging
+      if (loadedCount > 0) {
+        const entries = Array.from(this.positionEntryTimes.entries());
+        if (entries.length > 0) {
+          const sorted = entries.sort((a, b) => a[1] - b[1]);
+          const oldest = sorted[0];
+          const newest = sorted[sorted.length - 1];
+          const oldestAge = Math.round((Date.now() - oldest[1]) / (60 * 1000));
+          const newestAge = Math.round((Date.now() - newest[1]) / (60 * 1000));
+          this.logger.info(
+            `[PositionTracker] 📅 Entry times range: oldest ${oldestAge}min ago, newest ${newestAge}min ago`,
+          );
+        }
+      }
+    } catch (err) {
+      // Log the error but don't fail - strategies will be conservative without historical data
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[PositionTracker] ⚠️ Could not load entry times for active positions: ${errMsg}`,
+      );
+      // Do not set historicalEntryTimesLoaded = true on error - strategies should remain conservative
     }
   }
 
