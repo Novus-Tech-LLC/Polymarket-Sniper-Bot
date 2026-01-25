@@ -731,12 +731,6 @@ const resolveLegacyMinTradeOverride = (
   return {};
 };
 
-const warnLegacyKeys = (scope: string, keys: string[]): void => {
-  if (!keys.length) return;
-
-  console.warn(`[Config] ${scope} legacy vars detected: ${keys.join(", ")}`);
-};
-
 const warnIgnoredOverrides = (scope: string, keys: string[]): void => {
   if (!keys.length) return;
 
@@ -926,10 +920,6 @@ export function loadArbConfig(overrides: Overrides = {}): ArbRuntimeConfig {
   const legacyConflicts = detectLegacyUnifiedConflicts(overrides);
   warnLegacyUnifiedConflicts("ARB", legacyConflicts);
 
-  if (presetName === "custom") {
-    warnLegacyKeys("ARB", legacyKeysDetected);
-  }
-
   let preset =
     presetName === "custom"
       ? undefined
@@ -1082,10 +1072,6 @@ export function loadMonitorConfig(
   const legacyConflicts = detectLegacyUnifiedConflicts(overrides);
   warnLegacyUnifiedConflicts("MONITOR", legacyConflicts);
 
-  if (presetName === "custom") {
-    warnLegacyKeys("MONITOR", legacyKeysDetected);
-  }
-
   let preset =
     presetName === "custom"
       ? undefined
@@ -1197,9 +1183,6 @@ export function loadMonitorConfig(
       MONITOR_OVERRIDE_ALLOWLIST.has("MIN_TRADE_SIZE_USD"))
   ) {
     baseConfig.minTradeSizeUsd = minTradeOverride.value;
-    if (minTradeOverride.key && minTradeOverride.key !== "MIN_TRADE_SIZE_USD") {
-      warnLegacyKeys("MONITOR", [minTradeOverride.key]);
-    }
   } else if (minTradeOverride.key && minTradeOverride.value === undefined) {
     console.warn(
       `[Config] MONITOR override ${minTradeOverride.key} ignored (invalid value).`,
