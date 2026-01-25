@@ -1348,6 +1348,34 @@ export type StrategyConfig = {
    */
   smartHedgingNoHedgeWindowMinutes: number;
   /**
+   * Smart Hedging Direction: controls when hedging is active
+   * - "down": Only hedge losing positions (traditional behavior)
+   * - "up": Only buy more shares when winning at high probability (85¢+)
+   * - "both": Both behaviors enabled (default - maximize wins AND minimize losses)
+   */
+  smartHedgingDirection: "down" | "up" | "both";
+  /**
+   * Hedge Up: Minimum price threshold to trigger buying more shares (default: 0.85 = 85¢)
+   * When position price is at or above this threshold near market close,
+   * buy additional shares to maximize gains since resolution to $1 is nearly guaranteed.
+   */
+  smartHedgingHedgeUpPriceThreshold: number;
+  /**
+   * Hedge Up: Maximum price threshold - don't buy at prices >= this (default: 0.95 = 95¢)
+   * Prevents buying at prices that are essentially "closed" where profit margin is minimal.
+   */
+  smartHedgingHedgeUpMaxPrice: number;
+  /**
+   * Hedge Up: Minutes before market close to enable buying more shares (default: 30)
+   * Only buy more shares when within this window AND price is in the valid range.
+   */
+  smartHedgingHedgeUpWindowMinutes: number;
+  /**
+   * Hedge Up: Maximum USD to spend on buying more shares per position (default: 25)
+   * This is the maximum additional investment in a winning position.
+   */
+  smartHedgingHedgeUpMaxUsd: number;
+  /**
    * Universal Stop-Loss: Minimum time (seconds) to hold before stop-loss can trigger.
    * Prevents selling positions immediately after buying due to bid-ask spread.
    * Default: 60 seconds
@@ -1763,6 +1791,80 @@ export function loadStrategyConfig(
             .SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES
         : undefined) ??
       3, // Default: don't hedge in last 3 minutes
+    /**
+     * SMART_HEDGING_DIRECTION: controls when hedging is active
+     * - "down": Only hedge losing positions (traditional behavior)
+     * - "up": Only buy more shares when winning at high probability
+     * - "both": Both behaviors enabled (default - maximize wins AND minimize losses)
+     */
+    smartHedgingDirection: (() => {
+      const envValue = readEnv("SMART_HEDGING_DIRECTION", overrides)?.toLowerCase();
+      if (envValue === "down" || envValue === "up" || envValue === "both") {
+        return envValue;
+      }
+      if ("SMART_HEDGING_DIRECTION" in preset) {
+        const presetValue = (preset as { SMART_HEDGING_DIRECTION: string }).SMART_HEDGING_DIRECTION;
+        if (presetValue === "down" || presetValue === "up" || presetValue === "both") {
+          return presetValue;
+        }
+      }
+      return "both"; // Default: both directions enabled
+    })(),
+    /**
+     * SMART_HEDGING_HEDGE_UP_PRICE_THRESHOLD: minimum price to trigger buying more shares
+     * When position price is at or above this threshold, buy additional shares
+     * Default: 0.85 = 85¢
+     */
+    smartHedgingHedgeUpPriceThreshold:
+      parseNumber(
+        readEnv("SMART_HEDGING_HEDGE_UP_PRICE_THRESHOLD", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_HEDGE_UP_PRICE_THRESHOLD" in preset
+        ? (preset as { SMART_HEDGING_HEDGE_UP_PRICE_THRESHOLD: number })
+            .SMART_HEDGING_HEDGE_UP_PRICE_THRESHOLD
+        : undefined) ??
+      0.85, // Default: buy more at 85¢+
+    /**
+     * SMART_HEDGING_HEDGE_UP_MAX_PRICE: maximum price - don't buy at prices >= this
+     * Prevents buying at essentially closed prices where profit margin is minimal
+     * Default: 0.95 = 95¢
+     */
+    smartHedgingHedgeUpMaxPrice:
+      parseNumber(
+        readEnv("SMART_HEDGING_HEDGE_UP_MAX_PRICE", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_HEDGE_UP_MAX_PRICE" in preset
+        ? (preset as { SMART_HEDGING_HEDGE_UP_MAX_PRICE: number })
+            .SMART_HEDGING_HEDGE_UP_MAX_PRICE
+        : undefined) ??
+      0.95, // Default: don't buy at 95¢+ (too close to resolved)
+    /**
+     * SMART_HEDGING_HEDGE_UP_WINDOW_MINUTES: minutes before close to enable buying more
+     * Only buy more shares when within this window AND price is in valid range
+     * Default: 30 minutes
+     */
+    smartHedgingHedgeUpWindowMinutes:
+      parseNumber(
+        readEnv("SMART_HEDGING_HEDGE_UP_WINDOW_MINUTES", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_HEDGE_UP_WINDOW_MINUTES" in preset
+        ? (preset as { SMART_HEDGING_HEDGE_UP_WINDOW_MINUTES: number })
+            .SMART_HEDGING_HEDGE_UP_WINDOW_MINUTES
+        : undefined) ??
+      30, // Default: enable hedge up in last 30 minutes
+    /**
+     * SMART_HEDGING_HEDGE_UP_MAX_USD: maximum USD to spend on buying more per position
+     * Default: 25 (matches absoluteMaxUsd)
+     */
+    smartHedgingHedgeUpMaxUsd:
+      parseNumber(
+        readEnv("SMART_HEDGING_HEDGE_UP_MAX_USD", overrides) ?? "",
+      ) ??
+      ("SMART_HEDGING_HEDGE_UP_MAX_USD" in preset
+        ? (preset as { SMART_HEDGING_HEDGE_UP_MAX_USD: number })
+            .SMART_HEDGING_HEDGE_UP_MAX_USD
+        : undefined) ??
+      25, // Default: max $25 per position on hedge up
     /**
      * STOP_LOSS_MIN_HOLD_SECONDS: Minimum time before stop-loss can trigger
      * Prevents premature stop-loss sells due to bid-ask spread right after buying

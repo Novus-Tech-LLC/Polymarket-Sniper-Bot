@@ -24,11 +24,27 @@ import {
 import { formatCents, assessOrderbookQuality } from "../utils/price.util";
 
 /**
+ * Smart Hedging Direction - determines when smart hedging is active
+ * - "down": Only hedge losing positions (traditional behavior)
+ * - "up": Only buy more shares when winning at high probability (85¢+)
+ * - "both": Both behaviors enabled (default - maximize wins and minimize losses)
+ */
+export type SmartHedgingDirection = "down" | "up" | "both";
+
+/**
  * Smart Hedging Configuration
  */
 export interface SmartHedgingConfig {
   /** Enable smart hedging */
   enabled: boolean;
+
+  /**
+   * Direction for smart hedging (default: "both")
+   * - "down": Only hedge losing positions (traditional behavior)
+   * - "up": Only buy more shares when winning at high probability
+   * - "both": Both behaviors enabled (maximize wins AND minimize losses)
+   */
+  direction: SmartHedgingDirection;
 
   /** Loss % to trigger hedging (default: 20) */
   triggerLossPct: number;
@@ -86,10 +102,41 @@ export interface SmartHedgingConfig {
    * Inside this window, hedging is blocked (too late - just liquidate if needed)
    */
   noHedgeWindowMinutes: number;
+
+  // === SMART HEDGING UP (HIGH WIN PROBABILITY) ===
+  // When near close and price is high (85¢+), buy MORE shares to maximize almost guaranteed gains
+
+  /**
+   * Price threshold for "hedging up" - buy more shares when current price >= this (default: 0.85 = 85¢)
+   * When a position is winning at this price or above near market close,
+   * buy additional shares to maximize gains since resolution to $1 is nearly guaranteed.
+   */
+  hedgeUpPriceThreshold: number;
+
+  /**
+   * Minutes before market close to enable "hedging up" behavior (default: 30)
+   * Only buy more shares when within this window AND price >= hedgeUpPriceThreshold
+   */
+  hedgeUpWindowMinutes: number;
+
+  /**
+   * Maximum USD to spend on "hedging up" per position (default: uses absoluteMaxUsd)
+   * This is the maximum additional investment in a winning position.
+   * Respects dynamic reserves - won't exceed available funds minus reserve.
+   */
+  hedgeUpMaxUsd: number;
+
+  /**
+   * Maximum price for "hedging up" - don't buy at prices >= this (default: 0.95 = 95¢)
+   * Prevents buying at prices that are essentially "closed" where profit margin is minimal.
+   * The sweet spot for hedging up is between hedgeUpPriceThreshold (85¢) and this max (95¢).
+   */
+  hedgeUpMaxPrice: number;
 }
 
 export const DEFAULT_HEDGING_CONFIG: SmartHedgingConfig = {
   enabled: true,
+  direction: "both", // Enable both hedging down (losses) and hedging up (high win prob)
   triggerLossPct: 20,
   maxHedgeUsd: 10,
   minHedgeUsd: 1,
@@ -103,6 +150,11 @@ export const DEFAULT_HEDGING_CONFIG: SmartHedgingConfig = {
   nearClosePriceDropCents: 12, // Near close: hedge only on >= 12¢ adverse move
   nearCloseLossPct: 30, // Near close: hedge only on >= 30% loss
   noHedgeWindowMinutes: 3, // Don't hedge at all in last 3 minutes (too late)
+  // Hedging up (high win probability) settings
+  hedgeUpPriceThreshold: 0.85, // Buy more shares when price >= 85¢
+  hedgeUpWindowMinutes: 30, // Enable hedging up in last 30 minutes before close
+  hedgeUpMaxUsd: 25, // Max USD to spend per position on hedging up (matches absoluteMaxUsd)
+  hedgeUpMaxPrice: 0.95, // Don't buy at 95¢+ (too close to resolved, minimal profit margin)
 };
 
 /**
@@ -184,10 +236,14 @@ export class SmartHedgingStrategy {
     this.config = config.config;
 
     this.logger.info(
-      `[SmartHedging] Initialized: trigger=-${this.config.triggerLossPct}%, ` +
-        `maxHedge=$${this.config.maxHedgeUsd}, absoluteMax=$${this.config.absoluteMaxUsd}`,
+      `[SmartHedging] Initialized: direction=${this.config.direction}, trigger=-${this.config.triggerLossPct}%, ` +
+        `maxHedge=$${this.config.maxHedgeUsd}, absoluteMax=$${this.config.absoluteMaxUsd}, ` +
+        `hedgeUp=${this.config.direction !== "down" ? `@${(this.config.hedgeUpPriceThreshold * 100).toFixed(0)}¢/$${this.config.hedgeUpMaxUsd}` : "disabled"}`,
     );
   }
+
+  // Track positions that have been "hedged up" (bought more shares) this cycle
+  private hedgedUpPositions: Set<string> = new Set();
 
   /**
    * Execute the strategy - find losing positions and hedge them
@@ -228,15 +284,46 @@ export class SmartHedgingStrategy {
     // === LOG DEDUPLICATION: Aggregate skip reasons instead of per-position logs ===
     const skipAggregator = new SkipReasonAggregator();
 
-    for (const position of positions) {
-      const key = `${position.marketId}-${position.tokenId}`;
-      const tokenIdShort = position.tokenId.slice(0, TOKEN_ID_DISPLAY_LENGTH);
+    // === PHASE 1: HEDGING UP (Buy more shares for high win probability positions near close) ===
+    // This maximizes gains on nearly guaranteed wins by buying additional shares
+    if (this.config.direction === "up" || this.config.direction === "both") {
+      for (const position of positions) {
+        const key = `${position.marketId}-${position.tokenId}`;
+        const tokenIdShort = position.tokenId.slice(0, TOKEN_ID_DISPLAY_LENGTH);
 
-      // Skip if already hedged
-      if (this.hedgedPositions.has(key)) {
-        skipAggregator.add(tokenIdShort, "already_hedged");
-        continue;
+        // Skip if already hedged up this cycle
+        if (this.hedgedUpPositions.has(key)) {
+          continue;
+        }
+
+        // Check if position qualifies for "hedging up"
+        const hedgeUpResult = await this.tryHedgeUp(position, now);
+        if (hedgeUpResult.action === "bought") {
+          actionsCount++;
+          this.hedgedUpPositions.add(key);
+          this.logger.info(
+            `[SmartHedging] 📈 HEDGE UP: Bought more shares of ${position.side} ${tokenIdShort}... ` +
+              `at ${formatCents(position.currentPrice)} (${hedgeUpResult.reason})`,
+          );
+        } else if (hedgeUpResult.action === "skipped") {
+          skipAggregator.add(tokenIdShort, hedgeUpResult.reason);
+        }
+        // "not_applicable" means the position doesn't qualify for hedge up at all
       }
+    }
+
+    // === PHASE 2: HEDGING DOWN (Hedge or liquidate losing positions) ===
+    // This is the traditional hedging behavior - protect against losses
+    if (this.config.direction === "down" || this.config.direction === "both") {
+      for (const position of positions) {
+        const key = `${position.marketId}-${position.tokenId}`;
+        const tokenIdShort = position.tokenId.slice(0, TOKEN_ID_DISPLAY_LENGTH);
+
+        // Skip if already hedged
+        if (this.hedgedPositions.has(key)) {
+          skipAggregator.add(tokenIdShort, "already_hedged");
+          continue;
+        }
 
       // Skip if in failed liquidation cooldown (prevents repeated attempts)
       const cooldownUntil = this.failedLiquidationCooldowns.get(key);
@@ -589,6 +676,7 @@ export class SmartHedgingStrategy {
         );
       }
     }
+    } // End of PHASE 2 (hedging down) if block
 
     // === LOG DEDUPLICATION: Emit aggregated skip summary (rate-limited) ===
     if (skipAggregator.hasSkips()) {
@@ -601,6 +689,216 @@ export class SmartHedgingStrategy {
     }
 
     return actionsCount;
+  }
+
+  /**
+   * Try to "hedge up" - buy more shares of a high win probability position near market close.
+   *
+   * LOGIC:
+   * 1. Check if position qualifies: price >= hedgeUpPriceThreshold (e.g., 85¢)
+   * 2. Check if near close: within hedgeUpWindowMinutes (e.g., 30 minutes)
+   * 3. Check if we have sufficient funds (respecting dynamic reserves)
+   * 4. If all conditions met, buy additional shares up to hedgeUpMaxUsd
+   *
+   * @returns Object indicating the action taken:
+   *          - action: "bought" if we bought more shares
+   *          - action: "skipped" if conditions not met but position could qualify
+   *          - action: "not_applicable" if position doesn't qualify at all
+   *          - reason: Description of what happened
+   */
+  private async tryHedgeUp(
+    position: Position,
+    now: number,
+  ): Promise<{ action: "bought" | "skipped" | "not_applicable"; reason: string }> {
+    const tokenIdShort = position.tokenId.slice(0, TOKEN_ID_DISPLAY_LENGTH);
+
+    // === BASIC QUALIFICATION CHECKS ===
+
+    // Check if position has a side (required for trading)
+    if (!position.side || position.side.trim() === "") {
+      return { action: "not_applicable", reason: "no_side" };
+    }
+
+    // Check if price is at high win probability threshold
+    if (position.currentPrice < this.config.hedgeUpPriceThreshold) {
+      return { action: "not_applicable", reason: "price_below_threshold" };
+    }
+
+    // Check if price is too high (essentially closed - minimal profit margin)
+    // Sweet spot is between hedgeUpPriceThreshold (85¢) and hedgeUpMaxPrice (95¢)
+    if (position.currentPrice >= this.config.hedgeUpMaxPrice) {
+      return { action: "skipped", reason: "price_too_high" };
+    }
+
+    // Check execution status - can't trade if position is not tradable
+    if (
+      position.executionStatus === "NOT_TRADABLE_ON_CLOB" ||
+      position.executionStatus === "EXECUTION_BLOCKED"
+    ) {
+      return { action: "skipped", reason: "not_tradable" };
+    }
+
+    // Skip redeemable positions (market already resolved)
+    if (position.redeemable) {
+      return { action: "skipped", reason: "redeemable" };
+    }
+
+    // Skip near-resolution positions (99.5¢+, essentially already won)
+    if (position.nearResolutionCandidate) {
+      return { action: "skipped", reason: "near_resolution" };
+    }
+
+    // === TIME WINDOW CHECK ===
+    // Only hedge up when near market close
+    if (!position.marketEndTime || position.marketEndTime <= now) {
+      // No end time available or market already ended
+      return { action: "not_applicable", reason: "no_end_time" };
+    }
+
+    const minutesToClose = (position.marketEndTime - now) / (60 * 1000);
+
+    // Must be within the hedge up window
+    if (minutesToClose > this.config.hedgeUpWindowMinutes) {
+      return { action: "not_applicable", reason: "outside_window" };
+    }
+
+    // Don't hedge up in the very last minutes (same as no-hedge window)
+    if (minutesToClose <= this.config.noHedgeWindowMinutes) {
+      return { action: "skipped", reason: "no_hedge_window" };
+    }
+
+    // === ORDERBOOK QUALITY CHECK ===
+    const orderbookQuality = assessOrderbookQuality(
+      position.currentBidPrice,
+      position.currentAskPrice,
+      position.dataApiCurPrice,
+    );
+
+    if (orderbookQuality.quality === "INVALID_BOOK") {
+      return { action: "skipped", reason: "invalid_book" };
+    }
+
+    // === EXECUTE HEDGE UP ===
+    this.logger.info(
+      `[SmartHedging] 📈 HEDGE UP candidate: ${position.side} ${tokenIdShort}... ` +
+        `at ${formatCents(position.currentPrice)}, ${minutesToClose.toFixed(1)}min to close`,
+    );
+
+    const result = await this.executeBuyMore(position);
+    if (result.success) {
+      return {
+        action: "bought",
+        reason: `bought_$${result.amountUsd?.toFixed(2) ?? "?"}_at_${formatCents(position.currentPrice)}`,
+      };
+    }
+
+    return { action: "skipped", reason: result.reason ?? "buy_failed" };
+  }
+
+  /**
+   * Execute a "buy more" order - buy additional shares of the same position.
+   * Used for "hedging up" to maximize gains on high probability positions.
+   *
+   * @returns Object with success status, reason, and amount spent
+   */
+  private async executeBuyMore(
+    position: Position,
+  ): Promise<{ success: boolean; reason?: string; amountUsd?: number }> {
+    const wallet = (this.client as { wallet?: Wallet }).wallet;
+    if (!wallet) {
+      this.logger.error(`[SmartHedging] No wallet - cannot buy more`);
+      return { success: false, reason: "NO_WALLET" };
+    }
+
+    // Get current ask price for buying
+    let askPrice: number;
+    try {
+      const orderbook = await this.client.getOrderBook(position.tokenId);
+      if (!orderbook.asks || orderbook.asks.length === 0) {
+        this.logger.warn(`[SmartHedging] No liquidity to buy more ${position.side}`);
+        return { success: false, reason: "NO_LIQUIDITY" };
+      }
+      askPrice = parseFloat(orderbook.asks[0].price);
+    } catch {
+      this.logger.warn(`[SmartHedging] Failed to get price for buying more`);
+      return { success: false, reason: "ORDERBOOK_ERROR" };
+    }
+
+    // Check if ask price is still at or above our threshold
+    if (askPrice < this.config.hedgeUpPriceThreshold) {
+      this.logger.debug(
+        `[SmartHedging] Ask price ${formatCents(askPrice)} below threshold ${formatCents(this.config.hedgeUpPriceThreshold)}`,
+      );
+      return { success: false, reason: "PRICE_DROPPED" };
+    }
+
+    // Check if ask price is too high (essentially closed - minimal profit margin)
+    if (askPrice >= this.config.hedgeUpMaxPrice) {
+      this.logger.debug(
+        `[SmartHedging] Ask price ${formatCents(askPrice)} too high (>= ${formatCents(this.config.hedgeUpMaxPrice)}) - minimal profit margin`,
+      );
+      return { success: false, reason: "PRICE_TOO_HIGH" };
+    }
+
+    // Calculate buy amount
+    // Use hedgeUpMaxUsd, respecting allowExceedMax and absoluteMaxUsd
+    let buyUsd: number;
+    if (this.config.allowExceedMax) {
+      buyUsd = Math.min(this.config.hedgeUpMaxUsd, this.config.absoluteMaxUsd);
+    } else {
+      buyUsd = Math.min(this.config.hedgeUpMaxUsd, this.config.maxHedgeUsd);
+    }
+
+    // Check minimum
+    if (buyUsd < this.config.minHedgeUsd) {
+      this.logger.debug(
+        `[SmartHedging] Buy amount $${buyUsd.toFixed(2)} below min $${this.config.minHedgeUsd}`,
+      );
+      return { success: false, reason: "BELOW_MIN" };
+    }
+
+    // Calculate expected profit if we win
+    const additionalShares = buyUsd / askPrice;
+    const potentialProfit = additionalShares * (1 - askPrice); // What we make if price goes to $1
+
+    this.logger.info(
+      `[SmartHedging] 📈 BUYING MORE: ${additionalShares.toFixed(2)} ${position.side} @ ${formatCents(askPrice)} = $${buyUsd.toFixed(2)}` +
+        `\n  Potential profit if ${position.side} wins: +$${potentialProfit.toFixed(2)}`,
+    );
+
+    try {
+      // Normalize the outcome for the order API
+      const orderOutcome = this.normalizeOutcomeForOrder(position.side ?? "YES");
+
+      const result = await postOrder({
+        client: this.client,
+        wallet,
+        marketId: position.marketId,
+        tokenId: position.tokenId,
+        outcome: orderOutcome,
+        side: "BUY",
+        sizeUsd: buyUsd,
+        maxAcceptablePrice: askPrice * 1.02, // Allow 2% slippage
+        logger: this.logger,
+        skipDuplicatePrevention: true, // Hedge up is intentional
+        skipMinBuyPriceCheck: true, // High prices are what we want here
+      });
+
+      if (result.status === "submitted") {
+        this.logger.info(`[SmartHedging] ✅ Buy more executed successfully`);
+        return { success: true, amountUsd: buyUsd };
+      }
+
+      this.logger.warn(
+        `[SmartHedging] ⚠️ Buy more order not filled: ${result.reason ?? "unknown"}`,
+      );
+      return { success: false, reason: result.reason ?? "ORDER_NOT_FILLED" };
+    } catch (err) {
+      this.logger.error(
+        `[SmartHedging] ❌ Buy more failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { success: false, reason: "BUY_ERROR" };
+    }
   }
 
   /**

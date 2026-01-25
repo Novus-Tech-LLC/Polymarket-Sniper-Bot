@@ -111,6 +111,12 @@ async function main(): Promise<void> {
           strategyConfig.smartHedgingNearClosePriceDropCents,
         nearCloseLossPct: strategyConfig.smartHedgingNearCloseLossPct,
         noHedgeWindowMinutes: strategyConfig.smartHedgingNoHedgeWindowMinutes,
+        // Smart hedging direction and "hedge up" settings
+        direction: strategyConfig.smartHedgingDirection,
+        hedgeUpPriceThreshold: strategyConfig.smartHedgingHedgeUpPriceThreshold,
+        hedgeUpMaxPrice: strategyConfig.smartHedgingHedgeUpMaxPrice,
+        hedgeUpWindowMinutes: strategyConfig.smartHedgingHedgeUpWindowMinutes,
+        hedgeUpMaxUsd: strategyConfig.smartHedgingHedgeUpMaxUsd,
       },
       // Quick flip module removed - functionality covered by ScalpTakeProfit
       // Pass endgame config
