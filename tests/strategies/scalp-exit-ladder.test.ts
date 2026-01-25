@@ -578,3 +578,142 @@ describe("Near-Resolution Capital Release", () => {
     );
   });
 });
+
+// === ILLIQUID EXIT DETECTION TESTS ===
+
+import {
+  checkIlliquidExit,
+  ILLIQUID_EXIT_THRESHOLDS,
+  ILLIQUID_BACKOFF_MS,
+  MAX_ILLIQUID_RECHECKS,
+} from "../../src/strategies/scalp-take-profit";
+
+describe("Illiquid Exit Detection", () => {
+  test("Extreme spread triggers illiquid exit (spread > 30¢)", () => {
+    // bestBid=30¢, bestAsk=65¢ -> spread=35¢ > 30¢ threshold
+    const result = checkIlliquidExit(0.30, 0.65, 0.50, 0.40);
+
+    assert.strictEqual(result.isIlliquid, true, "Should detect as illiquid");
+    assert.ok(
+      result.reason?.includes("Extreme spread"),
+      `Expected extreme spread reason, got: ${result.reason}`,
+    );
+  });
+
+  test("Normal spread does not trigger illiquid exit", () => {
+    // bestBid=60¢, bestAsk=65¢ -> spread=5¢ < 30¢ threshold
+    const result = checkIlliquidExit(0.60, 0.65, 0.55, 0.50);
+
+    assert.strictEqual(result.isIlliquid, false, "Should not be illiquid");
+  });
+
+  test("Tiny bid triggers illiquid when target is high (no extreme spread)", () => {
+    // bestBid=2¢, bestAsk=30¢ (spread=28¢ < 30¢ threshold, no extreme spread)
+    // But bid=2¢ ≤ 2¢ AND target=65¢ > 50¢ -> tiny bid trigger
+    const result = checkIlliquidExit(0.02, 0.30, 0.65, 0.50);
+
+    assert.strictEqual(result.isIlliquid, true, "Should detect as illiquid");
+    assert.ok(
+      result.reason?.includes("Tiny bid"),
+      `Expected tiny bid reason, got: ${result.reason}`,
+    );
+  });
+
+  test("Tiny bid does not trigger illiquid when target is also low", () => {
+    // bestBid=1¢, bestAsk=5¢ (spread=4¢ < 30¢, no extreme spread)
+    // bid=1¢ ≤ 2¢ BUT target=10¢ < 50¢ (tiny bid threshold won't trigger)
+    // minAcceptable=8¢ * 0.5 = 4¢, and bid=1¢ < 4¢ (far below acceptable WILL trigger)
+    const result = checkIlliquidExit(0.01, 0.05, 0.10, 0.08);
+
+    // In this case, the "far below acceptable" condition triggers because
+    // bestBid (1¢) < minAcceptable (8¢) * 0.5 = 4¢
+    assert.strictEqual(
+      result.isIlliquid,
+      true,
+      "Should still detect illiquid due to bid far below acceptable",
+    );
+    assert.ok(
+      result.reason?.includes("far below acceptable"),
+      `Expected far below acceptable reason, got: ${result.reason}`,
+    );
+  });
+
+  test("Bid far below acceptable triggers illiquid (no spread or tiny bid)", () => {
+    // bestBid=20¢, bestAsk=45¢ (spread=25¢ < 30¢, no extreme spread)
+    // bid=20¢ > 2¢ (no tiny bid)
+    // But minAcceptable=65¢ * 0.5 = 32.5¢, and bid=20¢ < 32.5¢
+    const result = checkIlliquidExit(0.20, 0.45, 0.75, 0.65);
+
+    assert.strictEqual(result.isIlliquid, true, "Should detect as illiquid");
+    assert.ok(
+      result.reason?.includes("far below acceptable"),
+      `Expected far below acceptable reason, got: ${result.reason}`,
+    );
+  });
+
+  test("No bid returns not illiquid (handled separately)", () => {
+    const result = checkIlliquidExit(null, null, 0.65, 0.50);
+
+    // null/0 bid is handled by NO_BID check, not illiquid check
+    assert.strictEqual(result.isIlliquid, false, "Null bid handled elsewhere");
+  });
+
+  test("Illiquid thresholds have expected values", () => {
+    assert.strictEqual(
+      ILLIQUID_EXIT_THRESHOLDS.EXTREME_SPREAD_DOLLARS,
+      0.30,
+      "Extreme spread threshold should be 30¢",
+    );
+    assert.strictEqual(
+      ILLIQUID_EXIT_THRESHOLDS.TINY_BID_DOLLARS,
+      0.02,
+      "Tiny bid threshold should be 2¢",
+    );
+    assert.strictEqual(
+      ILLIQUID_EXIT_THRESHOLDS.MIN_TARGET_FOR_TINY_BID_CHECK,
+      0.50,
+      "Min target for tiny bid check should be 50¢",
+    );
+  });
+
+  test("Illiquid backoff ladder has escalating values", () => {
+    assert.strictEqual(ILLIQUID_BACKOFF_MS.length, 3, "Should have 3 backoff levels");
+    assert.strictEqual(ILLIQUID_BACKOFF_MS[0], 60_000, "Level 0: 1 minute");
+    assert.strictEqual(ILLIQUID_BACKOFF_MS[1], 300_000, "Level 1: 5 minutes");
+    assert.strictEqual(ILLIQUID_BACKOFF_MS[2], 900_000, "Level 2: 15 minutes");
+  });
+
+  test("MAX_ILLIQUID_RECHECKS limits retries", () => {
+    assert.strictEqual(MAX_ILLIQUID_RECHECKS, 10, "Should limit to 10 rechecks");
+  });
+
+  test("ExitLadderStage type supports EXIT_DEFERRED_ILLQ", () => {
+    const illiq: ExitLadderStage = "EXIT_DEFERRED_ILLQ";
+    assert.equal(illiq, "EXIT_DEFERRED_ILLQ");
+  });
+
+  test("Real production bug scenario: bestBid=1¢, target=65¢", () => {
+    // This is the exact scenario from the bug report:
+    // Price protection blocks SELL because bestBid=0.01 (1¢) while minAcceptable ≈ 0.646 (64.6¢)
+    const result = checkIlliquidExit(
+      0.01, // bestBid = 1¢
+      0.99, // bestAsk = 99¢ (extreme spread)
+      0.70, // target = 70¢
+      0.646, // minAcceptable ≈ 64.6¢
+    );
+
+    assert.strictEqual(
+      result.isIlliquid,
+      true,
+      "Production bug scenario should detect as illiquid",
+    );
+
+    // Should match at least one of the conditions
+    assert.ok(
+      result.reason?.includes("Extreme spread") ||
+        result.reason?.includes("Tiny bid") ||
+        result.reason?.includes("far below acceptable"),
+      `Should have a valid illiquid reason, got: ${result.reason}`,
+    );
+  });
+});

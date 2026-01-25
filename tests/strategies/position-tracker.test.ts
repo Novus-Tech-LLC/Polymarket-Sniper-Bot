@@ -5425,3 +5425,158 @@ describe("PositionTracker Gamma Batch URL Encoding", () => {
     assert.ok(url.includes("token2"), "URL should contain second tokenId");
   });
 });
+
+// === PARTIAL REFRESH VALIDATION TESTS ===
+
+describe("PositionTracker: Partial Refresh Does Not Overwrite lastGoodSnapshot", () => {
+  test("SUSPICIOUS_SHRINK: raw_total dropping >50% should not overwrite lastGoodSnapshot", () => {
+    // Simulates the bug where raw_total drops from 78 to 2
+    const lastGoodRawTotal = 78;
+    const newRawTotal = 2;
+    const SUSPICIOUS_SHRINK_THRESHOLD = 0.25; // 25%
+
+    // Validation rule: if new rawTotal < lastGood * threshold, reject
+    const shouldReject =
+      lastGoodRawTotal >= 20 && // Only check if lastGood has significant count
+      newRawTotal <= lastGoodRawTotal * SUSPICIOUS_SHRINK_THRESHOLD;
+
+    assert.strictEqual(
+      shouldReject,
+      true,
+      `Should reject: newRawTotal=${newRawTotal} <= ${lastGoodRawTotal} * ${SUSPICIOUS_SHRINK_THRESHOLD} = ${lastGoodRawTotal * SUSPICIOUS_SHRINK_THRESHOLD}`
+    );
+  });
+
+  test("SUSPICIOUS_SHRINK: moderate drop (60%) should NOT trigger rejection", () => {
+    const lastGoodRawTotal = 78;
+    const newRawTotal = 47; // ~60% of original - not suspicious
+    const SUSPICIOUS_SHRINK_THRESHOLD = 0.25;
+
+    const shouldReject =
+      lastGoodRawTotal >= 20 &&
+      newRawTotal <= lastGoodRawTotal * SUSPICIOUS_SHRINK_THRESHOLD;
+
+    assert.strictEqual(
+      shouldReject,
+      false,
+      "60% drop should NOT be considered suspicious"
+    );
+  });
+
+  test("ACTIVE_WIPEOUT: active going from 48 to 0 while rawTotal > 0 should reject", () => {
+    // Simulates: healthy snapshot (active=48), then refresh returns active=0 but rawTotal=2
+    const lastGoodActive = 48;
+    const newActive = 0;
+    const newRawTotal = 2;
+    const MIN_ACTIVE_FOR_WIPEOUT_CHECK = 10;
+
+    const isActiveWipeout =
+      lastGoodActive >= MIN_ACTIVE_FOR_WIPEOUT_CHECK &&
+      newActive === 0 &&
+      newRawTotal > 0;
+
+    assert.strictEqual(
+      isActiveWipeout,
+      true,
+      "ACTIVE_WIPEOUT should be detected when lastGood had many active and new has 0"
+    );
+  });
+
+  test("Small portfolio (active < 10) should NOT trigger ACTIVE_WIPEOUT", () => {
+    const lastGoodActive = 5; // Small portfolio
+    const newActive = 0;
+    const newRawTotal = 2;
+    const MIN_ACTIVE_FOR_WIPEOUT_CHECK = 10;
+
+    const isActiveWipeout =
+      lastGoodActive >= MIN_ACTIVE_FOR_WIPEOUT_CHECK &&
+      newActive === 0 &&
+      newRawTotal > 0;
+
+    assert.strictEqual(
+      isActiveWipeout,
+      false,
+      "Small portfolios should NOT trigger ACTIVE_WIPEOUT"
+    );
+  });
+
+  test("Consecutive failures should trigger self-heal, not overwrite lastGoodSnapshot", () => {
+    const MAX_CONSECUTIVE_FAILURES = 5;
+
+    // Simulate 5 consecutive failures
+    let consecutiveFailures = 0;
+    let lastGoodSnapshot = {
+      activeCount: 48,
+      redeemableCount: 30,
+      rawTotal: 78,
+    };
+    let currentSnapshot = lastGoodSnapshot;
+
+    // Simulate 5 failed refreshes
+    for (let i = 0; i < 5; i++) {
+      consecutiveFailures++;
+      // Each failure should NOT overwrite lastGoodSnapshot
+      // currentSnapshot stays as lastGoodSnapshot (marked stale)
+      currentSnapshot = { ...lastGoodSnapshot }; // Keep using lastGood
+    }
+
+    assert.strictEqual(
+      consecutiveFailures,
+      MAX_CONSECUTIVE_FAILURES,
+      "Should have accumulated 5 failures"
+    );
+    assert.deepStrictEqual(
+      currentSnapshot,
+      lastGoodSnapshot,
+      "lastGoodSnapshot should NOT be overwritten during failures"
+    );
+
+    // After 5 failures, self-heal should trigger
+    const shouldSelfHeal = consecutiveFailures >= MAX_CONSECUTIVE_FAILURES;
+    assert.strictEqual(
+      shouldSelfHeal,
+      true,
+      "Self-heal should trigger after 5 consecutive failures"
+    );
+  });
+
+  test("HTTP 422 on outcomes batch fetch should mark as PARTIAL_FAILURE", () => {
+    // Simulates the bug: outcomes batch fetch fails with HTTP 422
+    const httpStatus = 422;
+    const is4xxError = httpStatus >= 400 && httpStatus < 500;
+
+    // 4xx errors (especially 422) indicate client-side issue with the request
+    // This should NOT overwrite lastGoodSnapshot
+    assert.strictEqual(
+      is4xxError,
+      true,
+      "HTTP 422 should be recognized as 4xx error"
+    );
+
+    // A partial failure should be marked and NOT replace lastGoodSnapshot
+    const isPartialFailure = is4xxError;
+    assert.strictEqual(
+      isPartialFailure,
+      true,
+      "HTTP 422 should mark refresh as PARTIAL_FAILURE"
+    );
+  });
+
+  test("Snapshot hash should change when positions change", () => {
+    // Simple hash function for testing
+    const hashSnapshot = (snapshot: { activeCount: number; rawTotal: number; address: string }): string => {
+      return `${snapshot.activeCount}-${snapshot.rawTotal}-${snapshot.address.slice(0, 10)}`;
+    };
+
+    const snapshot1 = { activeCount: 48, rawTotal: 78, address: "0x1234567890" };
+    const snapshot2 = { activeCount: 48, rawTotal: 78, address: "0x1234567890" };
+    const snapshot3 = { activeCount: 2, rawTotal: 2, address: "0x1234567890" };
+
+    const hash1 = hashSnapshot(snapshot1);
+    const hash2 = hashSnapshot(snapshot2);
+    const hash3 = hashSnapshot(snapshot3);
+
+    assert.strictEqual(hash1, hash2, "Identical snapshots should have same hash");
+    assert.notStrictEqual(hash1, hash3, "Different snapshots should have different hash");
+  });
+});

@@ -677,3 +677,228 @@ describe("EntryMetaResolver Edge Cases", () => {
     );
   });
 });
+
+// === UNTRUSTED_ENTRY VALIDATION TESTS ===
+
+describe("EntryMetaResolver UNTRUSTED_ENTRY Validation", () => {
+  /**
+   * Helper to validate entry meta against live shares
+   * This mirrors the private validateAgainstLiveShares logic for unit testing
+   */
+  function validateAgainstLiveShares(
+    computedShares: number,
+    liveShares: number | undefined,
+  ): { trusted: boolean; reason?: string } {
+    if (liveShares === undefined || liveShares <= 0) {
+      return { trusted: true };
+    }
+
+    const difference = Math.abs(computedShares - liveShares);
+    const percentDiff = (difference / liveShares) * 100;
+
+    // Threshold constants (same as in EntryMetaResolver)
+    const MAX_PERCENT_DIFF = 2; // 2%
+    const MAX_ABSOLUTE_DIFF = 0.5; // 0.5 shares
+
+    if (percentDiff > MAX_PERCENT_DIFF || difference > MAX_ABSOLUTE_DIFF) {
+      const reason = `Shares mismatch: computed=${computedShares.toFixed(2)} vs live=${liveShares.toFixed(2)} (diff=${difference.toFixed(2)}, ${percentDiff.toFixed(1)}%)`;
+      return { trusted: false, reason };
+    }
+
+    return { trusted: true };
+  }
+
+  test("Entry is trusted when computed shares match live shares exactly", () => {
+    const result = validateAgainstLiveShares(100, 100);
+    assert.strictEqual(result.trusted, true, "Should be trusted when shares match");
+    assert.strictEqual(result.reason, undefined, "Should have no reason");
+  });
+
+  test("Entry is trusted when difference is within both thresholds", () => {
+    // 100 shares computed, 100.3 live = 0.3% difference AND 0.3 absolute < 0.5
+    const result = validateAgainstLiveShares(100, 100.3);
+    assert.strictEqual(result.trusted, true, "Should be trusted within both thresholds");
+  });
+
+  test("Entry is UNTRUSTED when percent difference exceeds 2%", () => {
+    // 10 shares computed, 10.25 live = 2.5% difference (but absolute only 0.25)
+    // This tests percent threshold specifically
+    const result = validateAgainstLiveShares(10, 10.25);
+    assert.strictEqual(result.trusted, false, "Should be untrusted when percent diff > 2%");
+    assert.ok(result.reason?.includes("Shares mismatch"), "Should have mismatch reason");
+  });
+
+  test("Entry is UNTRUSTED when absolute difference exceeds 0.5 shares", () => {
+    // 10 shares computed, 10.6 live = 6% but more importantly 0.6 > 0.5 absolute
+    const result = validateAgainstLiveShares(10, 10.6);
+    assert.strictEqual(result.trusted, false, "Should be untrusted when absolute diff > 0.5");
+  });
+
+  test("Entry is trusted when no live shares provided (undefined)", () => {
+    const result = validateAgainstLiveShares(100, undefined);
+    assert.strictEqual(result.trusted, true, "Should be trusted when no live shares");
+  });
+
+  test("Entry is trusted when live shares is 0", () => {
+    const result = validateAgainstLiveShares(100, 0);
+    assert.strictEqual(result.trusted, true, "Should be trusted when live shares is 0");
+  });
+
+  test("Small positions: 1 share computed vs 0.4 live = UNTRUSTED (diff 0.6)", () => {
+    const result = validateAgainstLiveShares(1, 0.4);
+    assert.strictEqual(result.trusted, false, "Small position diff should be caught");
+  });
+
+  test("Large positions within thresholds: 1000 vs 1000.4 = trusted", () => {
+    // 1000.4 - 1000 = 0.4 (< 0.5 absolute) AND 0.04% (< 2%)
+    const result = validateAgainstLiveShares(1000, 1000.4);
+    assert.strictEqual(result.trusted, true, "Should be trusted when within both thresholds");
+  });
+
+  test("Large positions: 1000 computed vs 1025 live = UNTRUSTED (2.5% diff)", () => {
+    const result = validateAgainstLiveShares(1000, 1025);
+    assert.strictEqual(result.trusted, false, "2.5% diff should be untrusted");
+  });
+});
+
+// === MULTIPLE TOKENID DISTINCT RESULTS TESTS ===
+
+describe("EntryMetaResolver Multiple TokenIds", () => {
+  test("Different tokenIds with different trades produce different results", () => {
+    // TokenId 1: 100 shares @ 50¢
+    const trades1: TradeItem[] = [
+      {
+        timestamp: 1700000000,
+        conditionId: "market-1",
+        asset: "token-1",
+        side: "BUY",
+        size: 100,
+        price: 0.5,
+      },
+    ];
+
+    // TokenId 2: 50 shares @ 70¢
+    const trades2: TradeItem[] = [
+      {
+        timestamp: 1700000000,
+        conditionId: "market-1",
+        asset: "token-2",
+        side: "BUY",
+        size: 50,
+        price: 0.7,
+      },
+    ];
+
+    const now = 1700003600 * 1000;
+    const result1 = reconstructPositionFromTrades(trades1, now);
+    const result2 = reconstructPositionFromTrades(trades2, now);
+
+    assert.ok(result1, "Result 1 should exist");
+    assert.ok(result2, "Result 2 should exist");
+
+    // CRITICAL: Results must be DIFFERENT
+    assert.notStrictEqual(
+      result1.remainingShares,
+      result2.remainingShares,
+      "Different tokenIds should have different share counts",
+    );
+    assert.notStrictEqual(
+      result1.avgEntryPriceCents,
+      result2.avgEntryPriceCents,
+      "Different tokenIds should have different avg entry prices",
+    );
+
+    // Verify specific values
+    assert.strictEqual(result1.remainingShares, 100, "Token 1 should have 100 shares");
+    assert.strictEqual(result1.avgEntryPriceCents, 50, "Token 1 should have 50¢ avg");
+    assert.strictEqual(result2.remainingShares, 50, "Token 2 should have 50 shares");
+    assert.strictEqual(result2.avgEntryPriceCents, 70, "Token 2 should have 70¢ avg");
+  });
+
+  test("Same tokenId across different markets still grouped by tokenId", () => {
+    // Same tokenId but different markets - trades should still be correctly grouped
+    const trades: TradeItem[] = [
+      {
+        timestamp: 1700000000,
+        conditionId: "market-1", // Different market
+        asset: "shared-token-id",
+        side: "BUY",
+        size: 100,
+        price: 0.5,
+      },
+      {
+        timestamp: 1700001000,
+        conditionId: "market-2", // Different market
+        asset: "shared-token-id",
+        side: "BUY",
+        size: 100,
+        price: 0.7,
+      },
+    ];
+
+    const now = 1700003600 * 1000;
+    const result = reconstructPositionFromTrades(trades, now);
+
+    assert.ok(result, "Result should exist");
+    // Both trades should be aggregated (same tokenId)
+    assert.strictEqual(result.remainingShares, 200, "Should aggregate both buys");
+    assert.strictEqual(result.avgEntryPriceCents, 60, "Should have weighted avg of 60¢");
+  });
+
+  test("Prevent bug: multiple tokenIds with identical first/last timestamps", () => {
+    // This tests the bug where "2885.49 shares @ 61.4¢ avg" was reconstructed
+    // identically for multiple different tokenIds
+    const token1Trades: TradeItem[] = [
+      {
+        timestamp: 1700000000, // Same timestamp
+        conditionId: "market-1",
+        asset: "token-AAA",
+        side: "BUY",
+        size: 2885.49,
+        price: 0.614,
+      },
+    ];
+
+    const token2Trades: TradeItem[] = [
+      {
+        timestamp: 1700000000, // Same timestamp
+        conditionId: "market-1",
+        asset: "token-BBB",
+        side: "BUY",
+        size: 500,
+        price: 0.30,
+      },
+    ];
+
+    const now = 1700003600 * 1000;
+    const result1 = reconstructPositionFromTrades(token1Trades, now);
+    const result2 = reconstructPositionFromTrades(token2Trades, now);
+
+    assert.ok(result1, "Token AAA result should exist");
+    assert.ok(result2, "Token BBB result should exist");
+
+    // Even with same timestamp, results must be different because trades are different
+    assert.notStrictEqual(
+      result1.remainingShares,
+      result2.remainingShares,
+      "Bug prevention: different tokens should have different shares",
+    );
+    assert.notStrictEqual(
+      result1.avgEntryPriceCents,
+      result2.avgEntryPriceCents,
+      "Bug prevention: different tokens should have different avg prices",
+    );
+
+    // Verify the specific values match the input trades
+    assert.ok(
+      Math.abs(result1.remainingShares - 2885.49) < 0.01,
+      `Token AAA should have 2885.49 shares, got ${result1.remainingShares}`,
+    );
+    assert.ok(
+      Math.abs(result1.avgEntryPriceCents - 61.4) < 0.1,
+      `Token AAA should have 61.4¢ avg, got ${result1.avgEntryPriceCents}`,
+    );
+    assert.strictEqual(result2.remainingShares, 500, "Token BBB should have 500 shares");
+    assert.strictEqual(result2.avgEntryPriceCents, 30, "Token BBB should have 30¢ avg");
+  });
+});

@@ -30,10 +30,23 @@
  *   - Sell at bestBid immediately, even at loss
  *   - Frees capital, prevents stuck positions
  *
+ * Stage D - EXIT_DEFERRED_ILLQ (illiquid book detected):
+ *   - When bestBid is far below target/minAcceptable OR spread is extreme
+ *   - DO NOT spam market-sell attempts (price protection would block anyway)
+ *   - Transition to deferred state with escalating backoff (1m, 5m, 15m)
+ *   - Periodically recheck liquidity; resume normal exit ladder when book normalizes
+ *   - After MAX_ILLIQUID_RECHECKS (10), abandon the exit plan
+ *
+ * ILLIQUID EXIT CONDITIONS:
+ * - Extreme spread: bestAsk - bestBid > 30¢
+ * - Tiny bid: bestBid ≤ 2¢ while target > 50¢
+ * - Bid far below acceptable: bestBid < minAcceptable * 0.5
+ *
  * NON-NEGOTIABLES:
  * - Sell sizing uses position notional (sharesHeld * limitPrice), NOT profitUsd
  * - If notional < MIN_ORDER_USD, treat as DUST and skip
  * - If no bestBid (NO_BOOK), mark as BLOCKED and retry with backoff
+ * - If ILLIQUID, defer exits with escalating backoff to prevent infinite retry loops
  *
  * This strategy is designed to churn out consistent winners by
  * taking profits when momentum is fading, rather than waiting
@@ -327,6 +340,98 @@ export function validateOrderbookQuality(
 }
 
 /**
+ * Result of illiquid exit check
+ */
+export interface IlliquidExitResult {
+  /** Whether the book is illiquid and exit should be deferred */
+  isIlliquid: boolean;
+  /** Reason for illiquidity (for logging) */
+  reason?: string;
+  /** Diagnostic data */
+  diagnostics?: {
+    bestBid: number | null;
+    bestAsk: number | null;
+    spread: number | null;
+    targetPrice: number;
+    minAcceptable: number;
+  };
+}
+
+/**
+ * Check if an exit should be deferred due to illiquid orderbook conditions.
+ *
+ * ILLIQUID_EXIT conditions:
+ * 1. Extreme spread: bestAsk - bestBid > 30¢
+ * 2. Tiny bid: bestBid ≤ 2¢ while target price > 50¢
+ *
+ * This prevents infinite retry loops when the market is illiquid and
+ * price protection blocks every sell attempt.
+ *
+ * @param bestBid Best bid price from CLOB (in dollars)
+ * @param bestAsk Best ask price from CLOB (in dollars, can be null)
+ * @param targetPrice Target exit price (in dollars)
+ * @param minAcceptable Minimum acceptable price (in dollars)
+ * @returns IlliquidExitResult with isIlliquid flag and reason
+ */
+export function checkIlliquidExit(
+  bestBid: number | null,
+  bestAsk: number | null,
+  targetPrice: number,
+  minAcceptable: number,
+): IlliquidExitResult {
+  const diagnostics: IlliquidExitResult["diagnostics"] = {
+    bestBid,
+    bestAsk,
+    spread: bestBid !== null && bestAsk !== null ? bestAsk - bestBid : null,
+    targetPrice,
+    minAcceptable,
+  };
+
+  // If no bid at all, that's handled separately (NO_BID condition)
+  if (bestBid === null || bestBid === 0) {
+    return { isIlliquid: false, diagnostics };
+  }
+
+  // Condition 1: Extreme spread
+  if (bestAsk !== null && bestAsk > 0) {
+    const spread = bestAsk - bestBid;
+    if (spread > ILLIQUID_EXIT_THRESHOLDS.EXTREME_SPREAD_DOLLARS) {
+      return {
+        isIlliquid: true,
+        reason: `Extreme spread: ${(spread * 100).toFixed(1)}¢ > ${(ILLIQUID_EXIT_THRESHOLDS.EXTREME_SPREAD_DOLLARS * 100).toFixed(0)}¢ threshold`,
+        diagnostics,
+      };
+    }
+  }
+
+  // Condition 2: Tiny bid while target is high
+  // bestBid ≤ 2¢ while target/minAcceptable > 50¢
+  if (
+    bestBid <= ILLIQUID_EXIT_THRESHOLDS.TINY_BID_DOLLARS &&
+    (targetPrice > ILLIQUID_EXIT_THRESHOLDS.MIN_TARGET_FOR_TINY_BID_CHECK ||
+     minAcceptable > ILLIQUID_EXIT_THRESHOLDS.MIN_TARGET_FOR_TINY_BID_CHECK)
+  ) {
+    return {
+      isIlliquid: true,
+      reason: `Tiny bid: bestBid=${(bestBid * 100).toFixed(1)}¢ ≤ ${(ILLIQUID_EXIT_THRESHOLDS.TINY_BID_DOLLARS * 100).toFixed(0)}¢ while target=${(targetPrice * 100).toFixed(1)}¢ > ${(ILLIQUID_EXIT_THRESHOLDS.MIN_TARGET_FOR_TINY_BID_CHECK * 100).toFixed(0)}¢`,
+      diagnostics,
+    };
+  }
+
+  // Condition 3: bestBid is far below minAcceptable (price protection would block)
+  // If bestBid < minAcceptable * 0.5 (less than half the acceptable price), defer
+  if (bestBid < minAcceptable * 0.5) {
+    return {
+      isIlliquid: true,
+      reason: `Bid far below acceptable: bestBid=${(bestBid * 100).toFixed(1)}¢ < minAcceptable=${(minAcceptable * 100).toFixed(1)}¢ * 0.5`,
+      diagnostics,
+    };
+  }
+
+  return { isIlliquid: false, diagnostics };
+}
+
+/**
  * Circuit breaker entry for per-token execution disabling.
  *
  * When orderbook quality is repeatedly poor for a tokenId, we disable
@@ -371,6 +476,42 @@ export const CIRCUIT_BREAKER_ESCALATION_WINDOW_MS = 7_200_000; // 2 hours
 export const DUST_COOLDOWN_MS = 600_000;
 
 /**
+ * ILLIQUID EXIT THRESHOLDS
+ *
+ * Detects when a position cannot be exited due to illiquid orderbook conditions:
+ * - Extreme spread: bestAsk - bestBid > 30¢
+ * - Tiny bid: bestBid ≤ 2¢ while target price > 50¢
+ *
+ * When ILLIQUID_EXIT is triggered:
+ * - Do NOT spam market sell attempts
+ * - Transition to EXIT_DEFERRED_ILLQ stage
+ * - Escalating backoff: 1m -> 5m -> 15m until book normalizes
+ */
+export const ILLIQUID_EXIT_THRESHOLDS = {
+  /** Spread threshold in dollars: spread > this = illiquid */
+  EXTREME_SPREAD_DOLLARS: 0.30, // 30¢
+  /** Minimum bid threshold in dollars: bid ≤ this AND target > MIN_TARGET = illiquid */
+  TINY_BID_DOLLARS: 0.02, // 2¢
+  /** Target threshold: only check tiny bid when target > this */
+  MIN_TARGET_FOR_TINY_BID_CHECK: 0.50, // 50¢
+};
+
+/**
+ * Backoff escalation ladder for ILLIQUID_EXIT deferral (1m, 5m, 15m)
+ */
+export const ILLIQUID_BACKOFF_MS = [
+  60_000, // 1 minute
+  300_000, // 5 minutes
+  900_000, // 15 minutes
+];
+
+/**
+ * Maximum number of illiquid rechecks before abandoning the exit plan.
+ * After this many escalations, the plan will be removed to prevent infinite hold.
+ */
+export const MAX_ILLIQUID_RECHECKS = 10;
+
+/**
  * Price history entry for momentum tracking
  */
 interface PriceHistoryEntry {
@@ -388,8 +529,9 @@ interface PriceHistoryEntry {
  * - PROFIT: Try to exit at target profit price (most aggressive)
  * - BREAKEVEN: If PROFIT fails, try to exit at average entry price (no loss)
  * - FORCE: If window expires, exit at best bid even at loss (capital recovery)
+ * - EXIT_DEFERRED_ILLQ: Book is illiquid (extreme spread or tiny bid); deferred with backoff
  */
-export type ExitLadderStage = "PROFIT" | "BREAKEVEN" | "FORCE";
+export type ExitLadderStage = "PROFIT" | "BREAKEVEN" | "FORCE" | "EXIT_DEFERRED_ILLQ";
 
 /**
  * Exit Plan State
@@ -429,6 +571,10 @@ export interface ExitPlan {
   blockedAtMs?: number;
   /** Whether START log has been emitted for this plan (prevents re-logging) */
   startLogged?: boolean;
+  /** For EXIT_DEFERRED_ILLQ: backoff level (0, 1, 2 corresponding to 1m, 5m, 15m) */
+  illiquidBackoffLevel?: number;
+  /** For EXIT_DEFERRED_ILLQ: next allowed recheck timestamp (ms) */
+  illiquidNextRecheckAtMs?: number;
 }
 
 /**
@@ -1919,6 +2065,11 @@ export class ScalpTakeProfitStrategy {
         return { limitCents: bestBidCents, reason: "FORCE_AT_BID" };
       }
 
+      case "EXIT_DEFERRED_ILLQ": {
+        // In deferred mode, use target price (won't actually execute - just for logging)
+        return { limitCents: plan.targetPriceCents, reason: "ILLIQUID_DEFERRED" };
+      }
+
       default:
         return { limitCents: bestBidCents, reason: "UNKNOWN_STAGE" };
     }
@@ -2042,6 +2193,111 @@ export class ScalpTakeProfitStrategy {
     // At this point, currentBidPrice is guaranteed to exist and be > 0
     // because validateOrderbookQuality() would have returned NO_EXECUTION_PRICE if not
     const bestBidCents = position.currentBidPrice! * 100;
+    const bestBidDollars = position.currentBidPrice!;
+    const bestAskDollars = position.currentAskPrice ?? null;
+
+    // Calculate target and minimum acceptable prices for illiquid check
+    const targetPriceDollars = plan.targetPriceCents / 100;
+    const minAcceptableDollars = plan.avgEntryCents / 100; // At minimum, we want to break even
+
+    // === ILLIQUID EXIT CHECK ===
+    // If the orderbook is illiquid (extreme spread or tiny bid vs high target),
+    // transition to EXIT_DEFERRED_ILLQ stage instead of hammering sell attempts
+    if (plan.stage !== "EXIT_DEFERRED_ILLQ") {
+      const illiquidResult = checkIlliquidExit(
+        bestBidDollars,
+        bestAskDollars,
+        targetPriceDollars,
+        minAcceptableDollars,
+      );
+
+      if (illiquidResult.isIlliquid) {
+        // Transition to ILLIQUID deferral
+        plan.stage = "EXIT_DEFERRED_ILLQ";
+        plan.blockedReason = "ILLIQUID_DEFERRED";
+        plan.blockedAtMs = now;
+        plan.illiquidBackoffLevel = 0;
+        plan.illiquidNextRecheckAtMs = now + ILLIQUID_BACKOFF_MS[0];
+
+        this.logger.warn(
+          `[ScalpExit] ILLIQUID_EXIT tokenId=${plan.tokenId.slice(0, 12)}... ` +
+            `bestBid=${(bestBidDollars * 100).toFixed(1)}¢ ` +
+            `bestAsk=${bestAskDollars !== null ? (bestAskDollars * 100).toFixed(1) + "¢" : "null"} ` +
+            `target=${(targetPriceDollars * 100).toFixed(1)}¢ minAcceptable=${(minAcceptableDollars * 100).toFixed(1)}¢ ` +
+            `-> deferring exit for ${ILLIQUID_BACKOFF_MS[0] / 1000}s. Reason: ${illiquidResult.reason}`,
+        );
+
+        return { filled: false, reason: "ILLIQUID_DEFERRED", shouldContinue: true };
+      }
+    }
+
+    // === HANDLE EXIT_DEFERRED_ILLQ STAGE ===
+    if (plan.stage === "EXIT_DEFERRED_ILLQ") {
+      // Check if we're still in backoff period
+      if (plan.illiquidNextRecheckAtMs && now < plan.illiquidNextRecheckAtMs) {
+        // Still in backoff - skip without logging spam
+        return { filled: false, reason: "ILLIQUID_BACKOFF", shouldContinue: true };
+      }
+
+      // Backoff expired - recheck liquidity
+      const recheckResult = checkIlliquidExit(
+        bestBidDollars,
+        bestAskDollars,
+        targetPriceDollars,
+        minAcceptableDollars,
+      );
+
+      if (recheckResult.isIlliquid) {
+        // Still illiquid - escalate backoff
+        const currentLevel = plan.illiquidBackoffLevel ?? 0;
+        const nextLevel = Math.min(currentLevel + 1, ILLIQUID_BACKOFF_MS.length - 1);
+        const nextBackoffMs = ILLIQUID_BACKOFF_MS[nextLevel];
+
+        plan.illiquidBackoffLevel = nextLevel;
+        plan.illiquidNextRecheckAtMs = now + nextBackoffMs;
+        plan.attempts++;
+
+        // Check if we've exceeded max rechecks
+        if (plan.attempts >= MAX_ILLIQUID_RECHECKS) {
+          this.logger.warn(
+            `[ScalpExit] ILLIQUID_ABANDONED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+              `after ${plan.attempts} rechecks - market remained illiquid. ` +
+              `bestBid=${(bestBidDollars * 100).toFixed(1)}¢ target=${(targetPriceDollars * 100).toFixed(1)}¢`,
+          );
+          return { filled: false, reason: "ILLIQUID_MAX_RECHECKS", shouldContinue: false };
+        }
+
+        if (this.logDeduper.shouldLog(`ScalpExit:ILLIQUID_RECHECK:${plan.tokenId}`, 60_000)) {
+          this.logger.info(
+            `[ScalpExit] ILLIQUID_RECHECK tokenId=${plan.tokenId.slice(0, 12)}... ` +
+              `still illiquid, escalating backoff to ${nextBackoffMs / 1000}s (level=${nextLevel} attempts=${plan.attempts}). ` +
+              `bestBid=${(bestBidDollars * 100).toFixed(1)}¢`,
+          );
+        }
+
+        return { filled: false, reason: "ILLIQUID_RECHECK_FAILED", shouldContinue: true };
+      }
+
+      // Liquidity restored! Transition back to normal stage
+      this.logger.info(
+        `[ScalpExit] ILLIQUID_RECOVERED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `liquidity restored after ${plan.attempts} rechecks. bestBid=${(bestBidDollars * 100).toFixed(1)}¢ ` +
+          `-> resuming exit ladder at PROFIT stage`,
+      );
+
+      plan.stage = "PROFIT";
+      plan.blockedReason = undefined;
+      plan.blockedAtMs = undefined;
+      plan.illiquidBackoffLevel = undefined;
+      plan.illiquidNextRecheckAtMs = undefined;
+      // Continue with normal execution below
+    }
+
+    // Clear illiquid-related state if not in deferred mode
+    if (plan.blockedReason === "ILLIQUID_DEFERRED") {
+      plan.blockedReason = undefined;
+      plan.blockedAtMs = undefined;
+    }
 
     // Update plan stage based on elapsed time
     this.updateExitPlanStage(plan, now);
