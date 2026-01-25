@@ -840,7 +840,7 @@ export class ScalpTakeProfitStrategy {
     this.config = config.config;
 
     this.logger.info(
-      `[ScalpTakeProfit] Initialized: ` +
+      `[ProfitTaker] Initialized: ` +
         `hold=${this.config.minHoldMinutes}-${this.config.maxHoldMinutes}min, ` +
         `profit=${this.config.minProfitPct}-${this.config.targetProfitPct}%`,
     );
@@ -894,7 +894,7 @@ export class ScalpTakeProfitStrategy {
           )
         ) {
           this.logger.warn(
-            `[ScalpTakeProfit] ⚠️ using stale snapshot age=${staleAgeSec}s ` +
+            `[ProfitTaker] ⚠️ using stale snapshot age=${staleAgeSec}s ` +
               `reason="${effectiveSnapshot.staleReason ?? "unknown"}" ` +
               `active=${effectiveSnapshot.activePositions.length} ` +
               `redeemable=${effectiveSnapshot.redeemablePositions.length}`,
@@ -919,7 +919,7 @@ export class ScalpTakeProfitStrategy {
           )
         ) {
           this.logger.warn(
-            `[ScalpTakeProfit] ⚠️ snapshot reports activeTotal=0 but lastGoodSnapshot had ` +
+            `[ProfitTaker] ⚠️ snapshot reports activeTotal=0 but lastGoodSnapshot had ` +
               `${lastGoodSnapshot.activePositions.length} positions; using lastGoodSnapshot as fallback`,
           );
         }
@@ -985,7 +985,7 @@ export class ScalpTakeProfitStrategy {
           }
 
           this.logger.error(
-            `[ScalpTakeProfit] 🐛 SNAPSHOT_MISMATCH: cycleId=${effectiveSnapshot.cycleId} ` +
+            `[ProfitTaker] 🐛 SNAPSHOT_MISMATCH: cycleId=${effectiveSnapshot.cycleId} ` +
               `addressUsed=${holdingAddress?.slice(0, 10)}... ` +
               `snapshot.summary.activeTotal=${effectiveSnapshot.summary.activeTotal} ` +
               `but activePositions.length=0. ` +
@@ -1000,7 +1000,7 @@ export class ScalpTakeProfitStrategy {
     } else {
       // FALLBACK: No snapshot available, use positionTracker methods (legacy path)
       this.logger.warn(
-        `[ScalpTakeProfit] No snapshot available, falling back to positionTracker methods`,
+        `[ProfitTaker] No snapshot available, falling back to positionTracker methods`,
       );
       activePositions = this.positionTracker.getActivePositions();
       profitable = this.positionTracker.getActiveProfitablePositions();
@@ -1031,7 +1031,7 @@ export class ScalpTakeProfitStrategy {
       // Get raw total for diagnostic
       const allPositions = this.positionTracker.getPositions();
       this.logger.info(
-        `[ScalpTakeProfit] active_count=0 ` +
+        `[ProfitTaker] active_count=0 ` +
           `(cycleId=${effectiveSnapshot?.cycleId ?? "none"} ` +
           `chosenAddress=${holdingAddress ?? "unknown"} ` +
           `raw_total=${allPositions.length} ` +
@@ -1046,7 +1046,7 @@ export class ScalpTakeProfitStrategy {
       )
     ) {
       this.logger.debug(
-        `[ScalpTakeProfit] active_count=${activePositions.length} ` +
+        `[ProfitTaker] active_count=${activePositions.length} ` +
           `(cycleId=${effectiveSnapshot?.cycleId ?? "none"} ` +
           `start=${activePositions.length} afterPnlTrusted=${afterPnlTrusted} ` +
           `afterThreshold=${afterThreshold})`,
@@ -1074,13 +1074,13 @@ export class ScalpTakeProfitStrategy {
       // Log summary at DEBUG level (use INFO only when there are positions at target profit threshold)
       if (targetProfit.length > 0) {
         this.logger.info(
-          `[ScalpTakeProfit] 📊 Active positions: ${activePositions.length} total | ` +
+          `[ProfitTaker] 📊 Active positions: ${activePositions.length} total | ` +
             `${profitable.length} profitable (>0%) | ${losing.length} losing | ` +
             `${targetProfit.length} >= target ${this.config.targetProfitPct}%`,
         );
       } else {
         this.logger.debug(
-          `[ScalpTakeProfit] 📊 Active positions: ${activePositions.length} total | ` +
+          `[ProfitTaker] 📊 Active positions: ${activePositions.length} total | ` +
             `${profitable.length} profitable (>0%) | ${losing.length} losing | ` +
             `${minProfit.length} >= min ${this.config.minProfitPct}% | ` +
             `${targetProfit.length} >= target ${this.config.targetProfitPct}%`,
@@ -1104,14 +1104,14 @@ export class ScalpTakeProfitStrategy {
               ? enriched.avgEntryPriceCents.toFixed(1)
               : (p.entryPrice * 100).toFixed(1);
           this.logger.debug(
-            `[ScalpTakeProfit] 💰 ${p.tokenId.slice(0, 12)}... +${p.pnlPct.toFixed(1)}% ($${p.pnlUsd.toFixed(2)}) | ` +
+            `[ProfitTaker] 💰 ${p.tokenId.slice(0, 12)}... +${p.pnlPct.toFixed(1)}% ($${p.pnlUsd.toFixed(2)}) | ` +
               `entry=${entryPriceCents}¢ current=${(p.currentPrice * 100).toFixed(1)}¢ | ` +
               `held=${holdMin}min | size=${p.size.toFixed(2)}`,
           );
         }
         if (profitable.length > 10) {
           this.logger.debug(
-            `[ScalpTakeProfit] ... and ${profitable.length - 10} more profitable positions`,
+            `[ProfitTaker] ... and ${profitable.length - 10} more profitable positions`,
           );
         }
       }
@@ -1123,7 +1123,7 @@ export class ScalpTakeProfitStrategy {
     const highlyProfitable = targetProfit;
     if (highlyProfitable.length > 0) {
       this.logger.info(
-        `[ScalpTakeProfit] 🎯 ${highlyProfitable.length} position(s) at/above target profit (${this.config.targetProfitPct}%): ` +
+        `[ProfitTaker] 🎯 ${highlyProfitable.length} position(s) at/above target profit (${this.config.targetProfitPct}%): ` +
           highlyProfitable
             .slice(0, 5)
             .map((p) => {
@@ -1170,7 +1170,7 @@ export class ScalpTakeProfitStrategy {
       if (!position.pnlTrusted) {
         if (this.shouldLogSkip(positionKey, position.pnlPct)) {
           this.logger.debug(
-            `[ScalpTakeProfit] Skip ${positionKey.slice(0, 20)}...: UNTRUSTED_PNL - ${position.pnlUntrustedReason ?? "unknown reason"}`,
+            `[ProfitTaker] Skip ${positionKey.slice(0, 20)}...: UNTRUSTED_PNL - ${position.pnlUntrustedReason ?? "unknown reason"}`,
           );
           this.recordSkipLog(positionKey, position.pnlPct);
         }
@@ -1218,7 +1218,7 @@ export class ScalpTakeProfitStrategy {
             )
           ) {
             this.logger.debug(
-              `[ScalpTakeProfit] Legacy position ${tokenIdShort} has untrusted entry (${position.entryMetaUntrustedReason ?? "unknown"}), ` +
+              `[ProfitTaker] Legacy position ${tokenIdShort} has untrusted entry (${position.entryMetaUntrustedReason ?? "unknown"}), ` +
                 `allowing P&L-only exit since profitable (+${position.pnlPct.toFixed(1)}%) and P&L trusted (bypassing hold-time checks)`,
             );
           }
@@ -1383,7 +1383,7 @@ export class ScalpTakeProfitStrategy {
 
       // === NEW SCALP TRIGGER - Create Exit Plan ===
       this.logger.info(
-        `[ScalpTakeProfit] 💰 Scalping position at +${position.pnlPct.toFixed(1)}% (+$${position.pnlUsd.toFixed(2)}): ${exitDecision.reason}`,
+        `[ProfitTaker] 💰 Scalping position at +${position.pnlPct.toFixed(1)}% (+$${position.pnlUsd.toFixed(2)}): ${exitDecision.reason}`,
       );
 
       // Create and start the exit plan
@@ -1412,14 +1412,14 @@ export class ScalpTakeProfitStrategy {
       const fingerprint = skipAggregator.getFingerprint();
       if (this.logDeduper.shouldLogSummary("Scalp", fingerprint)) {
         this.logger.debug(
-          `[ScalpTakeProfit] Skipped ${skipAggregator.getTotalCount()} positions: ${skipAggregator.getSummary()} (cycle=${this.cycleCount})`,
+          `[ProfitTaker] Skipped ${skipAggregator.getTotalCount()} positions: ${skipAggregator.getSummary()} (cycle=${this.cycleCount})`,
         );
       }
     }
 
     if (scalpedCount > 0) {
       this.logger.info(
-        `[ScalpTakeProfit] ✅ Scalped ${scalpedCount} position(s)`,
+        `[ProfitTaker] ✅ Scalped ${scalpedCount} position(s)`,
       );
     }
 
@@ -1523,7 +1523,7 @@ export class ScalpTakeProfitStrategy {
       holdMinutes < ScalpTakeProfitStrategy.NO_ENTRY_TIME_HOLD_MINUTES
     ) {
       this.logger.debug(
-        `[ScalpTakeProfit] Position ${position.tokenId.slice(0, 8)}... using FALLBACK entry time (container uptime). ` +
+        `[ProfitTaker] Position ${position.tokenId.slice(0, 8)}... using FALLBACK entry time (container uptime). ` +
           `Trade history not available - timeHeldSec may be inaccurate after restarts.`,
       );
     }
@@ -1560,7 +1560,7 @@ export class ScalpTakeProfitStrategy {
         }
         // If loss is large, log but don't force exit (stop-loss will handle)
         this.logger.debug(
-          `[ScalpTakeProfit] Low-price position at ${position.pnlPct.toFixed(1)}% loss after ${holdMinutes.toFixed(0)}min - stop-loss will handle`,
+          `[ProfitTaker] Low-price position at ${position.pnlPct.toFixed(1)}% loss after ${holdMinutes.toFixed(0)}min - stop-loss will handle`,
         );
       }
 
@@ -1627,7 +1627,7 @@ export class ScalpTakeProfitStrategy {
       // Log if we're skipping a profitable position due to hold time
       if (position.pnlPct >= this.config.targetProfitPct) {
         this.logger.debug(
-          `[ScalpTakeProfit] ⏳ Position at +${position.pnlPct.toFixed(1)}% waiting for hold time (${holdMinutes.toFixed(0)}/${this.config.minHoldMinutes}min)`,
+          `[ProfitTaker] ⏳ Position at +${position.pnlPct.toFixed(1)}% waiting for hold time (${holdMinutes.toFixed(0)}/${this.config.minHoldMinutes}min)`,
         );
       }
       return {
@@ -1772,7 +1772,7 @@ export class ScalpTakeProfitStrategy {
 
     if (nearResolution) {
       this.logger.debug(
-        `[ScalpTakeProfit] 🎯 Resolution exclusion active: ` +
+        `[ProfitTaker] 🎯 Resolution exclusion active: ` +
           `entry ${(position.entryPrice * 100).toFixed(1)}¢ → current ${(position.currentPrice * 100).toFixed(1)}¢ ` +
           `(near resolution at 90¢+, let it ride to $1.00!)`,
       );
@@ -1887,7 +1887,7 @@ export class ScalpTakeProfitStrategy {
         // Skip if anomaly detected (crossed book or extreme spread)
         if (priceExtraction.hasAnomaly) {
           this.logger.debug(
-            `[ScalpTakeProfit] Price history skipped for tokenId=${position.tokenId.slice(0, 12)}...: ` +
+            `[ProfitTaker] Price history skipped for tokenId=${position.tokenId.slice(0, 12)}...: ` +
               `anomaly detected - ${priceExtraction.anomalyReason}`,
           );
           continue;
@@ -1968,7 +1968,7 @@ export class ScalpTakeProfitStrategy {
   ): Promise<boolean> {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
     if (!wallet) {
-      this.logger.error(`[ScalpTakeProfit] No wallet`);
+      this.logger.error(`[ProfitTaker] No wallet`);
       return false;
     }
 
@@ -1986,7 +1986,7 @@ export class ScalpTakeProfitStrategy {
       // Preflight check: is notional >= minOrderUsd?
       if (notionalUsd < this.config.minOrderUsd) {
         this.logger.debug(
-          `[ScalpTakeProfit] DUST_EXIT: notional=${notionalUsd.toFixed(2)} < minOrder=${this.config.minOrderUsd}. ` +
+          `[ProfitTaker] DUST_EXIT: notional=${notionalUsd.toFixed(2)} < minOrder=${this.config.minOrderUsd}. ` +
             `shares=${position.size.toFixed(4)} limitPrice=${effectiveLimitPrice.toFixed(4)} tokenId=${position.tokenId.slice(0, 12)}...`,
         );
         return false;
@@ -2009,7 +2009,7 @@ export class ScalpTakeProfitStrategy {
 
       if (result.status === "submitted") {
         this.logger.info(
-          `[ScalpTakeProfit] ✅ Scalp sell executed: notional=$${notionalUsd.toFixed(2)} ` +
+          `[ProfitTaker] ✅ Scalp sell executed: notional=$${notionalUsd.toFixed(2)} ` +
             `limit=${effectiveLimitCents.toFixed(1)}¢`,
         );
         return true;
@@ -2018,13 +2018,13 @@ export class ScalpTakeProfitStrategy {
       // Check for SKIP_MIN_ORDER_SIZE despite our preflight
       if (result.reason === "SKIP_MIN_ORDER_SIZE") {
         this.logger.error(
-          `[ScalpTakeProfit] BUG: SKIP_MIN_ORDER_SIZE despite notional=$${notionalUsd.toFixed(2)} >= min=$${this.config.minOrderUsd}. ` +
+          `[ProfitTaker] BUG: SKIP_MIN_ORDER_SIZE despite notional=$${notionalUsd.toFixed(2)} >= min=$${this.config.minOrderUsd}. ` +
             `shares=${position.size.toFixed(4)} limit=${effectiveLimitCents.toFixed(1)}¢ tokenId=${position.tokenId.slice(0, 12)}...`,
         );
       }
 
       this.logger.warn(
-        `[ScalpTakeProfit] ⚠️ Scalp not filled: ${result.reason ?? "unknown"} ` +
+        `[ProfitTaker] ⚠️ Scalp not filled: ${result.reason ?? "unknown"} ` +
           `position={tokenId=${position.tokenId.slice(0, 16)}..., marketId=${position.marketId.slice(0, 16)}..., ` +
           `side=${position.side}, shares=${position.size.toFixed(4)}, entry=${(position.entryPrice * 100).toFixed(1)}¢, ` +
           `currentBid=${position.currentBidPrice !== undefined ? (position.currentBidPrice * 100).toFixed(1) + "¢" : "N/A"}, ` +
@@ -2050,7 +2050,7 @@ export class ScalpTakeProfitStrategy {
           )
         ) {
           this.logger.warn(
-            `[ScalpTakeProfit] ⚠️ Orderbook quality error (entering cooldown): ` +
+            `[ProfitTaker] ⚠️ Orderbook quality error (entering cooldown): ` +
               `status=${err.qualityResult.status} tokenId=${position.tokenId.slice(0, 12)}... ` +
               `reason: ${err.qualityResult.reason}`,
           );
@@ -2063,22 +2063,24 @@ export class ScalpTakeProfitStrategy {
       // the position exits or the plan is abandoned. Container restarts clear plans but
       // positions remain, causing new plans to be created on the next cycle.
       const exitPlan = this.exitPlans.get(position.tokenId);
-      const exitPlanInfo = exitPlan
-        ? `stage=${exitPlan.stage}, attempts=${exitPlan.attempts}, elapsed=${Math.round((Date.now() - exitPlan.startedAtMs) / 1000)}s`
-        : "no active plan";
-      // Recalculate limit/notional for error logging (same logic as try block)
-      const errLimitCents =
-        limitPriceCents ??
-        (position.currentBidPrice ?? position.currentPrice) * 100;
-      const errNotionalUsd = position.size * (errLimitCents / 100);
+
+      // Use avgEntryPriceCents if available (true cost basis), otherwise fall back to entryPrice
+      const entryCents = position.avgEntryPriceCents ?? position.entryPrice * 100;
+      // Use bestBid if available, otherwise fall back to currentPrice for consistent "worth" calculation
+      const currentWorthCents = (position.currentBidPrice ?? position.currentPrice) * 100;
+      const notionalUsd = position.size * (currentWorthCents / 100);
+
+      // Build a plain-English error message
+      const errorReason = err instanceof Error ? err.message : String(err);
+      const exitAttemptInfo = exitPlan
+        ? ` (attempt #${exitPlan.attempts}, trying for ${Math.round((Date.now() - exitPlan.startedAtMs) / 1000)}s)`
+        : "";
+
       this.logger.error(
-        `[ScalpTakeProfit] ❌ Scalp failed: ${err instanceof Error ? err.message : String(err)} ` +
-          `position={tokenId=${position.tokenId.slice(0, 16)}..., marketId=${position.marketId.slice(0, 16)}..., ` +
-          `side=${position.side}, shares=${position.size.toFixed(4)}, entry=${(position.entryPrice * 100).toFixed(1)}¢, ` +
-          `currentBid=${position.currentBidPrice !== undefined ? (position.currentBidPrice * 100).toFixed(1) + "¢" : "N/A"}, ` +
-          `currentAsk=${position.currentAskPrice !== undefined ? (position.currentAskPrice * 100).toFixed(1) + "¢" : "N/A"}, ` +
-          `limit=${errLimitCents.toFixed(1)}¢, notional=$${errNotionalUsd.toFixed(2)}} ` +
-          `exitPlan={${exitPlanInfo}}`,
+        `[ProfitTaker] ❌ Could not sell "${position.side}" position. ` +
+          `Bought at ${entryCents.toFixed(1)}¢, now worth ${currentWorthCents.toFixed(1)}¢ ` +
+          `(${position.size.toFixed(2)} shares = $${notionalUsd.toFixed(2)}).${exitAttemptInfo} ` +
+          `Reason: ${errorReason}`,
       );
       return false;
     }
@@ -2111,7 +2113,7 @@ export class ScalpTakeProfitStrategy {
     };
 
     this.logger.info(
-      `[ScalpExit] START tokenId=${position.tokenId.slice(0, 12)}... ` +
+      `[ProfitTaker] START tokenId=${position.tokenId.slice(0, 12)}... ` +
         `pnl=+${position.pnlPct.toFixed(1)}% profit=$${position.pnlUsd.toFixed(2)} ` +
         `window=${this.config.exitWindowSec}s shares=${position.size.toFixed(4)} ` +
         `entry=${avgEntryCents.toFixed(1)}¢ target=${targetPriceCents.toFixed(1)}¢`,
@@ -2132,7 +2134,7 @@ export class ScalpTakeProfitStrategy {
     if (plan.stage === "PROFIT" && elapsedSec >= profitWindowSec) {
       plan.stage = "BREAKEVEN";
       this.logger.info(
-        `[ScalpExit] ESCALATE tokenId=${plan.tokenId.slice(0, 12)}... ` +
+        `[ProfitTaker] ESCALATE tokenId=${plan.tokenId.slice(0, 12)}... ` +
           `PROFIT->BREAKEVEN reason=WINDOW_PROGRESS (${elapsedSec.toFixed(0)}s elapsed)`,
       );
     } else if (
@@ -2141,7 +2143,7 @@ export class ScalpTakeProfitStrategy {
     ) {
       plan.stage = "FORCE";
       this.logger.info(
-        `[ScalpExit] ESCALATE tokenId=${plan.tokenId.slice(0, 12)}... ` +
+        `[ProfitTaker] ESCALATE tokenId=${plan.tokenId.slice(0, 12)}... ` +
           `BREAKEVEN->FORCE reason=WINDOW_EXPIRED (${elapsedSec.toFixed(0)}s elapsed)`,
       );
     }
@@ -2241,7 +2243,7 @@ export class ScalpTakeProfitStrategy {
           (circuitBreaker.disabledUntilMs - now) / 1000,
         );
         this.logger.debug(
-          `[ScalpExit] CIRCUIT_BREAKER tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `[ProfitTaker] CIRCUIT_BREAKER tokenId=${plan.tokenId.slice(0, 12)}... ` +
             `reason=${circuitBreaker.reason} cooldown=${remainingSec}s remaining`,
         );
       }
@@ -2264,7 +2266,7 @@ export class ScalpTakeProfitStrategy {
         this.logDeduper.shouldLog(`ScalpExit:NO_BID:${plan.tokenId}`, 30_000)
       ) {
         this.logger.warn(
-          `[ScalpExit] BLOCKED tokenId=${plan.tokenId.slice(0, 12)}... reason=NO_BID`,
+          `[ProfitTaker] BLOCKED tokenId=${plan.tokenId.slice(0, 12)}... reason=NO_BID`,
         );
       }
       return { filled: false, reason: "NO_BID", shouldContinue: true };
@@ -2354,7 +2356,7 @@ export class ScalpTakeProfitStrategy {
         plan.illiquidNextRecheckAtMs = now + ILLIQUID_BACKOFF_MS[0];
 
         this.logger.warn(
-          `[ScalpExit] ILLIQUID_EXIT tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `[ProfitTaker] ILLIQUID_EXIT tokenId=${plan.tokenId.slice(0, 12)}... ` +
             `bestBid=${(bestBidDollars * 100).toFixed(1)}¢ ` +
             `bestAsk=${bestAskDollars !== null ? (bestAskDollars * 100).toFixed(1) + "¢" : "null"} ` +
             `target=${(targetPriceDollars * 100).toFixed(1)}¢ minAcceptable=${(minAcceptableDollars * 100).toFixed(1)}¢ ` +
@@ -2394,7 +2396,7 @@ export class ScalpTakeProfitStrategy {
         // Check if we've exceeded max rechecks
         if (plan.attempts >= MAX_ILLIQUID_RECHECKS) {
           this.logger.warn(
-            `[ScalpExit] ILLIQUID_ABANDONED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+            `[ProfitTaker] ILLIQUID_ABANDONED tokenId=${plan.tokenId.slice(0, 12)}... ` +
               `after ${plan.attempts} rechecks - market remained illiquid. ` +
               `bestBid=${(bestBidDollars * 100).toFixed(1)}¢ target=${(targetPriceDollars * 100).toFixed(1)}¢`,
           );
@@ -2403,7 +2405,7 @@ export class ScalpTakeProfitStrategy {
 
         if (this.logDeduper.shouldLog(`ScalpExit:ILLIQUID_RECHECK:${plan.tokenId}`, 60_000)) {
           this.logger.info(
-            `[ScalpExit] ILLIQUID_RECHECK tokenId=${plan.tokenId.slice(0, 12)}... ` +
+            `[ProfitTaker] ILLIQUID_RECHECK tokenId=${plan.tokenId.slice(0, 12)}... ` +
               `still illiquid, escalating backoff to ${nextBackoffMs / 1000}s (level=${nextLevel} attempts=${plan.attempts}). ` +
               `bestBid=${(bestBidDollars * 100).toFixed(1)}¢`,
           );
@@ -2414,7 +2416,7 @@ export class ScalpTakeProfitStrategy {
 
       // Liquidity restored! Transition back to normal stage
       this.logger.info(
-        `[ScalpExit] ILLIQUID_RECOVERED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+        `[ProfitTaker] ILLIQUID_RECOVERED tokenId=${plan.tokenId.slice(0, 12)}... ` +
           `liquidity restored after ${plan.attempts} rechecks. bestBid=${(bestBidDollars * 100).toFixed(1)}¢ ` +
           `-> resuming exit ladder at PROFIT stage`,
       );
@@ -2460,7 +2462,7 @@ export class ScalpTakeProfitStrategy {
       // Set dust cooldown to prevent re-starting plan
       this.dustCooldowns.set(plan.tokenId, now + DUST_COOLDOWN_MS);
       this.logger.debug(
-        `[ScalpExit] DUST_EXIT tokenId=${plan.tokenId.slice(0, 12)}... ` +
+        `[ProfitTaker] DUST_EXIT tokenId=${plan.tokenId.slice(0, 12)}... ` +
           `notional=$${notionalUsd.toFixed(2)} < min=$${this.config.minOrderUsd} ` +
           `(cooldown 10min to prevent spam)`,
       );
@@ -2481,7 +2483,7 @@ export class ScalpTakeProfitStrategy {
       )
     ) {
       this.logger.info(
-        `[ScalpExit] TRY stage=${plan.stage} tokenId=${plan.tokenId.slice(0, 12)}... ` +
+        `[ProfitTaker] TRY stage=${plan.stage} tokenId=${plan.tokenId.slice(0, 12)}... ` +
           `price=${limitCents.toFixed(1)}¢ notional=$${notionalUsd.toFixed(2)} ` +
           `attempt=${plan.attempts} reason=${reason}`,
       );
@@ -2492,7 +2494,7 @@ export class ScalpTakeProfitStrategy {
 
     if (filled) {
       this.logger.info(
-        `[ScalpExit] FILLED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+        `[ProfitTaker] FILLED tokenId=${plan.tokenId.slice(0, 12)}... ` +
           `stage=${plan.stage} price=${limitCents.toFixed(1)}¢`,
       );
       return {
@@ -2511,7 +2513,7 @@ export class ScalpTakeProfitStrategy {
         ScalpTakeProfitStrategy.FORCE_STAGE_WINDOW_MULTIPLIER;
       if (elapsedSec > maxForceWindowSec) {
         this.logger.warn(
-          `[ScalpExit] ABANDONED tokenId=${plan.tokenId.slice(0, 12)}... ` +
+          `[ProfitTaker] ABANDONED tokenId=${plan.tokenId.slice(0, 12)}... ` +
             `elapsed=${elapsedSec.toFixed(0)}s - exceeded max attempts`,
         );
         return { filled: false, reason: "MAX_ATTEMPTS", shouldContinue: false };
@@ -2596,7 +2598,7 @@ export class ScalpTakeProfitStrategy {
     // Log escalation separately for debugging
     if (failureCount > 1) {
       this.logger.debug(
-        `[ScalpExit] Circuit breaker escalated for tokenId=${tokenId.slice(0, 12)}... ` +
+        `[ProfitTaker] Circuit breaker escalated for tokenId=${tokenId.slice(0, 12)}... ` +
           `failures=${failureCount} cooldown=${cooldownMs / 1000}s`,
       );
     }

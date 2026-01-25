@@ -49,18 +49,19 @@ describe("validatePriceProtection", () => {
 
       assert.equal(result.valid, false);
       assert.ok(result.error !== undefined);
-      // Must NOT say "exceeds max" - this is a SELL, should say "below min"
+      // Must NOT say "exceeds max" - this is a SELL, should say "blocked"
       assert.ok(
         !result.error.includes("exceeds"),
         `Error should not mention 'exceeds' for SELL: ${result.error}`,
       );
+      // Plain English message should mention sale being blocked and the price difference
       assert.ok(
-        result.error.includes("below"),
-        `Error should mention 'below' for SELL: ${result.error}`,
+        result.error.includes("Sale blocked") || result.error.includes("blocked"),
+        `Error should mention sale being blocked: ${result.error}`,
       );
       assert.ok(
-        result.error.includes("SELL"),
-        `Error should mention 'SELL': ${result.error}`,
+        result.error.includes("minimum acceptable"),
+        `Error should mention minimum acceptable price: ${result.error}`,
       );
     });
 
@@ -87,9 +88,10 @@ describe("validatePriceProtection", () => {
 
       assert.equal(result.valid, false);
       assert.ok(result.error !== undefined);
+      // Plain English message should mention no buyers or bids
       assert.ok(
-        result.error.includes("no bestBid") || result.error.includes("NO_BOOK"),
-        `Error should mention no bestBid: ${result.error}`,
+        result.error.includes("no buyers") || result.error.includes("no bids"),
+        `Error should mention no buyers/bids: ${result.error}`,
       );
     });
 
@@ -380,7 +382,8 @@ describe("validatePriceProtection", () => {
       });
 
       assert.equal(resultSell.valid, false);
-      assert.ok(resultSell.error?.includes("no bestBid"));
+      // Plain English message should mention no buyers or bids
+      assert.ok(resultSell.error?.includes("no buyers") || resultSell.error?.includes("no bids"));
 
       const resultBuy = validatePriceProtection({
         side: "BUY",

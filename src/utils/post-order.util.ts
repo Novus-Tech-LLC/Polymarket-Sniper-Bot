@@ -285,8 +285,8 @@ export function validatePriceProtection(params: {
       return {
         valid: false,
         error:
-          `SELL price protection: no bestBid available (NO_BOOK). ` +
-          `Cannot verify floor price ${minAcceptablePrice.toFixed(4)} (${(minAcceptablePrice * 100).toFixed(1)}¢)`,
+          `Sale blocked: no buyers available in the market. ` +
+          `Minimum sell price is ${(minAcceptablePrice * 100).toFixed(1)}¢ but there are no bids.`,
         diagnostics,
       };
     }
@@ -295,9 +295,8 @@ export function validatePriceProtection(params: {
       return {
         valid: false,
         error:
-          `SELL price protection: bestBid ${bestBid.toFixed(4)} (${(bestBid * 100).toFixed(1)}¢) ` +
-          `below minAcceptable ${minAcceptablePrice.toFixed(4)} (${(minAcceptablePrice * 100).toFixed(1)}¢). ` +
-          `Would sell too cheap.`,
+          `Sale blocked: best bid is ${(bestBid * 100).toFixed(1)}¢ but minimum acceptable is ${(minAcceptablePrice * 100).toFixed(1)}¢. ` +
+          `Waiting for a better price.`,
         diagnostics,
       };
     }
