@@ -12,12 +12,13 @@
  *
  * EXECUTION ORDER:
  * 1. Refresh PositionTracker (single-flight, awaited by all strategies)
- * 2. SellEarly - CAPITAL EFFICIENCY: Sell near-$1 ACTIVE positions before redemption
- * 3. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
- * 4. Smart Hedging - Hedge losing positions
- * 5. Universal Stop-Loss - Sell positions at max loss
- * 6. Scalp Take-Profit - Time-based profit taking with momentum checks
- * 7. Endgame Sweep - Buy high-confidence positions
+ * 2. SellEarly - CAPITAL EFFICIENCY: Sell near-$1 ACTIVE positions (99.9¢+)
+ * 3. AutoSell - NEAR-RESOLUTION EXIT: Sell ACTIVE positions at 99¢+ (dispute exit at 99.9¢)
+ * 4. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
+ * 5. Smart Hedging - Hedge losing positions
+ * 6. Universal Stop-Loss - Sell positions at max loss
+ * 7. Scalp Take-Profit - Time-based profit taking with momentum checks
+ * 8. Endgame Sweep - Buy high-confidence positions
  */
 
 import { randomUUID } from "crypto";
@@ -53,6 +54,11 @@ import {
   DEFAULT_SELL_EARLY_CONFIG,
 } from "./sell-early";
 import {
+  AutoSellStrategy,
+  type AutoSellConfig,
+  DEFAULT_AUTO_SELL_CONFIG,
+} from "./auto-sell";
+import {
   UniversalStopLossStrategy,
   type UniversalStopLossConfig,
 } from "./universal-stop-loss";
@@ -82,6 +88,7 @@ export interface OrchestratorConfig {
   scalpConfig?: Partial<ScalpTakeProfitConfig>;
   autoRedeemConfig?: Partial<AutoRedeemConfig>;
   sellEarlyConfig?: Partial<SellEarlyConfig>;
+  autoSellConfig?: Partial<AutoSellConfig>;
   stopLossConfig?: Partial<UniversalStopLossConfig>;
   dynamicReservesConfig?: Partial<DynamicReservesConfig>;
   /** Wallet balance fetcher for dynamic reserves (optional - if not provided, reserves are disabled) */
@@ -99,6 +106,7 @@ export class Orchestrator {
 
   // All strategies
   private sellEarlyStrategy: SellEarlyStrategy;
+  private autoSellStrategy: AutoSellStrategy;
   private autoRedeemStrategy: AutoRedeemStrategy;
   private hedgingStrategy: SmartHedgingStrategy;
   private stopLossStrategy: UniversalStopLossStrategy;
@@ -173,8 +181,8 @@ export class Orchestrator {
       config.client as { relayerContext?: RelayerContext }
     ).relayerContext;
 
-    // 1. SellEarly - CAPITAL EFFICIENCY: Sell near-$1 ACTIVE positions
-    // Runs BEFORE AutoRedeem to free capital instead of waiting for slow redemption
+    // 1. SellEarly - CAPITAL EFFICIENCY: Sell near-$1 ACTIVE positions (99.9¢+)
+    // Runs BEFORE AutoSell (which handles 99¢+) to catch highest-value exits first
     // Only applies to ACTIVE positions (never REDEEMABLE - those go to AutoRedeem)
     this.sellEarlyStrategy = new SellEarlyStrategy({
       client: config.client,
@@ -186,7 +194,22 @@ export class Orchestrator {
       },
     });
 
-    // 2. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
+    // 2. AutoSell - NEAR-RESOLUTION EXIT: Sell positions at 99¢+ to free capital
+    // Handles dispute window exit (99.9¢) and normal near-resolution (99¢)
+    // Runs AFTER SellEarly (which handles 99.9¢) to catch remaining near-resolution positions
+    // Only applies to ACTIVE (non-redeemable) positions with valid execution status
+    this.autoSellStrategy = new AutoSellStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: {
+        ...DEFAULT_AUTO_SELL_CONFIG,
+        minOrderUsd: config.maxPositionUsd * 0.01, // 1% of max position as min order
+        ...config.autoSellConfig,
+      },
+    });
+
+    // 3. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
     // Uses relayer for gasless redemptions when available (recommended)
     this.autoRedeemStrategy = new AutoRedeemStrategy({
       client: config.client,
@@ -201,7 +224,7 @@ export class Orchestrator {
       },
     });
 
-    // 3. Smart Hedging - Hedge losing positions
+    // 4. Smart Hedging - Hedge losing positions
     const hedgingConfig = {
       ...DEFAULT_HEDGING_CONFIG,
       maxHedgeUsd: config.maxPositionUsd,
@@ -214,7 +237,7 @@ export class Orchestrator {
       config: hedgingConfig,
     });
 
-    // 4. Universal Stop-Loss - Protect against big losses
+    // 5. Universal Stop-Loss - Protect against big losses
     // When Smart Hedging is enabled, skip positions it handles (entry < maxEntryPrice)
     const smartHedgingEnabled = hedgingConfig.enabled;
     this.stopLossStrategy = new UniversalStopLossStrategy({
@@ -233,7 +256,7 @@ export class Orchestrator {
       },
     });
 
-    // 5. Endgame Sweep - Buy high-confidence positions
+    // 6. Endgame Sweep - Buy high-confidence positions
     this.endgameStrategy = new EndgameSweepStrategy({
       client: config.client,
       logger: config.logger,
@@ -245,7 +268,7 @@ export class Orchestrator {
       },
     });
 
-    // 6. Scalp Take-Profit - Time-and-momentum-based profit taking
+    // 7. Scalp Take-Profit - Time-and-momentum-based profit taking
     // Enabled by default - takes profits on positions after holding 45-90 min
     // with 5%+ profit, or captures sudden spikes (15%+ in 10 min)
     // CRITICAL: Never forces time-exit on ≤60¢ entries that reach 90¢+
@@ -399,14 +422,22 @@ export class Orchestrator {
       }
 
       // Phase 2: Capital efficiency and redemption
-      // 1. SellEarly - CAPITAL EFFICIENCY - sell near-$1 ACTIVE positions before redemption
+      // 1. SellEarly - CAPITAL EFFICIENCY - sell near-$1 ACTIVE positions (99.9¢+)
       await this.runStrategyTimed(
         "SellEarly",
         () => this.sellEarlyStrategy.execute(),
         strategyTimings,
       );
 
-      // 2. Auto-Redeem - get money back from REDEEMABLE positions
+      // 2. AutoSell - NEAR-RESOLUTION EXIT - sell near-resolution ACTIVE positions (99¢+)
+      //    Also handles dispute window exit (99.9¢) for faster capital recovery
+      await this.runStrategyTimed(
+        "AutoSell",
+        () => this.autoSellStrategy.execute(),
+        strategyTimings,
+      );
+
+      // 3. Auto-Redeem - get money back from REDEEMABLE positions
       await this.runStrategyTimed(
         "AutoRedeem",
         () => this.autoRedeemStrategy.execute(),
@@ -414,14 +445,14 @@ export class Orchestrator {
       );
 
       // Phase 3: Risk management
-      // 3. Smart Hedging - protect losing positions by buying opposite side
+      // 4. Smart Hedging - protect losing positions by buying opposite side
       await this.runStrategyTimed(
         "Hedging",
         () => this.hedgingStrategy.execute(),
         strategyTimings,
       );
 
-      // 4. Universal Stop-Loss - sell positions exceeding max loss threshold
+      // 5. Universal Stop-Loss - sell positions exceeding max loss threshold
       await this.runStrategyTimed(
         "StopLoss",
         () => this.stopLossStrategy.execute(),
@@ -429,7 +460,7 @@ export class Orchestrator {
       );
 
       // Phase 4: Trading strategies
-      // 5. Scalp Take-Profit - time-based profit taking with momentum checks
+      // 6. Scalp Take-Profit - time-based profit taking with momentum checks
       // CRITICAL: Pass snapshot to ensure ScalpTakeProfit uses same data as PositionTracker
       await this.runStrategyTimed(
         "ScalpTakeProfit",
@@ -437,7 +468,7 @@ export class Orchestrator {
         strategyTimings,
       );
 
-      // 6. Endgame Sweep - buy high-confidence positions (85-99¢)
+      // 7. Endgame Sweep - buy high-confidence positions (85-99¢)
       // Pass reserve plan for RISK_OFF gating (blocks BUYs when reserves insufficient)
       await this.runStrategyTimed(
         "Endgame",

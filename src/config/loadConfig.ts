@@ -1471,6 +1471,37 @@ export type StrategyConfig = {
    * Default: 0 (DISABLED)
    */
   sellEarlyMinHoldSec: number;
+  /**
+   * Enable auto-sell strategy for near-resolution positions
+   * Sells positions at 99¢+ to free capital instead of waiting for redemption.
+   * Also handles dispute window exit at 99.9¢ for faster capital recovery.
+   * Default: true
+   */
+  autoSellEnabled: boolean;
+  /**
+   * Price threshold for auto-sell (0.0-1.0 scale, e.g., 0.99 = 99¢)
+   * Positions at or above this price will be sold.
+   * Default: 0.99
+   */
+  autoSellThreshold: number;
+  /**
+   * Price threshold for dispute window exit (0.0-1.0 scale, e.g., 0.999 = 99.9¢)
+   * Positions at or above this price will be sold immediately (no hold time).
+   * Default: 0.999
+   */
+  autoSellDisputeExitPrice: number;
+  /**
+   * Enable dispute window exit feature
+   * When true, positions at 99.9¢+ are sold immediately to avoid dispute hold wait.
+   * Default: true
+   */
+  autoSellDisputeExitEnabled: boolean;
+  /**
+   * Minimum hold time (seconds) before auto-sell can trigger
+   * Avoids conflict with endgame sweep which buys near-resolution positions.
+   * Default: 60 (1 minute)
+   */
+  autoSellMinHoldSec: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
   monitorConfig?: MonitorRuntimeConfig;
@@ -1915,6 +1946,44 @@ export function loadStrategyConfig(
             .SELL_EARLY_MIN_HOLD_SEC
         : undefined) ??
       0, // Default: 0 = DISABLED (no hold time gating)
+    // === AUTO-SELL STRATEGY (Near-Resolution Exit) ===
+    // AUTO_SELL_ENABLED: Enable selling near-resolution ACTIVE positions (99¢+)
+    autoSellEnabled:
+      parseBool(readEnv("AUTO_SELL_ENABLED", overrides) ?? "") ??
+      ("AUTO_SELL_ENABLED" in preset
+        ? (preset as { AUTO_SELL_ENABLED: boolean }).AUTO_SELL_ENABLED
+        : undefined) ??
+      true, // Default: enabled - free capital for near-resolution positions
+    // AUTO_SELL_THRESHOLD: Price threshold to trigger auto-sell (0.0-1.0 scale)
+    autoSellThreshold:
+      parseNumber(readEnv("AUTO_SELL_THRESHOLD", overrides) ?? "") ??
+      ("AUTO_SELL_THRESHOLD" in preset
+        ? (preset as { AUTO_SELL_THRESHOLD: number }).AUTO_SELL_THRESHOLD
+        : undefined) ??
+      0.99, // Default: 99¢ - sell positions near resolution
+    // AUTO_SELL_DISPUTE_EXIT_PRICE: Price for dispute window exit (0.0-1.0 scale)
+    autoSellDisputeExitPrice:
+      parseNumber(readEnv("AUTO_SELL_DISPUTE_EXIT_PRICE", overrides) ?? "") ??
+      ("AUTO_SELL_DISPUTE_EXIT_PRICE" in preset
+        ? (preset as { AUTO_SELL_DISPUTE_EXIT_PRICE: number })
+            .AUTO_SELL_DISPUTE_EXIT_PRICE
+        : undefined) ??
+      0.999, // Default: 99.9¢ - exit dispute window immediately
+    // AUTO_SELL_DISPUTE_EXIT_ENABLED: Enable dispute window exit feature
+    autoSellDisputeExitEnabled:
+      parseBool(readEnv("AUTO_SELL_DISPUTE_EXIT_ENABLED", overrides) ?? "") ??
+      ("AUTO_SELL_DISPUTE_EXIT_ENABLED" in preset
+        ? (preset as { AUTO_SELL_DISPUTE_EXIT_ENABLED: boolean })
+            .AUTO_SELL_DISPUTE_EXIT_ENABLED
+        : undefined) ??
+      true, // Default: enabled - avoid dispute hold wait
+    // AUTO_SELL_MIN_HOLD_SEC: Minimum hold time before auto-sell (in seconds)
+    autoSellMinHoldSec:
+      parseNumber(readEnv("AUTO_SELL_MIN_HOLD_SEC", overrides) ?? "") ??
+      ("AUTO_SELL_MIN_HOLD_SEC" in preset
+        ? (preset as { AUTO_SELL_MIN_HOLD_SEC: number }).AUTO_SELL_MIN_HOLD_SEC
+        : undefined) ??
+      60, // Default: 60 seconds - avoid conflict with endgame sweep
   };
 
   // Apply preset settings to environment for ARB and MONITOR config loaders

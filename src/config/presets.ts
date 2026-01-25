@@ -206,6 +206,16 @@ export const STRATEGY_PRESETS = {
     SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
     SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
     SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
+    /**
+     * AUTO-SELL - Near-Resolution Exit (Jan 2025)
+     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     * Also handles dispute window exit at 99.9¢ for faster capital recovery.
+     */
+    AUTO_SELL_ENABLED: false, // Disabled in "off" preset
+    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
+    AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
+    AUTO_SELL_MIN_HOLD_SEC: 60, // Avoid conflict with endgame sweep
   },
   conservative: {
     STRATEGY_ENABLED: true,
@@ -292,6 +302,15 @@ export const STRATEGY_PRESETS = {
     SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
     SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
     SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
+    /**
+     * AUTO-SELL - Near-Resolution Exit (Jan 2025)
+     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     */
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
+    AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
+    AUTO_SELL_MIN_HOLD_SEC: 60, // Conservative: wait 60s before selling
     // Rate limits
     ORDER_SUBMIT_MAX_PER_HOUR: 30,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
@@ -395,6 +414,15 @@ export const STRATEGY_PRESETS = {
     SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
     SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
     SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
+    /**
+     * AUTO-SELL - Near-Resolution Exit (Jan 2025)
+     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     */
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
+    AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
+    AUTO_SELL_MIN_HOLD_SEC: 60, // Balanced: wait 60s before selling
     // Rate limits (higher for more trades)
     ORDER_SUBMIT_MAX_PER_HOUR: 60,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
@@ -554,6 +582,17 @@ export const STRATEGY_PRESETS = {
     SELL_EARLY_MIN_LIQUIDITY_USD: 0, // DISABLED by default
     SELL_EARLY_MAX_SPREAD_CENTS: 0, // DISABLED by default
     SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
+
+    /**
+     * AUTO-SELL - Near-Resolution Exit (Jan 2025)
+     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     * Aggressive preset: shorter hold time for faster capital recovery.
+     */
+    AUTO_SELL_ENABLED: true,
+    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
+    AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
+    AUTO_SELL_MIN_HOLD_SEC: 30, // Aggressive: only 30s hold time
 
     /**
      * RATE LIMITS - HIGH THROUGHPUT
