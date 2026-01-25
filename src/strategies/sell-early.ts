@@ -247,20 +247,19 @@ export class SellEarlyStrategy {
 
   /**
    * Check if position is ACTIVE (not redeemable/resolved)
+   *
+   * IMPORTANT (Jan 2025): Only skip REDEEMABLE if there's actual proof from
+   * on-chain (ONCHAIN_DENOM) or Data API (DATA_API_FLAG). Internal flags without
+   * proof should NOT block selling - this ensures we can exit positions that
+   * might be incorrectly flagged as redeemable internally.
    */
   private isActivePosition(position: Position): boolean {
-    // NEVER sell REDEEMABLE positions - their orderbooks may be dead
-    if (position.redeemable === true) {
-      return false;
-    }
+    // Only skip if there's actual proof of redeemability (on-chain or API)
+    const hasRedeemableProof =
+      position.redeemableProofSource === "ONCHAIN_DENOM" ||
+      position.redeemableProofSource === "DATA_API_FLAG";
 
-    // Check position state if available
-    if (position.positionState && position.positionState !== "ACTIVE") {
-      return false;
-    }
-
-    // Check status field
-    if (position.status === "REDEEMABLE" || position.status === "RESOLVED") {
+    if (hasRedeemableProof) {
       return false;
     }
 
@@ -278,15 +277,26 @@ export class SellEarlyStrategy {
   ): Promise<"SOLD" | "ELIGIBLE_NOT_SOLD" | null> {
     const tokenIdShort = position.tokenId.slice(0, 12);
 
-    // === REDEEMABLE CHECK (redundant but explicit for logging) ===
-    if (
-      position.redeemable === true ||
-      position.status === "REDEEMABLE" ||
-      position.status === "RESOLVED"
-    ) {
+    // === REDEEMABLE CHECK (only skip if there's actual proof) ===
+    // Trust on-chain resolution (ONCHAIN_DENOM) or explicit API flag (DATA_API_FLAG)
+    // Don't skip if redeemable=true but proofSource is NONE (internal heuristic only)
+    const hasRedeemableProof =
+      position.redeemableProofSource === "ONCHAIN_DENOM" ||
+      position.redeemableProofSource === "DATA_API_FLAG";
+
+    if (hasRedeemableProof) {
       skipReasons.redeemable++;
       return null;
     }
+
+    // Build diagnostic info for logging: currentPrice, currentBidPrice, executionStatus in one line
+    const currentPriceCents = (position.currentPrice * 100).toFixed(1);
+    const bidPriceCents =
+      position.currentBidPrice !== undefined
+        ? (position.currentBidPrice * 100).toFixed(1)
+        : "N/A";
+    const execStatus = position.executionStatus ?? "unknown";
+    const diagInfo = `currentPrice=${currentPriceCents}¢ currentBidPrice=${bidPriceCents}¢ executionStatus=${execStatus}`;
 
     // === EXECUTION STATUS CHECK (Jan 2025 - Handle NOT_TRADABLE_ON_CLOB) ===
     // If position has executionStatus set, use it to skip non-tradable positions.
@@ -298,7 +308,7 @@ export class SellEarlyStrategy {
       skipReasons.noBid++;
       this.logSkipOnce(
         "NOT_TRADABLE",
-        `[SellEarly] skip tokenId=${tokenIdShort}... reason=NOT_TRADABLE_ON_CLOB (bookStatus=${position.bookStatus ?? "unknown"})`,
+        `[SellEarly] skip tokenId=${tokenIdShort}... reason=NOT_TRADABLE ${diagInfo} bookStatus=${position.bookStatus ?? "unknown"}`,
       );
       return null;
     }
@@ -308,7 +318,7 @@ export class SellEarlyStrategy {
       skipReasons.noBid++;
       this.logSkipOnce(
         "NO_BID",
-        `[SellEarly] skip tokenId=${tokenIdShort}... reason=NO_BID`,
+        `[SellEarly] skip tokenId=${tokenIdShort}... reason=NO_BID ${diagInfo}`,
       );
       return null;
     }
@@ -317,6 +327,11 @@ export class SellEarlyStrategy {
       position.currentBidPrice * SellEarlyStrategy.CENTS_TO_DECIMAL;
     if (bidCents < this.config.bidCents) {
       skipReasons.belowThreshold++;
+      // Log BELOW_THRESHOLD with diagnostic info (rate-limited)
+      this.logSkipOnce(
+        `BELOW_THRESHOLD:${tokenIdShort}`,
+        `[SellEarly] skip tokenId=${tokenIdShort}... reason=BELOW_THRESHOLD ${diagInfo} threshold=${this.config.bidCents}¢`,
+      );
       return null;
     }
 

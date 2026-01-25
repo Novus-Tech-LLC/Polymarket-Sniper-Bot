@@ -199,12 +199,23 @@ export class AutoSellStrategy {
   /**
    * Check if position is tradable (not redeemable, has valid execution status)
    * Returns skip reason if not tradable, or null if tradable
+   *
+   * IMPORTANT (Jan 2025): Only skip REDEEMABLE if there's actual proof from
+   * on-chain (ONCHAIN_DENOM) or Data API (DATA_API_FLAG). Internal flags without
+   * proof should NOT block selling - this ensures we can exit positions that
+   * might be incorrectly flagged as redeemable internally.
    */
   private checkTradability(
     position: Position,
   ): "REDEEMABLE" | "NOT_TRADABLE" | "NO_BID" | null {
-    // Filter 1: Skip REDEEMABLE positions - these go to AutoRedeem
-    if (position.redeemable === true) {
+    // Filter 1: Skip REDEEMABLE positions ONLY if there's actual proof
+    // Trust on-chain resolution (ONCHAIN_DENOM) or explicit API flag (DATA_API_FLAG)
+    // Don't skip if redeemable=true but proofSource is NONE (internal heuristic only)
+    const hasRedeemableProof =
+      position.redeemableProofSource === "ONCHAIN_DENOM" ||
+      position.redeemableProofSource === "DATA_API_FLAG";
+
+    if (hasRedeemableProof) {
       return "REDEEMABLE";
     }
 
@@ -245,26 +256,35 @@ export class AutoSellStrategy {
     // Check tradability (redeemable, execution status, bid availability)
     const tradabilityIssue = this.checkTradability(position);
     if (tradabilityIssue) {
+      // Build diagnostic info for logging: currentPrice, currentBidPrice, executionStatus in one line
+      const currentPriceCents = (position.currentPrice * 100).toFixed(1);
+      const bidPriceCents =
+        position.currentBidPrice !== undefined
+          ? (position.currentBidPrice * 100).toFixed(1)
+          : "N/A";
+      const execStatus = position.executionStatus ?? "unknown";
+      const diagInfo = `currentPrice=${currentPriceCents}¢ currentBidPrice=${bidPriceCents}¢ executionStatus=${execStatus}`;
+
       switch (tradabilityIssue) {
         case "REDEEMABLE":
           skipReasons.redeemable++;
           this.logSkipOnce(
             `REDEEMABLE:${tokenIdShort}`,
-            `[AutoSell] skip tokenId=${tokenIdShort}... reason=REDEEMABLE (route to AutoRedeem)`,
+            `[AutoSell] skip tokenId=${tokenIdShort}... reason=REDEEMABLE proofSource=${position.redeemableProofSource ?? "unknown"} (route to AutoRedeem) ${diagInfo}`,
           );
           break;
         case "NOT_TRADABLE":
           skipReasons.notTradable++;
           this.logSkipOnce(
             `NOT_TRADABLE:${tokenIdShort}`,
-            `[AutoSell] skip tokenId=${tokenIdShort}... reason=NOT_TRADABLE executionStatus=${position.executionStatus ?? "unknown"} bookStatus=${position.bookStatus ?? "unknown"}`,
+            `[AutoSell] skip tokenId=${tokenIdShort}... reason=NOT_TRADABLE ${diagInfo} bookStatus=${position.bookStatus ?? "unknown"}`,
           );
           break;
         case "NO_BID":
           skipReasons.noBid++;
           this.logSkipOnce(
             `NO_BID:${tokenIdShort}`,
-            `[AutoSell] skip tokenId=${tokenIdShort}... reason=NO_BID (currentBidPrice undefined, cannot sell)`,
+            `[AutoSell] skip tokenId=${tokenIdShort}... reason=NO_BID ${diagInfo} (cannot sell without bid)`,
           );
           break;
       }
