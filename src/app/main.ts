@@ -263,6 +263,9 @@ async function main(): Promise<void> {
       // Pass position tracker to prevent buying positions we already own (avoids stacking)
       // NOTE: Does NOT block hedging - hedges use a different tokenId (opposite outcome)
       positionTracker: orchestrator?.getPositionTracker(),
+      // Pass dynamic reserves controller to gate BUY orders when reserves are insufficient
+      // NOTE: Does NOT block hedging/SELL paths since they help recover reserves
+      dynamicReserves: orchestrator?.getDynamicReserves(),
     });
 
     const monitor = new MempoolMonitorService({

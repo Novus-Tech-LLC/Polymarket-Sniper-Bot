@@ -7,13 +7,19 @@
  *
  * RESERVE MODEL:
  * A) Base reserve: max(20, 0.05 * equityUsd)
- * B) Per-position reserve based on P&L tier:
+ * B) Per-position reserve based on P&L tier and win probability:
  *    - Near-resolution or redeemable: 0
+ *    - High win probability (currentPrice >= 85¢): min(0.5, notional * 0.02)
  *    - Catastrophic loss (>=50%): min(HEDGE_CAP_USD, notional * 1.0)
  *    - Hedge trigger loss (>=20%): min(HEDGE_CAP_USD, notional * 0.5)
  *    - Normal: min(2, notional * 0.1)
  * C) Liquidity penalty: 1.5x if NOT_TRADABLE_ON_CLOB
  * D) Total capped at MAX_RESERVE_USD
+ *
+ * HIGH WIN PROBABILITY TIER:
+ * When a position's current price is high (≥85¢ by default), the probability
+ * of winning is high, so minimal reserves are needed regardless of entry price
+ * or P&L. This reflects the reduced risk of positions likely to resolve in our favor.
  *
  * GATING BEHAVIOR:
  * - RISK_OFF mode: block new BUY orders, allow SELL/hedge/redeem
@@ -64,6 +70,15 @@ export interface DynamicReservesConfig {
 
   /** Cap per-position normal reserve in USD (default: 2) */
   normalReserveCapUsd: number;
+
+  /** Price threshold for high win probability tier (default: 0.85 = 85¢) */
+  highWinProbPriceThreshold: number;
+
+  /** Reserve multiplier for high win probability positions (default: 0.02 = 2% of notional) */
+  highWinProbReservePct: number;
+
+  /** Cap per-position high win probability reserve in USD (default: 0.5) */
+  highWinProbReserveCapUsd: number;
 }
 
 /**
@@ -80,6 +95,10 @@ export const DEFAULT_RESERVES_CONFIG: DynamicReservesConfig = {
   illiquidityMultiplier: 1.5,
   normalReservePct: 0.1,
   normalReserveCapUsd: 2,
+  // High win probability positions (≥85¢) need minimal reserves
+  highWinProbPriceThreshold: 0.85,
+  highWinProbReservePct: 0.02,
+  highWinProbReserveCapUsd: 0.5,
 };
 
 // ============================================================
@@ -99,7 +118,7 @@ export interface PositionReserve {
   marketId: string;
   notionalUsd: number;
   pnlPct: number;
-  tier: "NONE" | "NORMAL" | "HEDGE" | "CATASTROPHIC";
+  tier: "NONE" | "HIGH_WIN_PROB" | "NORMAL" | "HEDGE" | "CATASTROPHIC";
   baseReserve: number;
   liquidityMultiplier: number;
   finalReserve: number;
@@ -405,7 +424,7 @@ export class DynamicReservesController {
   }
 
   /**
-   * Compute per-position reserves based on P&L tier and liquidity
+   * Compute per-position reserves based on P&L tier, win probability, and liquidity
    */
   private computePositionReserves(
     positions: readonly Position[],
@@ -430,7 +449,7 @@ export class DynamicReservesController {
       }
 
       // Determine tier and base reserve
-      let tier: "NORMAL" | "HEDGE" | "CATASTROPHIC";
+      let tier: "HIGH_WIN_PROB" | "NORMAL" | "HEDGE" | "CATASTROPHIC";
       let baseReserve: number;
       let reason: string;
 
@@ -438,7 +457,18 @@ export class DynamicReservesController {
       // Convert to absolute value for clearer threshold comparisons
       const lossPct = Math.abs(Math.min(0, pnlPct)); // Only count losses (pnlPct <= 0)
 
-      if (lossPct >= this.config.catastrophicLossPct) {
+      // HIGH WIN PROBABILITY CHECK (takes precedence over loss tiers)
+      // When current price is high (e.g., ≥85¢), the probability of winning is high,
+      // so we need minimal reserves regardless of entry price or P&L.
+      // This reflects the reduced risk of positions likely to resolve in our favor.
+      if (pos.currentPrice >= this.config.highWinProbPriceThreshold) {
+        tier = "HIGH_WIN_PROB";
+        baseReserve = Math.min(
+          this.config.highWinProbReserveCapUsd,
+          notionalUsd * this.config.highWinProbReservePct,
+        );
+        reason = `HIGH_WIN_PROB_${(pos.currentPrice * 100).toFixed(0)}¢`;
+      } else if (lossPct >= this.config.catastrophicLossPct) {
         // Catastrophic loss tier: assume worst-case hedge attempt
         tier = "CATASTROPHIC";
         baseReserve = Math.min(this.config.hedgeCapUsd, notionalUsd * 1.0);

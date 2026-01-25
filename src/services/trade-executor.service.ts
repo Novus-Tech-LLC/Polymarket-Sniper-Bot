@@ -4,6 +4,7 @@ import type { RuntimeEnv } from "../config/env";
 import type { Logger } from "../utils/logger.util";
 import type { TradeSignal } from "../domain/trade.types";
 import type { PositionTracker } from "../strategies/position-tracker";
+import type { DynamicReservesController } from "../risk";
 import { postOrder } from "../utils/post-order.util";
 import { getUsdBalanceApprox, getPolBalance } from "../utils/get-balance.util";
 import { httpGet } from "../utils/fetch-data.util";
@@ -24,6 +25,12 @@ export type TradeExecutorDeps = {
    * Does NOT block hedging since hedges use a different tokenId (opposite outcome).
    */
   positionTracker?: PositionTracker;
+  /**
+   * Optional dynamic reserves controller for reserve-based gating.
+   * When provided, blocks BUY orders when reserves are insufficient (shortfall > 0).
+   * Does NOT block hedging/SELL paths since they help recover reserves.
+   */
+  dynamicReserves?: DynamicReservesController;
 };
 
 interface Position {
@@ -64,6 +71,24 @@ export class TradeExecutorService {
         `[Frontrun] ⏭️ Skipping SELL copy trade - only BUY orders are copied. Use your own exit strategies. Market: ${signal.marketId}`,
       );
       return;
+    }
+
+    // === DYNAMIC RESERVES CHECK ===
+    // Block BUY orders when reserves are insufficient (shortfall > 0).
+    // This prevents overtrading when we lack hedge/exit reserves.
+    // SELL/hedging paths are NOT blocked since they help recover reserves.
+    if (signal.side === "BUY" && this.deps.dynamicReserves) {
+      const gateResult = this.deps.dynamicReserves.canOpenNewBuy();
+      if (!gateResult.allowed) {
+        logger.warn(
+          `[Frontrun] 🚫 BUY blocked by dynamic reserves - RISK_OFF mode. ` +
+            `Reserve required: $${gateResult.reserveRequired.toFixed(2)}, ` +
+            `Available: $${gateResult.availableCash.toFixed(2)}, ` +
+            `Shortfall: $${gateResult.shortfall.toFixed(2)}. ` +
+            `Market: ${signal.marketId}`,
+        );
+        return;
+      }
     }
 
     // === MINIMUM BUY PRICE CHECK ===

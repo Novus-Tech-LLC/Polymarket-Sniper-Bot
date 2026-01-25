@@ -642,3 +642,219 @@ test("frontrun blocks low-price BUY when price exceeds scalpLowPriceThreshold", 
     "postOrder should NOT be called when price exceeds scalp threshold and is below minBuyPrice",
   );
 });
+
+test("frontrun blocks BUY when dynamicReserves reports RISK_OFF", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - should NOT be called since reserves are insufficient
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  // Mock DynamicReservesController that reports RISK_OFF
+  const mockDynamicReserves = {
+    canOpenNewBuy: () => ({
+      allowed: false,
+      reason: "RISK_OFF_RESERVE_SHORTFALL",
+      reserveRequired: 100,
+      availableCash: 30,
+      shortfall: 70,
+      mode: "RISK_OFF" as const,
+    }),
+  };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: baseEnv,
+    logger,
+    dynamicReserves: mockDynamicReserves as never,
+  });
+
+  // Try to BUY - should be blocked due to RISK_OFF
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-1",
+    tokenId: "token-1",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.5,
+    timestamp: Date.now(),
+  });
+
+  // Verify the BUY was blocked
+  assert.ok(
+    logs.some((line) => line.includes("BUY blocked by dynamic reserves")),
+    "Should log that BUY is blocked by dynamic reserves",
+  );
+  assert.ok(
+    logs.some((line) => line.includes("Reserve required: $100.00")),
+    "Should log reserve required amount",
+  );
+  assert.ok(
+    logs.some((line) => line.includes("Available: $30.00")),
+    "Should log available cash amount",
+  );
+  assert.ok(
+    logs.some((line) => line.includes("Shortfall: $70.00")),
+    "Should log shortfall amount",
+  );
+  assert.equal(
+    postOrderCalled,
+    false,
+    "postOrder should NOT be called when dynamicReserves reports RISK_OFF",
+  );
+});
+
+test("frontrun allows BUY when dynamicReserves reports RISK_ON", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - SHOULD be called since reserves are sufficient
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  // Mock DynamicReservesController that reports RISK_ON
+  const mockDynamicReserves = {
+    canOpenNewBuy: () => ({
+      allowed: true,
+      reason: "RISK_ON",
+      reserveRequired: 50,
+      availableCash: 100,
+      shortfall: 0,
+      mode: "RISK_ON" as const,
+    }),
+  };
+
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: baseEnv,
+    logger,
+    dynamicReserves: mockDynamicReserves as never,
+  });
+
+  // Try to BUY - should be allowed
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-1",
+    tokenId: "token-1",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.5,
+    timestamp: Date.now(),
+  });
+
+  // Verify the BUY was executed
+  assert.ok(
+    !logs.some((line) => line.includes("BUY blocked by dynamic reserves")),
+    "Should NOT log that BUY is blocked",
+  );
+  assert.ok(
+    postOrderCalled,
+    "postOrder should be called when dynamicReserves reports RISK_ON",
+  );
+});
+
+test("frontrun allows BUY when no dynamicReserves is provided", async () => {
+  const logs: string[] = [];
+  const logger = {
+    info: (message: string) => logs.push(message),
+    warn: (message: string) => logs.push(message),
+    error: (message: string) => logs.push(message),
+    debug: (message: string) => logs.push(message),
+  };
+
+  (
+    balanceUtils as {
+      getUsdBalanceApprox: typeof balanceUtils.getUsdBalanceApprox;
+    }
+  ).getUsdBalanceApprox = async () => 500;
+  (
+    balanceUtils as { getPolBalance: typeof balanceUtils.getPolBalance }
+  ).getPolBalance = async () => 5;
+
+  // Mock postOrder - SHOULD be called
+  let postOrderCalled = false;
+  (postOrderUtils as { postOrder: typeof postOrderUtils.postOrder }).postOrder =
+    async () => {
+      postOrderCalled = true;
+      return {
+        status: "submitted",
+        statusCode: 200,
+        orderId: "order-123",
+      };
+    };
+
+  // No dynamicReserves provided - should allow BUY
+  const executor = new TradeExecutorService({
+    client: { wallet: {} } as never,
+    proxyWallet: "0x" + "11".repeat(20),
+    env: baseEnv,
+    logger,
+    // No dynamicReserves
+  });
+
+  await executor.frontrunTrade({
+    trader: "0xabc",
+    marketId: "market-1",
+    tokenId: "token-1",
+    outcome: "YES",
+    side: "BUY",
+    sizeUsd: 100,
+    price: 0.5,
+    timestamp: Date.now(),
+  });
+
+  // Verify the BUY was executed
+  assert.ok(
+    postOrderCalled,
+    "postOrder should be called when no dynamicReserves is provided (backward compatibility)",
+  );
+});

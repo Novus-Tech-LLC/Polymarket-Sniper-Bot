@@ -469,4 +469,162 @@ describe("DynamicReservesController", () => {
       assert.equal(tokenReserve?.baseReserve, 50);
     });
   });
+
+  describe("high win probability tier", () => {
+    test("positions with high current price get HIGH_WIN_PROB tier", () => {
+      const controller = createDynamicReservesController(mockLogger);
+      // Position at 90¢ (above 85¢ threshold)
+      const positions = [
+        createMockPosition({
+          tokenId: "token-1",
+          size: 100,
+          currentPrice: 0.9, // 90¢ - high win probability
+          entryPrice: 0.5, // Entry at 50¢
+          pnlPct: 80, // 80% profit
+        }),
+      ];
+      const snapshot = createMockSnapshot(positions);
+      const balances: WalletBalances = { usdcBalance: 50 };
+
+      const plan = controller.computeReservePlan(snapshot, balances);
+
+      const tokenReserve = plan.topPositionReserves.find(
+        (r) => r.tokenId === "token-1",
+      );
+      assert.equal(tokenReserve?.tier, "HIGH_WIN_PROB");
+      assert.ok(tokenReserve?.reason.includes("HIGH_WIN_PROB"));
+    });
+
+    test("high win probability positions require minimal reserves", () => {
+      const controller = createDynamicReservesController(mockLogger);
+      // Position at 90¢
+      const positions = [
+        createMockPosition({
+          tokenId: "token-1",
+          size: 100,
+          currentPrice: 0.9,
+          pnlPct: 10,
+        }),
+      ];
+      const snapshot = createMockSnapshot(positions);
+      const balances: WalletBalances = { usdcBalance: 50 };
+
+      const plan = controller.computeReservePlan(snapshot, balances);
+
+      const tokenReserve = plan.topPositionReserves.find(
+        (r) => r.tokenId === "token-1",
+      );
+      // HIGH_WIN_PROB tier = min(0.5, notional * 0.02)
+      // notional = 100 * 0.9 = 90
+      // reserve = min(0.5, 90 * 0.02) = min(0.5, 1.8) = 0.5
+      assert.equal(tokenReserve?.baseReserve, 0.5);
+      assert.ok(tokenReserve!.baseReserve < 2); // Much less than NORMAL tier
+    });
+
+    test("high win probability overrides loss-based tiers", () => {
+      const controller = createDynamicReservesController(mockLogger);
+      // Position bought at $1 entry (way overpaid), now at 90¢ - but still high probability of winning
+      // Without the HIGH_WIN_PROB tier, this would be NORMAL or worse due to P&L loss
+      const positions = [
+        createMockPosition({
+          tokenId: "token-1",
+          size: 100,
+          currentPrice: 0.9, // 90¢ - high win probability
+          entryPrice: 1.0, // Overpaid
+          pnlPct: -10, // 10% loss
+        }),
+      ];
+      const snapshot = createMockSnapshot(positions);
+      const balances: WalletBalances = { usdcBalance: 50 };
+
+      const plan = controller.computeReservePlan(snapshot, balances);
+
+      const tokenReserve = plan.topPositionReserves.find(
+        (r) => r.tokenId === "token-1",
+      );
+      // Even with a loss, should be HIGH_WIN_PROB because currentPrice is high
+      assert.equal(tokenReserve?.tier, "HIGH_WIN_PROB");
+    });
+
+    test("positions below threshold use normal loss-based tiers", () => {
+      const controller = createDynamicReservesController(mockLogger);
+      // Position at 70¢ (below 85¢ threshold)
+      const positions = [
+        createMockPosition({
+          tokenId: "token-1",
+          size: 100,
+          currentPrice: 0.7, // 70¢ - below threshold
+          pnlPct: 5,
+        }),
+      ];
+      const snapshot = createMockSnapshot(positions);
+      const balances: WalletBalances = { usdcBalance: 50 };
+
+      const plan = controller.computeReservePlan(snapshot, balances);
+
+      const tokenReserve = plan.topPositionReserves.find(
+        (r) => r.tokenId === "token-1",
+      );
+      // Should be NORMAL tier, not HIGH_WIN_PROB
+      assert.equal(tokenReserve?.tier, "NORMAL");
+    });
+
+    test("custom high win probability threshold is respected", () => {
+      const controller = createDynamicReservesController(mockLogger, {
+        highWinProbPriceThreshold: 0.95, // Higher threshold
+      });
+      // Position at 90¢
+      const positions = [
+        createMockPosition({
+          tokenId: "token-1",
+          size: 100,
+          currentPrice: 0.9, // 90¢ - below custom 95¢ threshold
+          pnlPct: 5,
+        }),
+      ];
+      const snapshot = createMockSnapshot(positions);
+      const balances: WalletBalances = { usdcBalance: 50 };
+
+      const plan = controller.computeReservePlan(snapshot, balances);
+
+      const tokenReserve = plan.topPositionReserves.find(
+        (r) => r.tokenId === "token-1",
+      );
+      // Should be NORMAL tier since 90¢ < 95¢
+      assert.equal(tokenReserve?.tier, "NORMAL");
+    });
+
+    test("high win probability reduces total reserve requirement", () => {
+      const controller = createDynamicReservesController(mockLogger);
+      // Two positions: one at 90¢ (high prob), one at 50¢ (normal)
+      const positions = [
+        createMockPosition({
+          tokenId: "token-high",
+          size: 100,
+          currentPrice: 0.9, // High win prob
+          pnlPct: 10,
+        }),
+        createMockPosition({
+          tokenId: "token-normal",
+          size: 100,
+          currentPrice: 0.5, // Normal
+          pnlPct: 5,
+        }),
+      ];
+      const snapshot = createMockSnapshot(positions);
+      const balances: WalletBalances = { usdcBalance: 50 };
+
+      const plan = controller.computeReservePlan(snapshot, balances);
+
+      const highReserve = plan.topPositionReserves.find(
+        (r) => r.tokenId === "token-high",
+      );
+      const normalReserve = plan.topPositionReserves.find(
+        (r) => r.tokenId === "token-normal",
+      );
+
+      // High win prob reserve should be much lower than normal
+      assert.ok(highReserve!.finalReserve < normalReserve!.finalReserve);
+    });
+  });
 });
