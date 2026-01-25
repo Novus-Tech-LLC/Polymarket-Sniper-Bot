@@ -928,3 +928,373 @@ describe("Auto-Redeem Continuous On-Chain Preflight", () => {
     });
   });
 });
+
+/**
+ * Tests for the new getRedeemablePositions() flow
+ * (Jan 2025: Direct Data API fetch, min-value filter, cooldown filter, parallel on-chain checks)
+ *
+ * These tests verify the end-to-end redeemable position selection logic
+ * by simulating the behavior of fetchPositionsFromDataApi, shouldSkipRedemption,
+ * and checkOnChainResolved.
+ */
+describe("Auto-Redeem getRedeemablePositions Flow", () => {
+  // Mock position type matching RedeemablePosition
+  interface MockRedeemablePosition {
+    tokenId: string;
+    marketId: string;
+    size: number;
+    currentPrice: number;
+  }
+
+  // Simulate the filtering logic from getRedeemablePositions
+  async function simulateGetRedeemablePositions(
+    apiPositions: MockRedeemablePosition[],
+    minPositionUsd: number,
+    cooldownMarkets: Set<string>,
+    onChainResolved: Map<string, boolean | "reject">,
+  ): Promise<MockRedeemablePosition[]> {
+    // 1. Simulate fetchPositionsFromDataApi - returns all positions
+    const allPositions = apiPositions;
+
+    if (allPositions.length === 0) {
+      return [];
+    }
+
+    // 2. Filter by minimum value threshold
+    const aboveMinValue = allPositions.filter(
+      (pos) => pos.size * pos.currentPrice >= minPositionUsd,
+    );
+
+    // 3. Filter out positions in cooldown
+    const notInCooldown = aboveMinValue.filter(
+      (pos) => !cooldownMarkets.has(pos.marketId),
+    );
+
+    if (notInCooldown.length === 0) {
+      return [];
+    }
+
+    // 4. Check on-chain payoutDenominator in parallel
+    const checkResults = await Promise.allSettled(
+      notInCooldown.map(async (pos) => {
+        const resolvedStatus = onChainResolved.get(pos.marketId);
+        if (resolvedStatus === "reject") {
+          throw new Error(`RPC error for ${pos.marketId}`);
+        }
+        return {
+          position: pos,
+          isResolved: resolvedStatus === true,
+        };
+      }),
+    );
+
+    // 5. Filter to only resolved positions
+    const redeemable: MockRedeemablePosition[] = [];
+    for (const result of checkResults) {
+      if (result.status === "fulfilled" && result.value.isResolved) {
+        redeemable.push(result.value.position);
+      }
+    }
+
+    return redeemable;
+  }
+
+  describe("Minimum Value Filter", () => {
+    test("should exclude positions below minPositionUsd", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 }, // $10
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 1, currentPrice: 0.5 },  // $0.50
+        { tokenId: "t3", marketId: "0x" + "3".repeat(64), size: 100, currentPrice: 0.01 }, // $1.00
+      ];
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],
+        ["0x" + "2".repeat(64), true],
+        ["0x" + "3".repeat(64), true],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        5.0, // minPositionUsd = $5
+        new Set(),
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 1, "Should only include positions above $5");
+      assert.strictEqual(result[0].tokenId, "t1", "Should include the $10 position");
+    });
+
+    test("should include positions at exactly minPositionUsd", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 5, currentPrice: 1.0 }, // Exactly $5
+      ];
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        5.0,
+        new Set(),
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 1, "Should include position at exactly minPositionUsd");
+    });
+
+    test("should return empty array when all positions are below minPositionUsd", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 1, currentPrice: 0.5 },
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 2, currentPrice: 0.1 },
+      ];
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],
+        ["0x" + "2".repeat(64), true],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        5.0,
+        new Set(),
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 0, "Should return empty array");
+    });
+  });
+
+  describe("Cooldown Filter", () => {
+    test("should skip markets in cooldown", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t3", marketId: "0x" + "3".repeat(64), size: 10, currentPrice: 1.0 },
+      ];
+
+      const cooldownMarkets = new Set(["0x" + "2".repeat(64)]); // Market 2 is in cooldown
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],
+        ["0x" + "2".repeat(64), true], // Would be resolved, but in cooldown
+        ["0x" + "3".repeat(64), true],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        0.01,
+        cooldownMarkets,
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 2, "Should skip 1 market in cooldown");
+      assert.ok(
+        !result.some((p) => p.marketId === "0x" + "2".repeat(64)),
+        "Should not include market in cooldown",
+      );
+    });
+
+    test("should return empty array when all markets are in cooldown", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 10, currentPrice: 1.0 },
+      ];
+
+      const cooldownMarkets = new Set([
+        "0x" + "1".repeat(64),
+        "0x" + "2".repeat(64),
+      ]);
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],
+        ["0x" + "2".repeat(64), true],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        0.01,
+        cooldownMarkets,
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 0, "Should return empty when all in cooldown");
+    });
+  });
+
+  describe("On-Chain payoutDenominator Check", () => {
+    test("should only return positions with payoutDenominator > 0", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t3", marketId: "0x" + "3".repeat(64), size: 10, currentPrice: 1.0 },
+      ];
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],  // Resolved
+        ["0x" + "2".repeat(64), false], // NOT resolved (payoutDenominator == 0)
+        ["0x" + "3".repeat(64), true],  // Resolved
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        0.01,
+        new Set(),
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 2, "Should only include resolved positions");
+      assert.ok(
+        result.some((p) => p.tokenId === "t1"),
+        "Should include first resolved position",
+      );
+      assert.ok(
+        result.some((p) => p.tokenId === "t3"),
+        "Should include third resolved position",
+      );
+      assert.ok(
+        !result.some((p) => p.tokenId === "t2"),
+        "Should NOT include unresolved position",
+      );
+    });
+
+    test("should return empty array when no positions are resolved on-chain", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 10, currentPrice: 1.0 },
+      ];
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), false],
+        ["0x" + "2".repeat(64), false],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        0.01,
+        new Set(),
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 0, "Should return empty when none are resolved");
+    });
+  });
+
+  describe("Promise.allSettled Error Handling", () => {
+    test("should handle rejected promises gracefully and continue with others", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t3", marketId: "0x" + "3".repeat(64), size: 10, currentPrice: 1.0 },
+      ];
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],     // Resolved
+        ["0x" + "2".repeat(64), "reject"], // RPC error - will reject
+        ["0x" + "3".repeat(64), true],     // Resolved
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        0.01,
+        new Set(),
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 2, "Should include resolved positions despite one rejection");
+      assert.ok(
+        result.some((p) => p.tokenId === "t1"),
+        "Should include first resolved position",
+      );
+      assert.ok(
+        result.some((p) => p.tokenId === "t3"),
+        "Should include third resolved position",
+      );
+      assert.ok(
+        !result.some((p) => p.tokenId === "t2"),
+        "Should NOT include position with rejected check",
+      );
+    });
+
+    test("should return empty array when all on-chain checks reject", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 },
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 10, currentPrice: 1.0 },
+      ];
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), "reject"],
+        ["0x" + "2".repeat(64), "reject"],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        0.01,
+        new Set(),
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 0, "Should return empty when all checks reject");
+    });
+  });
+
+  describe("Combined Filters", () => {
+    test("should correctly apply all filters in sequence", async () => {
+      const apiPositions: MockRedeemablePosition[] = [
+        // Position 1: Above min, not in cooldown, resolved - SHOULD BE INCLUDED
+        { tokenId: "t1", marketId: "0x" + "1".repeat(64), size: 10, currentPrice: 1.0 }, // $10
+        // Position 2: Below min - filtered out early
+        { tokenId: "t2", marketId: "0x" + "2".repeat(64), size: 1, currentPrice: 0.1 },  // $0.10
+        // Position 3: Above min, in cooldown - filtered out
+        { tokenId: "t3", marketId: "0x" + "3".repeat(64), size: 10, currentPrice: 1.0 }, // $10
+        // Position 4: Above min, not in cooldown, NOT resolved - filtered out by on-chain check
+        { tokenId: "t4", marketId: "0x" + "4".repeat(64), size: 10, currentPrice: 1.0 }, // $10
+        // Position 5: Above min, not in cooldown, resolved - SHOULD BE INCLUDED
+        { tokenId: "t5", marketId: "0x" + "5".repeat(64), size: 5, currentPrice: 2.0 },  // $10
+        // Position 6: Above min, not in cooldown, RPC error - filtered out
+        { tokenId: "t6", marketId: "0x" + "6".repeat(64), size: 10, currentPrice: 1.0 }, // $10
+      ];
+
+      const cooldownMarkets = new Set(["0x" + "3".repeat(64)]);
+
+      const onChainResolved = new Map<string, boolean | "reject">([
+        ["0x" + "1".repeat(64), true],
+        ["0x" + "4".repeat(64), false],
+        ["0x" + "5".repeat(64), true],
+        ["0x" + "6".repeat(64), "reject"],
+      ]);
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        5.0, // $5 minimum
+        cooldownMarkets,
+        onChainResolved,
+      );
+
+      assert.strictEqual(result.length, 2, "Should only include 2 positions that pass all filters");
+      assert.ok(
+        result.some((p) => p.tokenId === "t1"),
+        "Should include t1 (above min, not in cooldown, resolved)",
+      );
+      assert.ok(
+        result.some((p) => p.tokenId === "t5"),
+        "Should include t5 (above min, not in cooldown, resolved)",
+      );
+    });
+  });
+
+  describe("Empty Data API Response", () => {
+    test("should return empty array when Data API returns no positions", async () => {
+      const apiPositions: MockRedeemablePosition[] = [];
+
+      const result = await simulateGetRedeemablePositions(
+        apiPositions,
+        0.01,
+        new Set(),
+        new Map(),
+      );
+
+      assert.strictEqual(result.length, 0, "Should return empty array");
+    });
+  });
+});
