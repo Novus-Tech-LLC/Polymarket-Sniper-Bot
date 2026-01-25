@@ -465,22 +465,36 @@ export class SmartHedgingStrategy {
       }
 
       // === CRITICAL: P&L TRUST CHECK ===
-      // NEVER hedge or liquidate positions with untrusted P&L.
-      // Acting on invalid data can cause selling winners and keeping losers.
+      // For normal losses, skip positions with untrusted P&L to avoid selling winners.
+      // EXCEPTION: For CATASTROPHIC losses (>= forceLiquidationPct), allow action even with
+      // untrusted P&L because the risk of inaction is greater than the risk of acting on
+      // imperfect data. A 50% loss is a 50% loss regardless of P&L source precision.
       if (!position.pnlTrusted) {
-        // Log at warn level for significant losses so users know why hedging is blocked
         const lossPct = Math.abs(position.pnlPct);
-        if (lossPct >= this.config.triggerLossPct) {
+        const isCatastrophicLoss = lossPct >= this.config.forceLiquidationPct;
+        
+        if (isCatastrophicLoss) {
+          // CATASTROPHIC LOSS with untrusted P&L - ALLOW hedging/liquidation with warning
+          // The risk of doing nothing is greater than the risk of acting on imperfect data
+          this.logger.warn(
+            `[SmartHedging] 🚨 CATASTROPHIC LOSS (${lossPct.toFixed(1)}% >= ${this.config.forceLiquidationPct}%) with untrusted P&L ` +
+            `(${position.pnlUntrustedReason ?? "unknown reason"}) - PROCEEDING WITH HEDGE/LIQUIDATION despite data uncertainty`,
+          );
+          // Fall through to continue processing - don't skip
+        } else if (lossPct >= this.config.triggerLossPct) {
+          // Significant loss but not catastrophic - log warning but still skip
           this.logger.warn(
             `[SmartHedging] ⚠️ Skip hedge (UNTRUSTED_PNL): ${position.side} ${tokenIdShort}... at ${lossPct.toFixed(1)}% loss has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"}) - CANNOT HEDGE until P&L is trusted`,
           );
+          skipAggregator.add(tokenIdShort, "untrusted_pnl");
+          continue;
         } else {
           this.logger.debug(
             `[SmartHedging] 📋 Skip hedge (UNTRUSTED_PNL): ${position.side} position has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"})`,
           );
+          skipAggregator.add(tokenIdShort, "untrusted_pnl");
+          continue;
         }
-        skipAggregator.add(tokenIdShort, "untrusted_pnl");
-        continue;
       }
 
       // === EXECUTION STATUS CHECK (Jan 2025 - Handle NOT_TRADABLE_ON_CLOB) ===
