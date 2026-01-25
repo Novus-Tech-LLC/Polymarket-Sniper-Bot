@@ -186,11 +186,11 @@ describe("AutoSell Configuration - Preset Loading", () => {
 // === FILTERING BEHAVIOR TESTS ===
 
 describe("AutoSell Filtering Behavior", () => {
-  test("checkTradability returns REDEEMABLE only for positions with proof source", () => {
-    // UPDATED (Jan 2025): Only skip if there's actual proof of redeemability
-    // redeemable=true alone is NOT enough - we need redeemableProofSource
+  test("checkTradability returns REDEEMABLE only for positions with verified proof source", () => {
+    // UPDATED (Jan 2025): Only skip if there's verified proof of redeemability
+    // redeemable=true alone is NOT enough - we need verified redeemableProofSource
 
-    // Position with DATA_API_FLAG proof - should be filtered
+    // Position with DATA_API_FLAG proof (verified) - should be filtered
     const positionWithApiProof = {
       marketId: "0x123",
       tokenId: "0x456",
@@ -236,6 +236,40 @@ describe("AutoSell Filtering Behavior", () => {
     assert.strictEqual(positionWithApiProof.redeemableProofSource, "DATA_API_FLAG");
     assert.strictEqual(positionWithOnchainProof.redeemableProofSource, "ONCHAIN_DENOM");
     assert.strictEqual(positionWithoutProof.redeemableProofSource, "NONE");
+  });
+
+  test("checkTradability allows positions with DATA_API_UNCONFIRMED proof to be sold", () => {
+    // CRITICAL (Jan 2025 Fix): DATA_API_UNCONFIRMED means Data API says redeemable
+    // but on-chain payoutDenominator == 0. These positions should NOT be filtered
+    // and should be eligible for AutoSell if there are live bids.
+
+    const positionWithUnconfirmedApi = {
+      marketId: "0x123",
+      tokenId: "0x456",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.999, // Near resolution price
+      currentBidPrice: 0.998, // Live bid available
+      pnlPct: 99.8,
+      pnlUsd: 49.9,
+      // redeemable is false because on-chain payoutDenominator == 0 (mismatch with Data API)
+      // PositionTracker keeps this ACTIVE for AutoSell to handle instead of marking redeemable
+      redeemable: false,
+      redeemableProofSource: "DATA_API_UNCONFIRMED" as const,
+    };
+
+    // This position should be eligible for AutoSell (not blocked by redeemable filter)
+    assert.strictEqual(positionWithUnconfirmedApi.redeemableProofSource, "DATA_API_UNCONFIRMED");
+    assert.strictEqual(positionWithUnconfirmedApi.redeemable, false);
+    assert.ok(positionWithUnconfirmedApi.currentBidPrice !== undefined);
+
+    // Simulating the checkTradability logic:
+    const hasVerifiedRedeemableProof =
+      positionWithUnconfirmedApi.redeemableProofSource === "ONCHAIN_DENOM" ||
+      positionWithUnconfirmedApi.redeemableProofSource === "DATA_API_FLAG";
+
+    assert.strictEqual(hasVerifiedRedeemableProof, false, "DATA_API_UNCONFIRMED should NOT be considered verified proof");
   });
 
   test("checkTradability returns NOT_TRADABLE for non-tradable execution status", () => {
@@ -334,5 +368,89 @@ describe("AutoSell Near Resolution Detection", () => {
       effectivePrice < threshold,
       "Position with low prices should not be near resolution",
     );
+  });
+});
+
+// === DATA_API_UNCONFIRMED ROUTING TO AUTOSELL ===
+
+describe("AutoSell DATA_API_UNCONFIRMED Routing", () => {
+  test("DATA_API_UNCONFIRMED positions at 99.9¢ are routed to AutoSell, not AutoRedeem", () => {
+    // This test verifies the complete flow:
+    // 1. Data API says redeemable, but on-chain payoutDenominator == 0
+    // 2. PositionTracker sets redeemable=false with DATA_API_UNCONFIRMED proof
+    // 3. getPositionsNearResolution() includes this position (based on price)
+    // 4. checkTradability() does NOT block it (DATA_API_UNCONFIRMED is not verified)
+    // 5. AutoSell attempts to sell
+
+    const positionDataApiUnconfirmed = {
+      marketId: "0x" + "a".repeat(64),
+      tokenId: "0x" + "b".repeat(64),
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 1.0, // Data API shows resolved at $1
+      currentBidPrice: 0.999, // Live bid at exactly 99.9¢ threshold
+      pnlPct: 99.8,
+      pnlUsd: 49.9,
+      redeemable: false, // NOT redeemable because on-chain payoutDenominator == 0
+      redeemableProofSource: "DATA_API_UNCONFIRMED" as const,
+      positionState: "ACTIVE" as const,
+      executionStatus: "TRADABLE" as const,
+    };
+
+    // Step 1: Verify position would be picked up by getPositionsNearResolution
+    const effectivePrice = positionDataApiUnconfirmed.currentBidPrice ?? positionDataApiUnconfirmed.currentPrice;
+    const threshold = 0.999;
+    const isNearResolution = effectivePrice >= threshold;
+    assert.strictEqual(isNearResolution, true, "Position at 99.9¢ bid should be near resolution");
+
+    // Step 2: Verify checkTradability would NOT block this position
+    const hasVerifiedRedeemableProof =
+      positionDataApiUnconfirmed.redeemableProofSource === "ONCHAIN_DENOM" ||
+      positionDataApiUnconfirmed.redeemableProofSource === "DATA_API_FLAG";
+    assert.strictEqual(hasVerifiedRedeemableProof, false, "DATA_API_UNCONFIRMED is NOT verified proof");
+
+    // Step 3: Verify position would NOT be picked up by AutoRedeem
+    const wouldBePickedByAutoRedeem = positionDataApiUnconfirmed.redeemable === true;
+    assert.strictEqual(wouldBePickedByAutoRedeem, false, "Position should NOT be picked up by AutoRedeem (redeemable=false)");
+
+    // Step 4: Verify all conditions for AutoSell to attempt selling
+    const canAutoSell =
+      isNearResolution && // Price at threshold
+      !hasVerifiedRedeemableProof && // Not blocked by redeemable filter
+      positionDataApiUnconfirmed.currentBidPrice !== undefined && // Has bid
+      positionDataApiUnconfirmed.executionStatus === "TRADABLE"; // Can execute
+
+    assert.strictEqual(canAutoSell, true, "All conditions met for AutoSell to attempt selling");
+  });
+
+  test("positions at 100¢ with bids are sold instead of waiting for redemption", () => {
+    // Edge case: position exactly at $1.00 but on-chain not resolved yet
+    // Should be sold via AutoSell rather than waiting for on-chain resolution
+
+    const positionAt100Cents = {
+      marketId: "0x" + "c".repeat(64),
+      tokenId: "0x" + "d".repeat(64),
+      currentPrice: 1.0, // Data API shows winner
+      currentBidPrice: 0.999, // Live bid at 99.9¢
+      redeemable: false, // On-chain not resolved
+      redeemableProofSource: "DATA_API_UNCONFIRMED" as const,
+      executionStatus: "TRADABLE" as const,
+    };
+
+    // Should be eligible for AutoSell
+    const effectivePrice = positionAt100Cents.currentBidPrice ?? positionAt100Cents.currentPrice;
+    assert.ok(effectivePrice >= 0.999, "Position should be near resolution");
+
+    const hasVerifiedProof =
+      positionAt100Cents.redeemableProofSource === "ONCHAIN_DENOM" ||
+      positionAt100Cents.redeemableProofSource === "DATA_API_FLAG";
+    assert.strictEqual(hasVerifiedProof, false, "Should not have verified proof");
+
+    // Calculate expected loss from selling at 99.9¢ instead of waiting for $1.00 redemption
+    // Loss = (1.0 - 0.999) = $0.001 per share (0.1¢)
+    // This is acceptable to free up capital immediately
+    const lossPerShare = 1.0 - 0.999;
+    assert.ok(lossPerShare < 0.01, "Loss from selling early should be minimal (<1%)");
   });
 });

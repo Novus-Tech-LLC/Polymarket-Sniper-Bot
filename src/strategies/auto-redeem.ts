@@ -157,6 +157,10 @@ export class AutoRedeemStrategy {
 
   /**
    * Internal execution logic (called by execute() with in-flight guard)
+   *
+   * UPDATED (Jan 2025): Now includes preflight on-chain check for each position
+   * to be authoritative about redeemability. If payoutDenominator == 0, position
+   * is skipped and NOT treated as redeemable (allows AutoSell to handle if bids exist).
    */
   private async executeInternal(): Promise<number> {
     const redeemablePositions = this.getRedeemablePositions();
@@ -166,10 +170,11 @@ export class AutoRedeemStrategy {
     }
 
     this.logger.info(
-      `[AutoRedeem] Found ${redeemablePositions.length} redeemable position(s)`,
+      `[AutoRedeem] Found ${redeemablePositions.length} redeemable position(s), checking on-chain resolution...`,
     );
 
     let successCount = 0;
+    let skippedNotResolved = 0;
 
     for (const position of redeemablePositions) {
       // Check if we should skip due to recent failures
@@ -177,6 +182,33 @@ export class AutoRedeemStrategy {
         continue;
       }
 
+      // === PREFLIGHT ON-CHAIN CHECK (Jan 2025 Fix) ===
+      // Verify payoutDenominator > 0 before attempting redemption.
+      // This makes AutoRedeem the source of truth during continuous runs
+      // instead of blindly trusting PositionTracker's redeemable flag.
+      const isOnChainResolved = await this.checkOnChainResolved(
+        position.marketId,
+      );
+
+      if (!isOnChainResolved) {
+        // Position is NOT resolved on-chain - skip and do not treat as redeemable
+        skippedNotResolved++;
+        const positionValue = position.size * position.currentPrice;
+        this.logger.debug(
+          `[AutoRedeem] ⏭️ SKIP (not resolved on-chain): tokenId=${position.tokenId.slice(0, 12)}... ` +
+            `marketId=${position.marketId.slice(0, 16)}... value=$${positionValue.toFixed(2)} ` +
+            `(payoutDenominator=0, will retry next cycle)`,
+        );
+
+        // Set short cooldown to avoid rapid retries
+        this.redemptionAttempts.set(position.marketId, {
+          lastAttempt: Date.now(),
+          failures: 0, // Don't count as failure - just not ready yet
+        });
+        continue;
+      }
+
+      // On-chain confirmed - proceed with redemption
       const result = await this.redeemPositionWithRetry(position);
 
       // Track attempts
@@ -193,6 +225,13 @@ export class AutoRedeemStrategy {
       ) {
         await this.sleep(AutoRedeemStrategy.REDEMPTION_DELAY_MS);
       }
+    }
+
+    // Log summary if any positions were skipped
+    if (skippedNotResolved > 0) {
+      this.logger.info(
+        `[AutoRedeem] Summary: ${successCount} redeemed, ${skippedNotResolved} skipped (not resolved on-chain)`,
+      );
     }
 
     return successCount;

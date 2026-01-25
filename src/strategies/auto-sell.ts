@@ -201,21 +201,23 @@ export class AutoSellStrategy {
    * Returns skip reason if not tradable, or null if tradable
    *
    * IMPORTANT (Jan 2025): Only skip REDEEMABLE if there's actual proof from
-   * on-chain (ONCHAIN_DENOM) or Data API (DATA_API_FLAG). Internal flags without
-   * proof should NOT block selling - this ensures we can exit positions that
-   * might be incorrectly flagged as redeemable internally.
+   * on-chain (ONCHAIN_DENOM) or Data API verified (DATA_API_FLAG).
+   *
+   * Positions with DATA_API_UNCONFIRMED are NOT skipped - they remain eligible
+   * for AutoSell because Data API says redeemable but on-chain payoutDenominator == 0.
+   * This allows selling positions at 99.9-100¢ when live bids exist.
    */
   private checkTradability(
     position: Position,
   ): "REDEEMABLE" | "NOT_TRADABLE" | "NO_BID" | null {
-    // Filter 1: Skip REDEEMABLE positions ONLY if there's actual proof
-    // Trust on-chain resolution (ONCHAIN_DENOM) or explicit API flag (DATA_API_FLAG)
-    // Don't skip if redeemable=true but proofSource is NONE (internal heuristic only)
-    const hasRedeemableProof =
+    // Filter 1: Skip REDEEMABLE positions ONLY if there's verified proof
+    // Trust on-chain resolution (ONCHAIN_DENOM) or verified API flag (DATA_API_FLAG)
+    // Don't skip if proofSource is DATA_API_UNCONFIRMED or NONE (can still sell)
+    const hasVerifiedRedeemableProof =
       position.redeemableProofSource === "ONCHAIN_DENOM" ||
       position.redeemableProofSource === "DATA_API_FLAG";
 
-    if (hasRedeemableProof) {
+    if (hasVerifiedRedeemableProof) {
       return "REDEEMABLE";
     }
 

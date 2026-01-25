@@ -90,9 +90,15 @@ export type PositionState =
 /**
  * Source of REDEEMABLE determination.
  * Used for auditing and debugging incorrect classifications.
+ *
+ * IMPORTANT (Jan 2025 Fix): DATA_API_UNCONFIRMED indicates the Data API flagged
+ * redeemable=true BUT on-chain payoutDenominator is NOT verified or is 0.
+ * AutoSell should treat DATA_API_UNCONFIRMED as NOT redeemable (can still sell).
+ * Only DATA_API_FLAG (verified) and ONCHAIN_DENOM are truly redeemable.
  */
 export type RedeemableProofSource =
-  | "DATA_API_FLAG" // Data-API positions endpoint returned redeemable=true
+  | "DATA_API_FLAG" // Data-API positions endpoint returned redeemable=true AND on-chain verified
+  | "DATA_API_UNCONFIRMED" // Data-API says redeemable but on-chain payoutDenominator == 0 or not checked
   | "ONCHAIN_DENOM" // On-chain payoutDenominator > 0
   | "NONE"; // Not redeemable - for auditing
 
@@ -3434,21 +3440,77 @@ export class PositionTracker {
               // redeemable status from prices at 99¢+ or 1¢-. This caused the bug where
               // raw_redeemable_candidates=10 but final output showed 33 resolved positions.
 
-              let finalRedeemable = isRedeemable; // Trust ONLY Data-API flag
+              let finalRedeemable = false; // Default to NOT redeemable until verified
               let redeemableProofSource: RedeemableProofSource = "NONE";
               let positionState: PositionState = "ACTIVE";
               let marketClosed = false;
 
               if (isRedeemable) {
-                // Data-API explicitly flagged this position as redeemable
-                positionState = "REDEEMABLE";
-                redeemableProofSource = "DATA_API_FLAG";
-                finalRedeemable = true;
+                // === DATA API SAYS REDEEMABLE - VERIFY ON-CHAIN (Jan 2025 Fix) ===
+                // Data-API flagged this position as redeemable, but we must verify on-chain
+                // to prevent routing positions to AutoRedeem when they're not actually redeemable.
+                // If on-chain payoutDenominator == 0, keep ACTIVE for AutoSell with live bids.
 
-                // Log the promotion with proof source
-                this.logger.debug(
-                  `[PositionTracker] promote->REDEEMABLE tokenId=${tokenId.slice(0, 16)}... reason=DATA_API_FLAG`,
-                );
+                let isOnChainVerified = false;
+
+                // Only verify on-chain if we have a valid marketId (conditionId)
+                if (marketId) {
+                  try {
+                    isOnChainVerified =
+                      await this.checkOnChainRedeemable(marketId);
+                  } catch (err) {
+                    // On-chain check failed - log and treat as unverified
+                    const errMsg =
+                      err instanceof Error ? err.message : String(err);
+                    this.logger.debug(
+                      `[PositionTracker] on-chain verification failed for ${tokenId.slice(0, 16)}...: ${errMsg}`,
+                    );
+                  }
+                }
+
+                if (isOnChainVerified) {
+                  // On-chain confirmed - this is truly redeemable
+                  positionState = "REDEEMABLE";
+                  redeemableProofSource = "DATA_API_FLAG"; // Data API + on-chain verified
+                  finalRedeemable = true;
+
+                  this.logger.debug(
+                    `[PositionTracker] promote->REDEEMABLE tokenId=${tokenId.slice(0, 16)}... reason=DATA_API_FLAG (on-chain verified)`,
+                  );
+                } else {
+                  // === DATA API / ON-CHAIN MISMATCH (Jan 2025 Fix) ===
+                  // Data API says redeemable but on-chain payoutDenominator == 0
+                  // This is a common mismatch - keep position ACTIVE for AutoSell
+                  redeemableProofSource = "DATA_API_UNCONFIRMED";
+
+                  // Check if there are live bids - if so, keep ACTIVE for AutoSell
+                  const hasBids =
+                    bestBidPrice !== undefined && bestBidPrice > 0;
+
+                  if (hasBids) {
+                    // Position has live bids - keep ACTIVE for AutoSell to capture value
+                    positionState = "ACTIVE";
+                    finalRedeemable = false;
+
+                    this.logger.info(
+                      `[PositionTracker] ⚠️ DATA_API_ONCHAIN_MISMATCH: tokenId=${tokenId.slice(0, 16)}... ` +
+                        `Data-API says redeemable but on-chain payoutDenominator=0. ` +
+                        `Keeping ACTIVE for AutoSell (bid=${formatCents(bestBidPrice!)})`,
+                    );
+                  } else {
+                    // No bids available - mark as CLOSED_NOT_REDEEMABLE
+                    // Cannot sell (no bids) and cannot redeem (not on-chain yet)
+                    positionState = "CLOSED_NOT_REDEEMABLE";
+                    finalRedeemable = false;
+                    marketClosed = true;
+
+                    this.logger.info(
+                      `[PositionTracker] ⚠️ DATA_API_ONCHAIN_MISMATCH: tokenId=${tokenId.slice(0, 16)}... ` +
+                        `Data-API says redeemable but on-chain payoutDenominator=0, no bids. ` +
+                        `Setting CLOSED_NOT_REDEEMABLE (waiting for on-chain resolution)`,
+                    );
+                  }
+                }
               } else {
                 // Position is NOT redeemable per Data-API
                 // Check if market might be CLOSED_NOT_REDEEMABLE (Gamma says closed but not on-chain yet)
@@ -3950,6 +4012,18 @@ export class PositionTracker {
           if (stateRedeemable > 0) {
             this.logger.info(
               `[PositionTracker] 🔍 Redeemable Proof: DATA_API_FLAG=${redeemableByDataApi} ONCHAIN_DENOM=${redeemableByOnchain}`,
+            );
+          }
+
+          // === DATA API / ON-CHAIN MISMATCH DIAGNOSTIC (Jan 2025 Fix) ===
+          // Count positions where Data API said redeemable but on-chain payoutDenominator == 0
+          // These are kept ACTIVE for AutoSell to handle if live bids exist
+          const dataApiUnconfirmed = positions.filter(
+            (p) => p.redeemableProofSource === "DATA_API_UNCONFIRMED",
+          ).length;
+          if (dataApiUnconfirmed > 0) {
+            this.logger.info(
+              `[PositionTracker] ⚠️ DATA_API_UNCONFIRMED: ${dataApiUnconfirmed} position(s) where Data-API says redeemable but on-chain payoutDenominator=0 (routed to AutoSell if bids exist)`,
             );
           }
 
