@@ -2588,8 +2588,16 @@ export class PositionTracker {
       // === ADDRESS INVARIANT CHECK (D) ===
       // Verify positions_url user param matches cachedHoldingAddress (addressUsed).
       // If mismatch occurs, reject snapshot, log high-severity diagnostic, and retry.
-      const urlAddressMatch = positionsUrl.match(/user=([^&]+)/);
-      const urlAddress = urlAddressMatch ? urlAddressMatch[1] : null;
+      let urlAddress: string | null = null;
+      try {
+        // Use URL API for robust parameter extraction
+        const parsedUrl = new URL(positionsUrl);
+        urlAddress = parsedUrl.searchParams.get("user");
+      } catch {
+        // Fall back to regex if URL parsing fails (shouldn't happen in practice)
+        const urlAddressMatch = positionsUrl.match(/user=([^&]+)/);
+        urlAddress = urlAddressMatch ? urlAddressMatch[1] : null;
+      }
       if (
         urlAddress &&
         urlAddress.toLowerCase() !== holdingAddress.toLowerCase()

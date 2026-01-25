@@ -733,9 +733,20 @@ const warnUnsafeOverrides = (scope: string, keys: string[]): void => {
  * Mapping of legacy env var names to their unified/canonical equivalents.
  * Used to detect conflicting configurations where both legacy and unified vars
  * are set to different values.
+ *
+ * HOW TO EXTEND:
+ * When deprecating an env var in favor of a new unified name:
+ * 1. Add the mapping: LEGACY_NAME: "UNIFIED_NAME"
+ * 2. The system will warn if both are set to different values
+ * 3. The unified value always takes precedence
+ *
+ * CURRENT MAPPINGS:
+ * - MIN_TRADE_SIZE -> MIN_TRADE_SIZE_USD
+ * - MIN_TRADE_USDC -> MIN_TRADE_SIZE_USD
+ * - MIN_TRADE_SIZE_USDC -> MIN_TRADE_SIZE_USD
  */
 const LEGACY_TO_UNIFIED_MAP: Record<string, string> = {
-  // MIN_TRADE legacy aliases
+  // MIN_TRADE legacy aliases - all map to unified MIN_TRADE_SIZE_USD
   MIN_TRADE_SIZE: "MIN_TRADE_SIZE_USD",
   MIN_TRADE_USDC: "MIN_TRADE_SIZE_USD",
   MIN_TRADE_SIZE_USDC: "MIN_TRADE_SIZE_USD",

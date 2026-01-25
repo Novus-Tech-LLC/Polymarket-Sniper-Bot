@@ -326,18 +326,29 @@ export class LogDeduper {
     return this.shouldLog(key, ttlMs, fingerprint);
   }
 
+  // Price bucket threshold constants for priceToBucket()
+  private static readonly PRICE_BUCKET_10C_THRESHOLD = 10; // < 10¢
+  private static readonly PRICE_BUCKET_20C_THRESHOLD = 20; // < 20¢
+  private static readonly PRICE_BUCKET_50C_THRESHOLD = 50; // < 50¢
+
   /**
    * Utility to bucket a price into ranges for deduplication.
    * Useful for grouping "Skipping low-price BUY" logs by price range.
+   *
+   * Bucket definitions:
+   * - "0-10c": prices below 10 cents
+   * - "10-20c": prices 10-19 cents
+   * - "20-50c": prices 20-49 cents
+   * - "50c+": prices at or above 50 cents
    *
    * @param price Price in 0-1 scale (e.g., 0.03 for 3¢)
    * @returns Price bucket string (e.g., "0-10c", "10-50c", "50c+")
    */
   static priceToBucket(price: number): string {
     const cents = price * 100;
-    if (cents < 10) return "0-10c";
-    if (cents < 20) return "10-20c";
-    if (cents < 50) return "20-50c";
+    if (cents < LogDeduper.PRICE_BUCKET_10C_THRESHOLD) return "0-10c";
+    if (cents < LogDeduper.PRICE_BUCKET_20C_THRESHOLD) return "10-20c";
+    if (cents < LogDeduper.PRICE_BUCKET_50C_THRESHOLD) return "20-50c";
     return "50c+";
   }
 
