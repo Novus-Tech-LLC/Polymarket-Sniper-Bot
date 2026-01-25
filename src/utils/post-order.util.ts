@@ -824,9 +824,7 @@ async function postOrderClobInner(
 
       // Log cumulative depth for debugging SKIP_MIN_ORDER_SIZE issues
       logger.debug(
-        `[CLOB] SELL depth analysis: limitPrice=${(limitPrice * 100).toFixed(1)}¢ ` +
-          `cumulativeDepthUsd=$${cumulativeDepthUsd.toFixed(2)} remaining=$${remaining.toFixed(2)} ` +
-          `tokenId=${tokenId.slice(0, 12)}...`,
+        `[CLOB] SELL depth analysis: limitPrice=${(limitPrice * 100).toFixed(1)}¢ cumulativeDepthUsd=$${cumulativeDepthUsd.toFixed(2)} remaining=$${remaining.toFixed(2)} tokenId=${tokenId.slice(0, 12)}...`,
       );
 
       // Size the order based on cumulative depth and remaining amount

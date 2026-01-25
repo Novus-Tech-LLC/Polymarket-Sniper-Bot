@@ -628,7 +628,7 @@ describe("Cumulative Bid Depth for SELL Orders", () => {
 
     const depth = calculateCumulativeBidDepth(bids, limitPrice);
 
-    // Should only include first level: $55 (use approximate comparison for floating point)
+    // Should only include first level: $55 (0.55 * 100 may have floating point error)
     assert.ok(
       Math.abs(depth - 55) < 0.001,
       `Expected depth ~$55, got $${depth.toFixed(2)}`,
