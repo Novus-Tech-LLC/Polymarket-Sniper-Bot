@@ -5687,12 +5687,17 @@ export class PositionTracker {
         enrichedCount++;
       } else {
         // Entry metadata could not be resolved - include position without enrichment
-        // This can happen if trade history is unavailable or incomplete
+        // This can happen when:
+        // - Trade history is unavailable or incomplete (API limits, old positions)
+        // - No BUY trades found for the tokenId
+        // - Trade reconstruction failed (rounding errors, missing data)
         // Mark as untrusted since we couldn't resolve entry data
         enrichedPositions.push({
           ...position,
           entryMetaTrusted: false,
-          entryMetaUntrustedReason: "Entry metadata could not be resolved from trade history",
+          entryMetaUntrustedReason:
+            "Entry metadata could not be resolved from trade history " +
+            "(possible causes: incomplete trade history, API limits, legacy position)",
         });
         skippedCount++;
       }

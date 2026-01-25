@@ -1188,8 +1188,10 @@ export class ScalpTakeProfitStrategy {
           skipAggregator.add(tokenIdShort, "untrusted_entry_skip");
           continue;
         } else if (mode === "allow_profitable_only") {
-          // Default safer behavior: only allow if profitable AND P&L is trusted
-          // This was already checked above, so we only need to verify profitability
+          // Default safer behavior: only allow if profitable AND P&L is trusted.
+          // P&L trust was verified earlier in this function (see "CRITICAL: P&L TRUST CHECK"
+          // section around line 1166-1177). If we reach here, pnlTrusted === true.
+          // We only need to verify the position is actually profitable.
           if (position.pnlPct <= 0) {
             // Not profitable - skip this legacy position to avoid bad decisions
             skipAggregator.add(tokenIdShort, "untrusted_entry_not_profitable");
