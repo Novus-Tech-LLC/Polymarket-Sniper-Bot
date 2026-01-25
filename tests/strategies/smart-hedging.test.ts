@@ -1989,3 +1989,274 @@ describe("Smart Hedging Reserve-Aware Sizing", () => {
     });
   });
 });
+
+/**
+ * Tests for Untrusted P&L Exception Logic
+ * 
+ * These tests verify the control flow where positions with pnlTrusted=false
+ * are handled differently based on loss magnitude:
+ * - Catastrophic losses (>= forceLiquidationPct): Proceed with hedge/liquidation
+ * - Non-catastrophic losses: Skip to avoid false positives
+ */
+describe("Untrusted P&L Exception Logic", () => {
+  /**
+   * Helper function to simulate the untrusted P&L decision logic
+   * This mirrors the logic in SmartHedgingStrategy.execute()
+   */
+  function shouldProceedWithUntrustedPnl(
+    config: SmartHedgingConfig,
+    pnlPct: number,
+    pnlTrusted: boolean,
+  ): { shouldProceed: boolean; reason: string } {
+    if (pnlTrusted) {
+      return { shouldProceed: true, reason: "P&L is trusted" };
+    }
+
+    // Only consider catastrophic loss exception when pnlPct is actually negative
+    const isActualLoss = pnlPct < 0;
+    const lossPctMagnitude = Math.abs(pnlPct);
+    const isCatastrophicLoss = isActualLoss && lossPctMagnitude >= config.forceLiquidationPct;
+
+    if (isCatastrophicLoss) {
+      return { shouldProceed: true, reason: "Catastrophic loss - proceed despite untrusted P&L" };
+    } else if (isActualLoss && lossPctMagnitude >= config.triggerLossPct) {
+      return { shouldProceed: false, reason: "Non-catastrophic loss with untrusted P&L - skip" };
+    } else {
+      return { shouldProceed: false, reason: "Untrusted P&L - skip" };
+    }
+  }
+
+  test("should proceed with untrusted P&L when loss >= forceLiquidationPct (catastrophic)", () => {
+    const result = shouldProceedWithUntrustedPnl(
+      DEFAULT_HEDGING_CONFIG,
+      -55, // 55% loss (above 50% forceLiquidationPct)
+      false, // pnlTrusted = false
+    );
+
+    assert.strictEqual(
+      result.shouldProceed,
+      true,
+      "Should proceed with catastrophic loss even if P&L untrusted",
+    );
+    assert.ok(
+      result.reason.includes("Catastrophic"),
+      `Expected reason to mention catastrophic, got: ${result.reason}`,
+    );
+  });
+
+  test("should skip when loss is significant but not catastrophic with untrusted P&L", () => {
+    const result = shouldProceedWithUntrustedPnl(
+      DEFAULT_HEDGING_CONFIG,
+      -30, // 30% loss (above 20% trigger but below 50% force liquidation)
+      false, // pnlTrusted = false
+    );
+
+    assert.strictEqual(
+      result.shouldProceed,
+      false,
+      "Should skip non-catastrophic loss with untrusted P&L",
+    );
+    assert.ok(
+      result.reason.includes("Non-catastrophic"),
+      `Expected reason to mention non-catastrophic, got: ${result.reason}`,
+    );
+  });
+
+  test("should skip when loss is below trigger threshold with untrusted P&L", () => {
+    const result = shouldProceedWithUntrustedPnl(
+      DEFAULT_HEDGING_CONFIG,
+      -15, // 15% loss (below 20% trigger threshold)
+      false, // pnlTrusted = false
+    );
+
+    assert.strictEqual(
+      result.shouldProceed,
+      false,
+      "Should skip loss below trigger with untrusted P&L",
+    );
+  });
+
+  test("should NOT treat large positive pnlPct as catastrophic loss", () => {
+    const result = shouldProceedWithUntrustedPnl(
+      DEFAULT_HEDGING_CONFIG,
+      75, // +75% profit (positive, not a loss)
+      false, // pnlTrusted = false
+    );
+
+    assert.strictEqual(
+      result.shouldProceed,
+      false,
+      "Should NOT proceed with profitable position despite untrusted P&L",
+    );
+    assert.ok(
+      !result.reason.includes("Catastrophic"),
+      `Should NOT classify profitable position as catastrophic loss, got: ${result.reason}`,
+    );
+  });
+
+  test("should proceed when P&L is trusted regardless of loss amount", () => {
+    const result = shouldProceedWithUntrustedPnl(
+      DEFAULT_HEDGING_CONFIG,
+      -25, // 25% loss
+      true, // pnlTrusted = true
+    );
+
+    assert.strictEqual(
+      result.shouldProceed,
+      true,
+      "Should proceed when P&L is trusted",
+    );
+  });
+
+  test("should respect custom forceLiquidationPct threshold", () => {
+    const customConfig = { ...DEFAULT_HEDGING_CONFIG, forceLiquidationPct: 40 };
+    
+    // 45% loss should now be catastrophic with custom 40% threshold
+    const result = shouldProceedWithUntrustedPnl(
+      customConfig,
+      -45,
+      false,
+    );
+
+    assert.strictEqual(
+      result.shouldProceed,
+      true,
+      "Should proceed when loss exceeds custom forceLiquidationPct",
+    );
+  });
+});
+
+/**
+ * Tests for hedgeUpAnytime Configuration
+ * 
+ * These tests verify the hedge up eligibility logic based on the hedgeUpAnytime setting:
+ * - hedgeUpAnytime=true: Allow hedge up regardless of time to close
+ * - hedgeUpAnytime=false (default): Only hedge up within hedgeUpWindowMinutes of close
+ */
+describe("hedgeUpAnytime Configuration", () => {
+  /**
+   * Helper function to simulate hedge up eligibility based on time window
+   * This mirrors the time window logic in SmartHedgingStrategy.tryHedgeUp()
+   */
+  function isHedgeUpEligibleByTime(
+    config: SmartHedgingConfig,
+    marketEndTime: number | undefined,
+    now: number,
+  ): { eligible: boolean; reason: string } {
+    // If hedgeUpAnytime is enabled, skip the time window check
+    if (config.hedgeUpAnytime) {
+      // Even with hedgeUpAnytime, respect the no-hedge window if market end time is known
+      if (marketEndTime && marketEndTime > now) {
+        const minutesToClose = (marketEndTime - now) / (60 * 1000);
+        if (minutesToClose <= config.noHedgeWindowMinutes) {
+          return { eligible: false, reason: "no_hedge_window" };
+        }
+      }
+      return { eligible: true, reason: "hedgeUpAnytime enabled" };
+    } else {
+      // hedgeUpAnytime=false: require time window
+      if (!marketEndTime || marketEndTime <= now) {
+        return { eligible: false, reason: "no_end_time" };
+      }
+
+      const minutesToClose = (marketEndTime - now) / (60 * 1000);
+
+      if (minutesToClose > config.hedgeUpWindowMinutes) {
+        return { eligible: false, reason: "outside_window" };
+      }
+
+      if (minutesToClose <= config.noHedgeWindowMinutes) {
+        return { eligible: false, reason: "no_hedge_window" };
+      }
+
+      return { eligible: true, reason: "within hedge up window" };
+    }
+  }
+
+  describe("hedgeUpAnytime=false (default)", () => {
+    const config = { ...DEFAULT_HEDGING_CONFIG, hedgeUpAnytime: false };
+
+    test("should not be eligible without market end time", () => {
+      const now = Date.now();
+      const result = isHedgeUpEligibleByTime(config, undefined, now);
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "no_end_time");
+    });
+
+    test("should not be eligible when market already ended", () => {
+      const now = Date.now();
+      const marketEndTime = now - 60000; // 1 minute ago
+      const result = isHedgeUpEligibleByTime(config, marketEndTime, now);
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "no_end_time");
+    });
+
+    test("should not be eligible when outside hedge up window (60 min from close)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 60 * 60 * 1000; // 60 minutes from now
+      const result = isHedgeUpEligibleByTime(config, marketEndTime, now);
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "outside_window");
+    });
+
+    test("should be eligible when within hedge up window (20 min from close)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 20 * 60 * 1000; // 20 minutes from now (within 30 min window)
+      const result = isHedgeUpEligibleByTime(config, marketEndTime, now);
+
+      assert.strictEqual(result.eligible, true);
+      assert.strictEqual(result.reason, "within hedge up window");
+    });
+
+    test("should not be eligible in no-hedge window (2 min from close)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 2 * 60 * 1000; // 2 minutes from now (within 3 min no-hedge)
+      const result = isHedgeUpEligibleByTime(config, marketEndTime, now);
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "no_hedge_window");
+    });
+  });
+
+  describe("hedgeUpAnytime=true", () => {
+    const config = { ...DEFAULT_HEDGING_CONFIG, hedgeUpAnytime: true };
+
+    test("should be eligible without market end time", () => {
+      const now = Date.now();
+      const result = isHedgeUpEligibleByTime(config, undefined, now);
+
+      assert.strictEqual(result.eligible, true);
+      assert.ok(result.reason.includes("hedgeUpAnytime"));
+    });
+
+    test("should be eligible when market already ended", () => {
+      const now = Date.now();
+      const marketEndTime = now - 60000; // 1 minute ago
+      const result = isHedgeUpEligibleByTime(config, marketEndTime, now);
+
+      assert.strictEqual(result.eligible, true);
+      assert.ok(result.reason.includes("hedgeUpAnytime"));
+    });
+
+    test("should be eligible when outside normal hedge up window (60 min from close)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 60 * 60 * 1000; // 60 minutes from now
+      const result = isHedgeUpEligibleByTime(config, marketEndTime, now);
+
+      assert.strictEqual(result.eligible, true);
+      assert.ok(result.reason.includes("hedgeUpAnytime"));
+    });
+
+    test("should still respect no-hedge window even with hedgeUpAnytime=true", () => {
+      const now = Date.now();
+      const marketEndTime = now + 2 * 60 * 1000; // 2 minutes from now (within 3 min no-hedge)
+      const result = isHedgeUpEligibleByTime(config, marketEndTime, now);
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "no_hedge_window");
+    });
+  });
+});

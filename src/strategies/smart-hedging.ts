@@ -116,7 +116,8 @@ export interface SmartHedgingConfig {
 
   /**
    * Minutes before market close to enable "hedging up" behavior (default: 30)
-   * Only buy more shares when within this window AND price >= hedgeUpPriceThreshold
+   * Only buy more shares when within this window AND price >= hedgeUpPriceThreshold.
+   * To hedge up without any time restriction, use the hedgeUpAnytime setting instead.
    */
   hedgeUpWindowMinutes: number;
 
@@ -133,6 +134,15 @@ export interface SmartHedgingConfig {
    * The sweet spot for hedging up is between hedgeUpPriceThreshold (85¢) and this max (95¢).
    */
   hedgeUpMaxPrice: number;
+
+  /**
+   * Allow "hedging up" at any time, not just near market close (default: false)
+   * When true, positions at high win probability (>= hedgeUpPriceThreshold) can be
+   * hedged up immediately, regardless of time to close.
+   * When false (default), hedging up only occurs within hedgeUpWindowMinutes of market close.
+   * This is the safer default - near close, the outcome is more certain.
+   */
+  hedgeUpAnytime: boolean;
 }
 
 export const DEFAULT_HEDGING_CONFIG: SmartHedgingConfig = {
@@ -156,6 +166,7 @@ export const DEFAULT_HEDGING_CONFIG: SmartHedgingConfig = {
   hedgeUpWindowMinutes: 30, // Enable hedging up in last 30 minutes before close
   hedgeUpMaxUsd: 25, // Max USD to spend per position on hedging up (matches absoluteMaxUsd)
   hedgeUpMaxPrice: 0.95, // Don't buy at 95¢+ (too close to resolved, minimal profit margin)
+  hedgeUpAnytime: false, // Default: only hedge up near close (safer - more certainty of outcome)
 };
 
 /**
@@ -454,13 +465,38 @@ export class SmartHedgingStrategy {
       }
 
       // === CRITICAL: P&L TRUST CHECK ===
-      // NEVER hedge or liquidate positions with untrusted P&L.
-      // Acting on invalid data can cause selling winners and keeping losers.
+      // For normal losses, skip positions with untrusted P&L to avoid selling winners.
+      // EXCEPTION: For CATASTROPHIC losses (>= forceLiquidationPct), allow action even with
+      // untrusted P&L because the risk of inaction is greater than the risk of acting on
+      // imperfect data. A 50% loss is a 50% loss regardless of P&L source precision.
       if (!position.pnlTrusted) {
-        this.logger.debug(
-          `[SmartHedging] 📋 Skip hedge (UNTRUSTED_PNL): ${position.side} position has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"})`,
-        );
-        continue;
+        // Only consider catastrophic loss exception when pnlPct is actually negative
+        const isActualLoss = position.pnlPct < 0;
+        const lossPctMagnitude = Math.abs(position.pnlPct);
+        const isCatastrophicLoss = isActualLoss && lossPctMagnitude >= this.config.forceLiquidationPct;
+        
+        if (isCatastrophicLoss) {
+          // CATASTROPHIC LOSS with untrusted P&L - ALLOW hedging/liquidation with warning
+          // The risk of doing nothing is greater than the risk of acting on imperfect data
+          this.logger.warn(
+            `[SmartHedging] 🚨 CATASTROPHIC LOSS (${lossPctMagnitude.toFixed(1)}% >= ${this.config.forceLiquidationPct}%) with untrusted P&L ` +
+            `(${position.pnlUntrustedReason ?? "unknown reason"}) - PROCEEDING WITH HEDGE/LIQUIDATION despite data uncertainty`,
+          );
+          // Fall through to continue processing - don't skip
+        } else if (isActualLoss && lossPctMagnitude >= this.config.triggerLossPct) {
+          // Significant loss but not catastrophic - log warning but still skip
+          this.logger.warn(
+            `[SmartHedging] ⚠️ Skip hedge (UNTRUSTED_PNL): ${position.side} ${tokenIdShort}... at ${lossPctMagnitude.toFixed(1)}% loss has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"}) - CANNOT HEDGE until P&L is trusted`,
+          );
+          skipAggregator.add(tokenIdShort, "untrusted_pnl");
+          continue;
+        } else {
+          this.logger.debug(
+            `[SmartHedging] 📋 Skip hedge (UNTRUSTED_PNL): ${position.side} position has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"})`,
+          );
+          skipAggregator.add(tokenIdShort, "untrusted_pnl");
+          continue;
+        }
       }
 
       // === EXECUTION STATUS CHECK (Jan 2025 - Handle NOT_TRADABLE_ON_CLOB) ===
@@ -470,6 +506,14 @@ export class SmartHedgingStrategy {
         position.executionStatus === "NOT_TRADABLE_ON_CLOB" ||
         position.executionStatus === "EXECUTION_BLOCKED"
       ) {
+        // Log at warn level for significant actual losses (pnlPct must be negative)
+        const pnlPct = position.pnlPct;
+        const lossPctMagnitude = Math.abs(pnlPct);
+        if (pnlPct < 0 && lossPctMagnitude >= this.config.triggerLossPct) {
+          this.logger.warn(
+            `[SmartHedging] ⚠️ Skip hedge (NOT_TRADABLE): ${position.side} ${tokenIdShort}... at ${lossPctMagnitude.toFixed(1)}% loss - position not tradable on CLOB (status=${position.executionStatus})`,
+          );
+        }
         skipAggregator.add(tokenIdShort, "not_tradable");
         continue;
       }
@@ -838,22 +882,33 @@ export class SmartHedgingStrategy {
     }
 
     // === TIME WINDOW CHECK ===
-    // Only hedge up when near market close
-    if (!position.marketEndTime || position.marketEndTime <= now) {
-      // No end time available or market already ended
-      return { action: "not_applicable", reason: "no_end_time" };
-    }
+    // If hedgeUpAnytime is enabled, skip the time window check entirely
+    // Otherwise, only hedge up when near market close
+    if (!this.config.hedgeUpAnytime) {
+      if (!position.marketEndTime || position.marketEndTime <= now) {
+        // No end time available or market already ended
+        return { action: "not_applicable", reason: "no_end_time" };
+      }
 
-    const minutesToClose = (position.marketEndTime - now) / (60 * 1000);
+      const minutesToClose = (position.marketEndTime - now) / (60 * 1000);
 
-    // Must be within the hedge up window
-    if (minutesToClose > this.config.hedgeUpWindowMinutes) {
-      return { action: "not_applicable", reason: "outside_window" };
-    }
+      // Must be within the hedge up window
+      if (minutesToClose > this.config.hedgeUpWindowMinutes) {
+        return { action: "not_applicable", reason: "outside_window" };
+      }
 
-    // Don't hedge up in the very last minutes (same as no-hedge window)
-    if (minutesToClose <= this.config.noHedgeWindowMinutes) {
-      return { action: "skipped", reason: "no_hedge_window" };
+      // Don't hedge up in the very last minutes (same as no-hedge window)
+      if (minutesToClose <= this.config.noHedgeWindowMinutes) {
+        return { action: "skipped", reason: "no_hedge_window" };
+      }
+    } else {
+      // Even with hedgeUpAnytime, respect the no-hedge window if market end time is known
+      if (position.marketEndTime && position.marketEndTime > now) {
+        const minutesToClose = (position.marketEndTime - now) / (60 * 1000);
+        if (minutesToClose <= this.config.noHedgeWindowMinutes) {
+          return { action: "skipped", reason: "no_hedge_window" };
+        }
+      }
     }
 
     // === ORDERBOOK QUALITY CHECK ===
@@ -868,9 +923,13 @@ export class SmartHedgingStrategy {
     }
 
     // === EXECUTE HEDGE UP ===
+    // Compute time to close for logging (may be undefined if no marketEndTime)
+    const timeToCloseStr = position.marketEndTime && position.marketEndTime > now
+      ? `${((position.marketEndTime - now) / (60 * 1000)).toFixed(1)}min to close`
+      : "no close time";
     this.logger.info(
       `[SmartHedging] 📈 HEDGE UP candidate: ${position.side} ${tokenIdShort}... ` +
-        `at ${formatCents(position.currentPrice)}, ${minutesToClose.toFixed(1)}min to close`,
+        `at ${formatCents(position.currentPrice)}, ${timeToCloseStr}`,
     );
 
     const result = await this.executeBuyMore(position);

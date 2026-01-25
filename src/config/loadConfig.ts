@@ -1400,6 +1400,13 @@ export type StrategyConfig = {
    */
   smartHedgingHedgeUpMaxUsd: number;
   /**
+   * Hedge Up: Allow hedging up at any time, not just near market close.
+   * When true, positions at high win probability can be hedged up immediately.
+   * When false, hedging up only occurs within hedgeUpWindowMinutes of market close.
+   * Default: false
+   */
+  smartHedgingHedgeUpAnytime: boolean;
+  /**
    * Universal Stop-Loss: Minimum time (seconds) to hold before stop-loss can trigger.
    * Prevents selling positions immediately after buying due to bid-ask spread.
    * Default: 60 seconds
@@ -1930,6 +1937,21 @@ export function loadStrategyConfig(
             .SMART_HEDGING_HEDGE_UP_MAX_USD
         : undefined) ??
       25, // Default: max $25 per position on hedge up
+    /**
+     * SMART_HEDGING_HEDGE_UP_ANYTIME: Allow hedging up at any time
+     * When true, positions at high win probability can be hedged up immediately.
+     * When false, hedging up only occurs within hedgeUpWindowMinutes of market close.
+     * Default: false (safer - only hedge up near close when outcome is more certain)
+     */
+    smartHedgingHedgeUpAnytime: (() => {
+      const envValue = readEnv("SMART_HEDGING_HEDGE_UP_ANYTIME", overrides)?.toLowerCase();
+      if (envValue === "true" || envValue === "1") return true;
+      if (envValue === "false" || envValue === "0") return false;
+      if ("SMART_HEDGING_HEDGE_UP_ANYTIME" in preset) {
+        return !!(preset as { SMART_HEDGING_HEDGE_UP_ANYTIME: boolean }).SMART_HEDGING_HEDGE_UP_ANYTIME;
+      }
+      return false; // Default: only hedge up near close (safer)
+    })(),
     /**
      * STOP_LOSS_MIN_HOLD_SECONDS: Minimum time before stop-loss can trigger
      * Prevents premature stop-loss sells due to bid-ask spread right after buying
