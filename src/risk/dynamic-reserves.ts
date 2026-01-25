@@ -321,9 +321,10 @@ export class DynamicReservesController {
         DynamicReservesController.STATUS_LOG_TTL_MS,
       )
     ) {
+      const modeEmoji = mode === "RISK_ON" ? "✅" : "⚠️";
       this.logger.info(
-        `[DynamicReserves] balance=$${availableCash.toFixed(2)} positionValue=$${positionValue.toFixed(2)} ` +
-          `reserves=$${reserveRequired.toFixed(2)} mode=${mode} equity=$${equityUsd.toFixed(2)} positions=${snapshot.activePositions.length}`,
+        `💰 [DynamicReserves] balance=$${availableCash.toFixed(2)} | positions=$${positionValue.toFixed(2)} | ` +
+          `reserves=$${reserveRequired.toFixed(2)} | equity=$${equityUsd.toFixed(2)} | ${modeEmoji} ${mode} (${snapshot.activePositions.length} pos)`,
       );
     }
 
