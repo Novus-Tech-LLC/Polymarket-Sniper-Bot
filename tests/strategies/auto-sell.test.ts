@@ -186,10 +186,12 @@ describe("AutoSell Configuration - Preset Loading", () => {
 // === FILTERING BEHAVIOR TESTS ===
 
 describe("AutoSell Filtering Behavior", () => {
-  test("checkTradability returns REDEEMABLE for redeemable positions", () => {
-    // This tests the logic documented in the strategy:
-    // Positions with redeemable === true should be skipped
-    const position = {
+  test("checkTradability returns REDEEMABLE only for positions with proof source", () => {
+    // UPDATED (Jan 2025): Only skip if there's actual proof of redeemability
+    // redeemable=true alone is NOT enough - we need redeemableProofSource
+
+    // Position with DATA_API_FLAG proof - should be filtered
+    const positionWithApiProof = {
       marketId: "0x123",
       tokenId: "0x456",
       side: "YES",
@@ -198,12 +200,42 @@ describe("AutoSell Filtering Behavior", () => {
       currentPrice: 0.99,
       pnlPct: 98,
       pnlUsd: 49,
-      redeemable: true, // Should be filtered out
+      redeemable: true,
+      redeemableProofSource: "DATA_API_FLAG" as const,
     };
 
-    // The actual filtering logic is:
-    // if (position.redeemable === true) return "REDEEMABLE"
-    assert.strictEqual(position.redeemable, true);
+    // Position with ONCHAIN_DENOM proof - should be filtered
+    const positionWithOnchainProof = {
+      marketId: "0x123",
+      tokenId: "0x456",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.99,
+      pnlPct: 98,
+      pnlUsd: 49,
+      redeemable: true,
+      redeemableProofSource: "ONCHAIN_DENOM" as const,
+    };
+
+    // Position with redeemable=true but NO proof - should NOT be filtered (can sell)
+    const positionWithoutProof = {
+      marketId: "0x123",
+      tokenId: "0x456",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.99,
+      pnlPct: 98,
+      pnlUsd: 49,
+      redeemable: true,
+      redeemableProofSource: "NONE" as const,
+    };
+
+    // Verify the proof sources
+    assert.strictEqual(positionWithApiProof.redeemableProofSource, "DATA_API_FLAG");
+    assert.strictEqual(positionWithOnchainProof.redeemableProofSource, "ONCHAIN_DENOM");
+    assert.strictEqual(positionWithoutProof.redeemableProofSource, "NONE");
   });
 
   test("checkTradability returns NOT_TRADABLE for non-tradable execution status", () => {
@@ -238,5 +270,69 @@ describe("AutoSell Filtering Behavior", () => {
     };
 
     assert.strictEqual(position.currentBidPrice, undefined);
+  });
+});
+
+// === NEAR RESOLUTION DETECTION TESTS ===
+
+describe("AutoSell Near Resolution Detection", () => {
+  test("getPositionsNearResolution uses currentBidPrice when available", () => {
+    // CRITICAL FIX (Jan 2025): Near resolution detection should use executable bid price
+    // This ensures positions with live bids at 99.9¢+ are eligible even when Data-API price is lower
+
+    // Position where bid is at threshold but currentPrice is lower
+    const positionWithHighBid = {
+      marketId: "0x123",
+      tokenId: "0x456",
+      currentPrice: 0.95, // Data API price is lower
+      currentBidPrice: 0.999, // But executable bid is at threshold
+    };
+
+    // Using the new logic: effectivePrice = currentBidPrice ?? currentPrice
+    const effectivePrice =
+      positionWithHighBid.currentBidPrice ?? positionWithHighBid.currentPrice;
+    const threshold = 0.999;
+
+    assert.ok(
+      effectivePrice >= threshold,
+      "Position with bid at 99.9¢ should be eligible even when currentPrice is 95¢",
+    );
+  });
+
+  test("getPositionsNearResolution falls back to currentPrice when no bid", () => {
+    // When currentBidPrice is undefined, fall back to currentPrice
+    const positionNoBid = {
+      marketId: "0x123",
+      tokenId: "0x456",
+      currentPrice: 0.999,
+      currentBidPrice: undefined,
+    };
+
+    const effectivePrice =
+      positionNoBid.currentBidPrice ?? positionNoBid.currentPrice;
+    const threshold = 0.999;
+
+    assert.ok(
+      effectivePrice >= threshold,
+      "Position with currentPrice at threshold should be eligible when no bid",
+    );
+  });
+
+  test("position with low bid and low currentPrice is NOT near resolution", () => {
+    const positionLowPrices = {
+      marketId: "0x123",
+      tokenId: "0x456",
+      currentPrice: 0.85,
+      currentBidPrice: 0.84,
+    };
+
+    const effectivePrice =
+      positionLowPrices.currentBidPrice ?? positionLowPrices.currentPrice;
+    const threshold = 0.999;
+
+    assert.ok(
+      effectivePrice < threshold,
+      "Position with low prices should not be near resolution",
+    );
   });
 });

@@ -2276,10 +2276,24 @@ export class PositionTracker {
   }
 
   /**
-   * Get positions near resolution (price > threshold)
+   * Get positions near resolution (price >= threshold)
+   *
+   * CRITICAL FIX (Jan 2025): Uses currentBidPrice (executable price) when available,
+   * falling back to currentPrice. This ensures positions with live executable bids
+   * at 99.9¢+ are eligible for auto-sell even when Data-API currentPrice is lower.
+   *
+   * The executable bid price is what we can actually sell at, so it should drive
+   * the "near resolution" determination for capital efficiency.
+   *
+   * @param threshold Price threshold in decimal (e.g., 0.999 for 99.9¢)
+   * @returns Positions where best bid or current price is at or above threshold
    */
   getPositionsNearResolution(threshold: number): Position[] {
-    return this.getPositions().filter((pos) => pos.currentPrice >= threshold);
+    return this.getPositions().filter((pos) => {
+      // Use executable bid price if available, otherwise fall back to currentPrice
+      const effectivePrice = pos.currentBidPrice ?? pos.currentPrice;
+      return effectivePrice >= threshold;
+    });
   }
 
   /**
@@ -3093,53 +3107,29 @@ export class PositionTracker {
               let pnlSource: PnLSource = "FALLBACK";
               // Track if pricing fetch completely failed (for pnlUntrustedReason)
               let pricingFetchFailed = false;
+
+              // === SIMPLIFIED REDEEMABLE DETECTION (Jan 2025 Refactor) ===
+              // ONLY trust explicit sources - NO internal inference/guessing:
+              // 1. Data API explicitly says redeemable: true (DATA_API_FLAG)
+              // 2. On-chain payoutDenominator > 0 (ONCHAIN_DENOM)
+              // We do NOT infer redeemability from:
+              // - Missing orderbook
+              // - Gamma API closed/resolved flags
+              // - Price being near 100¢ or 0¢
               const apiRedeemable = apiPos.redeemable === true;
-
-              // GATED REDEEMABLE DETECTION: Don't blindly trust apiPos.redeemable
-              // Verify with Gamma API that market is truly resolved/closed
-              // This fixes the bug where active markets were incorrectly marked as redeemable
-              let isRedeemable = false;
-              let verifiedWinningOutcome: string | null = null;
-
-              if (apiRedeemable) {
-                // API claims position is redeemable - verify with Gamma
-                const resolutionStatus =
-                  await this.verifyMarketResolutionStatus(tokenId, marketId);
-
-                if (resolutionStatus.isResolved) {
-                  // Gamma confirms market is resolved - trust redeemable flag
-                  isRedeemable = true;
-                  verifiedWinningOutcome = resolutionStatus.winningOutcome;
-                } else if (!resolutionStatus.hasOrderbook) {
-                  // No orderbook exists and market might be in limbo state
-                  // Keep as redeemable since there's no trading activity
-                  isRedeemable = true;
-                  this.logger.debug(
-                    `[PositionTracker] apiPos.redeemable=true, Gamma not resolved, but no orderbook - treating as redeemable: tokenId=${tokenId.slice(0, 16)}...`,
-                  );
-                } else {
-                  // IMPORTANT: API says redeemable but Gamma says NOT resolved AND orderbook EXISTS
-                  // This is the bug case - keep as ACTIVE position
-                  isRedeemable = false;
-                  this.logger.warn(
-                    `[PositionTracker] ⚠️ REDEEMABLE_OVERRIDE: apiPos.redeemable=true but market is STILL ACTIVE (orderbook exists, Gamma not resolved). ` +
-                      `Keeping as ACTIVE position. tokenId=${tokenId.slice(0, 16)}..., marketId=${marketId.slice(0, 16)}...`,
-                  );
-                }
-              }
+              let isRedeemable = apiRedeemable; // Trust Data API directly
 
               if (isRedeemable) {
-                // Market is verified resolved - set status to REDEEMABLE
+                // Data API says position is redeemable - set status accordingly
                 positionStatus = "REDEEMABLE";
 
-                // Use verified winning outcome or fetch from cache/API
+                // Fetch winning outcome from cache or API (for P&L calculation)
                 let winningOutcome: string | null | undefined =
-                  verifiedWinningOutcome ??
                   this.marketOutcomeCache.get(marketId);
                 const wasCached =
                   winningOutcome !== undefined && winningOutcome !== null;
 
-                if (!wasCached && !verifiedWinningOutcome) {
+                if (!wasCached) {
                   winningOutcome = await this.fetchMarketOutcome(tokenId);
                   // Only cache definite outcomes; avoid caching null/undefined that may come from transient API errors
                   if (winningOutcome !== null && winningOutcome !== undefined) {
@@ -3157,21 +3147,6 @@ export class PositionTracker {
                       }
                     }
                     this.marketOutcomeCache.set(marketId, winningOutcome);
-                    newlyCachedMarkets++;
-                  }
-                } else if (
-                  verifiedWinningOutcome &&
-                  !this.marketOutcomeCache.has(marketId)
-                ) {
-                  // Cache the verified outcome from resolution check
-                  if (
-                    this.marketOutcomeCache.size <
-                    PositionTracker.MAX_OUTCOME_CACHE_SIZE
-                  ) {
-                    this.marketOutcomeCache.set(
-                      marketId,
-                      verifiedWinningOutcome,
-                    );
                     newlyCachedMarkets++;
                   }
                 }

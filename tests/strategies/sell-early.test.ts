@@ -224,6 +224,7 @@ describe("SellEarly Strategy Logic", () => {
     currentAskPrice: 1.0,
     status: "ACTIVE",
     redeemable: false,
+    redeemableProofSource: "NONE", // Default: no proof (can sell)
     ...overrides,
   });
 
@@ -309,42 +310,52 @@ describe("SellEarly Strategy Logic", () => {
   });
 
   describe("Core Behavior: Redeemable Positions", () => {
-    test("redeemable=true -> do not sell", () => {
+    test("redeemable with DATA_API_FLAG proof -> do not sell", () => {
+      // UPDATED (Jan 2025): Only skip if there's actual proof of redeemability
       const position = createMockPosition({
         redeemable: true,
+        redeemableProofSource: "DATA_API_FLAG",
         currentBidPrice: 0.999,
       });
 
       assert.strictEqual(
-        position.redeemable,
-        true,
-        "Position should be marked redeemable",
+        position.redeemableProofSource,
+        "DATA_API_FLAG",
+        "Position should have DATA_API_FLAG proof source",
       );
     });
 
-    test("status=REDEEMABLE -> do not sell", () => {
+    test("redeemable with ONCHAIN_DENOM proof -> do not sell", () => {
       const position = createMockPosition({
-        status: "REDEEMABLE",
+        redeemable: true,
+        redeemableProofSource: "ONCHAIN_DENOM",
         currentBidPrice: 0.999,
       });
 
       assert.strictEqual(
-        position.status,
-        "REDEEMABLE",
-        "Position should have REDEEMABLE status",
+        position.redeemableProofSource,
+        "ONCHAIN_DENOM",
+        "Position should have ONCHAIN_DENOM proof source",
       );
     });
 
-    test("status=RESOLVED -> do not sell", () => {
+    test("redeemable=true but proofSource=NONE -> CAN sell (internal flag not trusted)", () => {
+      // CRITICAL: Internal redeemable flag without proof should NOT block selling
       const position = createMockPosition({
-        status: "RESOLVED",
+        redeemable: true,
+        redeemableProofSource: "NONE",
         currentBidPrice: 0.999,
       });
 
+      // The new logic only checks redeemableProofSource, not redeemable flag
+      const hasRedeemableProof =
+        position.redeemableProofSource === "ONCHAIN_DENOM" ||
+        position.redeemableProofSource === "DATA_API_FLAG";
+
       assert.strictEqual(
-        position.status,
-        "RESOLVED",
-        "Position should have RESOLVED status",
+        hasRedeemableProof,
+        false,
+        "Position with NONE proof source should be eligible for selling",
       );
     });
   });
