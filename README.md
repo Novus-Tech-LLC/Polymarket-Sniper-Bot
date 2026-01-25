@@ -17,6 +17,7 @@
 ## ✨ What's New
 
 - 💵 **Auto-Redeem Positions** - Automatically claim resolved market positions (wins and losses) for USDC
+- 🚪 **On-Chain Exit Strategy** - Route NOT_TRADABLE positions to on-chain redemption when CLOB is unavailable
 - ⛓️ **On-Chain Trading Mode** - Bypass CLOB API entirely and trade directly on Polygon blockchain
 - 🧠 **Adaptive Learning System** - Learns from trade outcomes to prevent bad trades
 - 🔐 **Simplified Authentication** - Uses `createOrDeriveApiKey()` for clean credential management
@@ -80,6 +81,65 @@ Auto-redeem runs as **Priority 1** in the strategy orchestrator, ensuring resolv
 - ⚡ **Immediate USDC Availability** - Claimed funds ready for new trades instantly
 - 🔄 **Set and Forget** - No manual intervention required
 - 🧹 **Dust Prevention** - Skip tiny positions to save on gas costs
+
+## 🚪 On-Chain Exit Strategy (New)
+
+Handles positions that **cannot be traded on CLOB** (e.g., `executionStatus=NOT_TRADABLE_ON_CLOB`, `bookStatus=NO_BOOK_404/EMPTY_BOOK/BOOK_ANOMALY`) but still have high current price (≥99¢). These positions are stuck—AutoSell skips them because CLOB doesn't accept orders, but they may still be redeemable on-chain if the market has resolved.
+
+### When Is It Used?
+
+The OnChainExit strategy kicks in when:
+
+1. **AutoSell skips the position** - Position has `executionStatus=NOT_TRADABLE_ON_CLOB`
+2. **Price is high** - `currentPrice ≥ 99¢` (configurable threshold)
+3. **Market is resolved on-chain** - `payoutDenominator > 0` in the CTF contract
+
+### What Happens
+
+1. **Detection**: OnChainExit scans active positions that AutoSell skipped
+2. **On-Chain Check**: Verifies the market is resolved by checking `payoutDenominator`
+3. **Route to Redemption**: If resolved, the position is flagged for AutoRedeem to claim
+
+### Safety Checks
+
+- ✅ **Never attempts exit on unresolved markets** - Only acts when `payoutDenominator > 0`
+- ✅ **Respects price threshold** - Only high-value positions (≥99¢) are considered
+- ✅ **No double-processing** - AutoSell and OnChainExit don't process the same position
+- ✅ **Behind feature flag** - Can be disabled via `ON_CHAIN_EXIT_ENABLED=false`
+
+### Configuration
+
+```bash
+# On-chain exit is enabled by default
+ON_CHAIN_EXIT_ENABLED=true              # Enable/disable on-chain exit strategy
+ON_CHAIN_EXIT_PRICE_THRESHOLD=0.99      # Price threshold (0-1 scale, default: 99¢)
+ON_CHAIN_EXIT_MIN_POSITION_USD=0.01     # Skip positions below this value
+```
+
+### Log Output
+
+When OnChainExit processes positions, you'll see logs like:
+
+```
+[OnChainExit] scanned=5 found_redeemable=1 skipped_tradable=3 skipped_below_threshold=0 skipped_not_redeemable=1
+[OnChainExit] ✅ ON-CHAIN REDEEMABLE FOUND: tokenId=0xabc123... marketId=0xdef456... currentPrice=99.5¢ value=$50.00 payoutDenominator=1 (AutoRedeem will claim on next cycle)
+```
+
+**Skip Reasons:**
+- `TRADABLE_ON_CLOB` - Position is tradable via CLOB (AutoSell handles it)
+- `BELOW_PRICE_THRESHOLD` - Price below configured threshold
+- `NOT_REDEEMABLE_ONCHAIN` - Market not resolved on-chain yet (will retry next cycle)
+- `RPC_ERROR` - Error checking on-chain state
+
+### Execution Order
+
+OnChainExit runs in the orchestrator after AutoSell but before AutoRedeem:
+
+1. SellEarly (99.9¢+)
+2. AutoSell (99¢+ tradable positions)
+3. **OnChainExit** (99¢+ NOT_TRADABLE positions → checks on-chain redeemability)
+4. AutoRedeem (claims REDEEMABLE positions)
+5. Smart Hedging, Stop-Loss, etc.
 
 ## ⛓️ On-Chain Trading Mode (New - Framework Ready)
 

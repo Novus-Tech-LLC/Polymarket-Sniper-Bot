@@ -216,6 +216,14 @@ export const STRATEGY_PRESETS = {
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Avoid conflict with endgame sweep
+    /**
+     * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
+     * When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
+     * but have high currentPrice (≥99¢), check if they can be redeemed on-chain.
+     */
+    ON_CHAIN_EXIT_ENABLED: true, // Enable on-chain exit for non-tradable high-price positions
+    ON_CHAIN_EXIT_PRICE_THRESHOLD: 0.99, // Only consider positions at 99¢+
+    ON_CHAIN_EXIT_MIN_POSITION_USD: 0.01, // Attempt exit for any non-dust position
   },
   conservative: {
     STRATEGY_ENABLED: true,
@@ -311,6 +319,14 @@ export const STRATEGY_PRESETS = {
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Conservative: wait 60s before selling
+    /**
+     * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
+     * When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
+     * but have high currentPrice (≥99¢), check if they can be redeemed on-chain.
+     */
+    ON_CHAIN_EXIT_ENABLED: true, // Enable on-chain exit for non-tradable high-price positions
+    ON_CHAIN_EXIT_PRICE_THRESHOLD: 0.99, // Only consider positions at 99¢+
+    ON_CHAIN_EXIT_MIN_POSITION_USD: 0.01, // Attempt exit for any non-dust position
     // Rate limits
     ORDER_SUBMIT_MAX_PER_HOUR: 30,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 10000,
@@ -423,6 +439,14 @@ export const STRATEGY_PRESETS = {
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Balanced: wait 60s before selling
+    /**
+     * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
+     * When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
+     * but have high currentPrice (≥99¢), check if they can be redeemed on-chain.
+     */
+    ON_CHAIN_EXIT_ENABLED: true, // Enable on-chain exit for non-tradable high-price positions
+    ON_CHAIN_EXIT_PRICE_THRESHOLD: 0.99, // Only consider positions at 99¢+
+    ON_CHAIN_EXIT_MIN_POSITION_USD: 0.01, // Attempt exit for any non-dust position
     // Rate limits (higher for more trades)
     ORDER_SUBMIT_MAX_PER_HOUR: 60,
     ORDER_SUBMIT_MIN_INTERVAL_MS: 5000,
@@ -593,6 +617,16 @@ export const STRATEGY_PRESETS = {
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 30, // Aggressive: only 30s hold time
+
+    /**
+     * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
+     * When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
+     * but have high currentPrice (≥99¢), check if they can be redeemed on-chain.
+     * Aggressive preset: same settings as others, enabled by default.
+     */
+    ON_CHAIN_EXIT_ENABLED: true, // Enable on-chain exit for non-tradable high-price positions
+    ON_CHAIN_EXIT_PRICE_THRESHOLD: 0.99, // Only consider positions at 99¢+
+    ON_CHAIN_EXIT_MIN_POSITION_USD: 0.01, // Attempt exit for any non-dust position
 
     /**
      * RATE LIMITS - HIGH THROUGHPUT

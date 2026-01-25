@@ -1530,6 +1530,28 @@ export type StrategyConfig = {
    * Default: 60 (1 minute)
    */
   autoSellMinHoldSec: number;
+  // === ON-CHAIN EXIT STRATEGY SETTINGS ===
+  // Handles positions that are NOT_TRADABLE_ON_CLOB but have high price (≥99¢)
+  // Routes to on-chain redemption when market is resolved
+  /**
+   * Enable on-chain exit strategy
+   * When positions cannot be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
+   * but have high currentPrice, check if they can be redeemed on-chain.
+   * Default: true
+   */
+  onChainExitEnabled: boolean;
+  /**
+   * Price threshold for on-chain exit (0.0-1.0 scale, e.g., 0.99 = 99¢)
+   * Only positions at or above this price will be considered for on-chain exit.
+   * Default: 0.99
+   */
+  onChainExitPriceThreshold: number;
+  /**
+   * Minimum position value (USD) for on-chain exit
+   * Prevents attempting redemption for dust positions.
+   * Default: 0.01
+   */
+  onChainExitMinPositionUsd: number;
   // Combined settings from ARB and MONITOR
   arbConfig?: ArbRuntimeConfig;
   monitorConfig?: MonitorRuntimeConfig;
@@ -2086,6 +2108,30 @@ export function loadStrategyConfig(
         ? (preset as { AUTO_SELL_MIN_HOLD_SEC: number }).AUTO_SELL_MIN_HOLD_SEC
         : undefined) ??
       60, // Default: 60 seconds - avoid conflict with endgame sweep
+    // === ON-CHAIN EXIT STRATEGY (routes NOT_TRADABLE positions to redemption) ===
+    // ON_CHAIN_EXIT_ENABLED: Enable on-chain exit for positions that cannot trade on CLOB
+    onChainExitEnabled:
+      parseBool(readEnv("ON_CHAIN_EXIT_ENABLED", overrides) ?? "") ??
+      ("ON_CHAIN_EXIT_ENABLED" in preset
+        ? (preset as { ON_CHAIN_EXIT_ENABLED: boolean }).ON_CHAIN_EXIT_ENABLED
+        : undefined) ??
+      true, // Default: enabled - route NOT_TRADABLE high-price positions to redemption
+    // ON_CHAIN_EXIT_PRICE_THRESHOLD: Price threshold for on-chain exit (0.0-1.0 scale)
+    onChainExitPriceThreshold:
+      parseNumber(readEnv("ON_CHAIN_EXIT_PRICE_THRESHOLD", overrides) ?? "") ??
+      ("ON_CHAIN_EXIT_PRICE_THRESHOLD" in preset
+        ? (preset as { ON_CHAIN_EXIT_PRICE_THRESHOLD: number })
+            .ON_CHAIN_EXIT_PRICE_THRESHOLD
+        : undefined) ??
+      0.99, // Default: 99¢ - only high-value positions
+    // ON_CHAIN_EXIT_MIN_POSITION_USD: Minimum position value for on-chain exit
+    onChainExitMinPositionUsd:
+      parseNumber(readEnv("ON_CHAIN_EXIT_MIN_POSITION_USD", overrides) ?? "") ??
+      ("ON_CHAIN_EXIT_MIN_POSITION_USD" in preset
+        ? (preset as { ON_CHAIN_EXIT_MIN_POSITION_USD: number })
+            .ON_CHAIN_EXIT_MIN_POSITION_USD
+        : undefined) ??
+      0.01, // Default: $0.01 - attempt for any non-dust position
   };
 
   // Apply preset settings to environment for ARB and MONITOR config loaders

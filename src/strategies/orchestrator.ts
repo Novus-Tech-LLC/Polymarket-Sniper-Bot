@@ -14,11 +14,12 @@
  * 1. Refresh PositionTracker (single-flight, awaited by all strategies)
  * 2. SellEarly - CAPITAL EFFICIENCY: Sell near-$1 ACTIVE positions (99.9¢+)
  * 3. AutoSell - NEAR-RESOLUTION EXIT: Sell ACTIVE positions at 99¢+ (dispute exit at 99.9¢)
- * 4. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
- * 5. Smart Hedging - Hedge losing positions
- * 6. Universal Stop-Loss - Sell positions at max loss
- * 7. Scalp Take-Profit - Time-based profit taking with momentum checks
- * 8. Endgame Sweep - Buy high-confidence positions
+ * 4. OnChainExit - Route NOT_TRADABLE positions to on-chain redemption (≥99¢)
+ * 5. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
+ * 6. Smart Hedging - Hedge losing positions
+ * 7. Universal Stop-Loss - Sell positions at max loss
+ * 8. Scalp Take-Profit - Time-based profit taking with momentum checks
+ * 9. Endgame Sweep - Buy high-confidence positions
  */
 
 import { randomUUID } from "crypto";
@@ -59,6 +60,11 @@ import {
   DEFAULT_AUTO_SELL_CONFIG,
 } from "./auto-sell";
 import {
+  OnChainExitStrategy,
+  type OnChainExitConfig,
+  DEFAULT_ON_CHAIN_EXIT_CONFIG,
+} from "./on-chain-exit";
+import {
   UniversalStopLossStrategy,
   type UniversalStopLossConfig,
 } from "./universal-stop-loss";
@@ -89,6 +95,7 @@ export interface OrchestratorConfig {
   autoRedeemConfig?: Partial<AutoRedeemConfig>;
   sellEarlyConfig?: Partial<SellEarlyConfig>;
   autoSellConfig?: Partial<AutoSellConfig>;
+  onChainExitConfig?: Partial<OnChainExitConfig>;
   stopLossConfig?: Partial<UniversalStopLossConfig>;
   dynamicReservesConfig?: Partial<DynamicReservesConfig>;
   /** Wallet balance fetcher for dynamic reserves (optional - if not provided, reserves are disabled) */
@@ -107,6 +114,7 @@ export class Orchestrator {
   // All strategies
   private sellEarlyStrategy: SellEarlyStrategy;
   private autoSellStrategy: AutoSellStrategy;
+  private onChainExitStrategy: OnChainExitStrategy;
   private autoRedeemStrategy: AutoRedeemStrategy;
   private hedgingStrategy: SmartHedgingStrategy;
   private stopLossStrategy: UniversalStopLossStrategy;
@@ -209,7 +217,21 @@ export class Orchestrator {
       },
     });
 
-    // 3. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
+    // 3. OnChainExit - Route NOT_TRADABLE positions to on-chain redemption
+    // When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
+    // but have high currentPrice (≥99¢), check if they can be redeemed on-chain.
+    // Runs BEFORE Auto-Redeem to prepare positions for redemption.
+    this.onChainExitStrategy = new OnChainExitStrategy({
+      client: config.client,
+      logger: config.logger,
+      positionTracker: this.positionTracker,
+      config: {
+        ...DEFAULT_ON_CHAIN_EXIT_CONFIG,
+        ...config.onChainExitConfig,
+      },
+    });
+
+    // 4. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
     // Uses relayer for gasless redemptions when available (recommended)
     this.autoRedeemStrategy = new AutoRedeemStrategy({
       client: config.client,
@@ -437,7 +459,16 @@ export class Orchestrator {
         strategyTimings,
       );
 
-      // 3. Auto-Redeem - get money back from REDEEMABLE positions
+      // 3. OnChainExit - Route NOT_TRADABLE positions to on-chain redemption
+      //    Handles positions that AutoSell skips (executionStatus=NOT_TRADABLE_ON_CLOB)
+      //    but have high currentPrice (≥99¢) and can be redeemed on-chain
+      await this.runStrategyTimed(
+        "OnChainExit",
+        () => this.onChainExitStrategy.execute(),
+        strategyTimings,
+      );
+
+      // 4. Auto-Redeem - get money back from REDEEMABLE positions
       await this.runStrategyTimed(
         "AutoRedeem",
         () => this.autoRedeemStrategy.execute(),
