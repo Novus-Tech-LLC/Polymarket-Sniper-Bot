@@ -232,11 +232,11 @@ export class Orchestrator {
     });
 
     // 4. Auto-Redeem - Claim REDEEMABLE positions (get money back!)
-    // Uses relayer for gasless redemptions when available (recommended)
+    // AutoRedeem fetches positions directly from Data API and checks on-chain
+    // payoutDenominator - it does NOT use PositionTracker.
     this.autoRedeemStrategy = new AutoRedeemStrategy({
       client: config.client,
       logger: config.logger,
-      positionTracker: this.positionTracker,
       relayer: relayerContext,
       config: {
         enabled: true,

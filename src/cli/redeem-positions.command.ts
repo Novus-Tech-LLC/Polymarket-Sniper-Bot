@@ -27,7 +27,6 @@
 import "dotenv/config";
 import { createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
 import { ConsoleLogger } from "../utils/logger.util";
-import { PositionTracker } from "../strategies/position-tracker";
 import { AutoRedeemStrategy } from "../strategies/auto-redeem";
 
 // Parse CLI arguments
@@ -98,59 +97,13 @@ async function run(): Promise<void> {
   const client = await auth.getClobClient();
   logger.info(`💳 Wallet: ${client.wallet.address}\n`);
 
-  // Initialize position tracker
-  logger.info("📊 Fetching positions...");
-  const positionTracker = new PositionTracker({
-    client,
-    logger,
-    refreshIntervalMs: 30000,
-  });
-
-  // Manually refresh to get initial positions
-  await positionTracker.refresh();
-
-  const allPositions = positionTracker.getPositions();
-  const redeemablePositions = allPositions.filter(
-    (pos) => pos.redeemable === true,
-  );
-
-  logger.info(`📈 Total positions: ${allPositions.length}`);
-  logger.info(`💰 Redeemable positions: ${redeemablePositions.length}\n`);
-
-  if (redeemablePositions.length === 0) {
-    logger.info(
-      "✅ No positions to redeem. All markets are still active or already claimed.\n",
-    );
-    process.exit(0);
-  }
-
-  // Display redeemable positions with win/loss categorization
-  const winners = redeemablePositions.filter((p) => p.currentPrice >= 0.5);
-  const losers = redeemablePositions.filter((p) => p.currentPrice < 0.5);
-
-  logger.info("📋 Redeemable positions found:");
-  logger.info(`   Winners: ${winners.length}, Losers: ${losers.length}\n`);
-
-  for (const pos of redeemablePositions) {
-    const value = pos.size * pos.currentPrice;
-    const winLoss = pos.currentPrice >= 0.5 ? "WIN" : "LOSS";
-    const willSkip =
-      !includeLosses && value < 0.001
-        ? " [WILL SKIP - $0 loser]"
-        : value < minValueUsd
-          ? " [WILL SKIP - below min]"
-          : "";
-    logger.info(
-      `  - Market: ${pos.marketId.substring(0, 16)}... | Side: ${pos.side} | Size: ${pos.size.toFixed(2)} | Value: $${value.toFixed(4)} (${winLoss})${willSkip}`,
-    );
-  }
-  logger.info("");
-
   // Initialize auto-redeem strategy
+  // AutoRedeem fetches positions directly from Data API and checks on-chain
+  // payoutDenominator - it does NOT use PositionTracker.
+  logger.info("📊 Initializing redemption (fetches positions directly)...");
   const autoRedeemStrategy = new AutoRedeemStrategy({
     client,
     logger,
-    positionTracker,
     config: {
       enabled: true,
       minPositionUsd: minValueUsd,

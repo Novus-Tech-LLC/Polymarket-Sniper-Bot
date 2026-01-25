@@ -18,12 +18,47 @@ import { Contract, Interface, Wallet, ZeroHash } from "ethers";
 import type { TransactionResponse } from "ethers";
 import type { ClobClient } from "@polymarket/clob-client";
 import type { ConsoleLogger } from "../utils/logger.util";
-import type { PositionTracker, Position } from "./position-tracker";
 import type { RelayerContext } from "../polymarket/relayer";
 import { httpGet } from "../utils/fetch-data.util";
 import { POLYMARKET_API } from "../constants/polymarket.constants";
 import { resolvePolymarketContracts } from "../polymarket/contracts";
 import { CTF_ABI, PROXY_WALLET_ABI } from "../trading/exchange-abi";
+import { resolveSignerAddress } from "../utils/funds-allowance.util";
+
+/**
+ * Minimal position data needed for redemption.
+ * AutoRedeem fetches this directly from the Data API instead of using PositionTracker.
+ *
+ * WHY NOT USE POSITIONTRACKER?
+ * AutoRedeem's responsibility is simple: find positions where payoutDenominator > 0 on-chain
+ * and redeem them. It doesn't need PositionTracker's complex state machine, P&L calculations,
+ * or orderbook data. By scanning on-chain directly (via the payoutDenominator check),
+ * AutoRedeem is authoritative about what can actually be redeemed.
+ *
+ * The Data API provides the list of tokenIds/conditionIds to check. The on-chain
+ * payoutDenominator check is the ONLY authority for redeemability.
+ */
+export interface RedeemablePosition {
+  /** Token ID (ERC-1155 token identifier) */
+  tokenId: string;
+  /** Condition ID / Market ID (bytes32 conditionId for CTF contract) */
+  marketId: string;
+  /** Number of shares held */
+  size: number;
+  /** Current price (used for value estimation, not redeemability) */
+  currentPrice: number;
+}
+
+/**
+ * Raw position data from Data API /positions endpoint
+ */
+interface DataApiPosition {
+  asset: string; // tokenId
+  conditionId: string; // marketId/conditionId
+  size: number;
+  curPrice?: number;
+  redeemable?: boolean;
+}
 
 /**
  * Auto-Redeem Configuration
@@ -67,11 +102,15 @@ export interface RedemptionResult {
 
 /**
  * Auto-Redeem Strategy Options
+ *
+ * NOTE: AutoRedeem does NOT use PositionTracker. It fetches positions directly
+ * from the Data API and uses on-chain payoutDenominator checks as the sole
+ * authority for redeemability. This avoids coupling to PositionTracker's
+ * complex state machine and ensures AutoRedeem is self-contained.
  */
 export interface AutoRedeemStrategyOptions {
   client: ClobClient;
   logger: ConsoleLogger;
-  positionTracker: PositionTracker;
   relayer?: RelayerContext;
   config: AutoRedeemConfig;
 }
@@ -80,16 +119,32 @@ export interface AutoRedeemStrategyOptions {
  * Auto-Redeem Strategy
  *
  * Automatically claims resolved positions to recover USDC.
+ *
+ * ARCHITECTURE: Direct On-Chain Scanning (No PositionTracker)
+ * ============================================================
+ * AutoRedeem fetches wallet holdings directly from the Data API and uses
+ * on-chain payoutDenominator checks to determine redeemability. This design:
+ *
+ * 1. AVOIDS PositionTracker dependency - AutoRedeem is self-contained
+ * 2. Uses on-chain state as the SOLE AUTHORITY for redeemability
+ * 3. Data API provides tokenIds/conditionIds to check (not redeemability)
+ * 4. payoutDenominator > 0 is the ONLY criterion for redemption
+ *
+ * The strict redeemable state machine is implemented HERE via checkOnChainResolved(),
+ * not inherited from PositionTracker.
  */
 export class AutoRedeemStrategy {
   private client: ClobClient;
   private logger: ConsoleLogger;
-  private positionTracker: PositionTracker;
   private config: AutoRedeemConfig;
 
   // === SINGLE-FLIGHT GUARD ===
   // Prevents concurrent execution if called multiple times
   private inFlight = false;
+
+  // === INTERVAL-BASED THROTTLING ===
+  // AutoRedeem only runs every checkIntervalMs to avoid hammering APIs
+  private lastCheckTimeMs = 0;
 
   // Timing constants
   private static readonly API_TIMEOUT_MS = 10_000;
@@ -124,20 +179,29 @@ export class AutoRedeemStrategy {
   constructor(options: AutoRedeemStrategyOptions) {
     this.client = options.client;
     this.logger = options.logger;
-    this.positionTracker = options.positionTracker;
     this.config = options.config;
   }
 
   /**
    * Execute the auto-redeem check cycle
-   * Called by the orchestrator on a schedule
+   * Called by the orchestrator on a schedule (every 2s), but only runs
+   * when checkIntervalMs has elapsed since last check.
    *
+   * INTERVAL-BASED THROTTLING: Only checks every checkIntervalMs (default 30s)
    * SINGLE-FLIGHT: Skips if already running (returns 0)
    *
    * @returns The number of successful redemptions
    */
   async execute(): Promise<number> {
     if (!this.config.enabled) {
+      return 0;
+    }
+
+    // Interval-based throttling: only run every checkIntervalMs
+    const now = Date.now();
+    const timeSinceLastCheck = now - this.lastCheckTimeMs;
+    if (timeSinceLastCheck < this.config.checkIntervalMs) {
+      // Not yet time to check - silently skip (no log spam)
       return 0;
     }
 
@@ -148,6 +212,7 @@ export class AutoRedeemStrategy {
     }
 
     this.inFlight = true;
+    this.lastCheckTimeMs = now; // Update last check time
     try {
       return await this.executeInternal();
     } finally {
@@ -158,57 +223,31 @@ export class AutoRedeemStrategy {
   /**
    * Internal execution logic (called by execute() with in-flight guard)
    *
-   * UPDATED (Jan 2025): Now includes preflight on-chain check for each position
-   * to be authoritative about redeemability. If payoutDenominator == 0, position
-   * is skipped and NOT treated as redeemable (allows AutoSell to handle if bids exist).
+   * ARCHITECTURE (Jan 2025 Refactor):
+   * =================================
+   * AutoRedeem no longer uses PositionTracker. Instead:
+   * 1. Fetches positions directly from Data API (source of tokenIds)
+   * 2. Checks on-chain payoutDenominator for each position
+   * 3. Only redeems positions where payoutDenominator > 0
+   *
+   * The on-chain check is the SOLE AUTHORITY for redeemability.
    */
   private async executeInternal(): Promise<number> {
-    const redeemablePositions = this.getRedeemablePositions();
+    // getRedeemablePositions now fetches from Data API and checks on-chain
+    const redeemablePositions = await this.getRedeemablePositions();
 
     if (redeemablePositions.length === 0) {
       return 0;
     }
 
     this.logger.info(
-      `[AutoRedeem] Found ${redeemablePositions.length} redeemable position(s), checking on-chain resolution...`,
+      `[AutoRedeem] Found ${redeemablePositions.length} on-chain redeemable position(s), executing redemptions...`,
     );
 
     let successCount = 0;
-    let skippedNotResolved = 0;
 
     for (const position of redeemablePositions) {
-      // Check if we should skip due to recent failures
-      if (this.shouldSkipRedemption(position.marketId)) {
-        continue;
-      }
-
-      // === PREFLIGHT ON-CHAIN CHECK (Jan 2025 Fix) ===
-      // Verify payoutDenominator > 0 before attempting redemption.
-      // This makes AutoRedeem the source of truth during continuous runs
-      // instead of blindly trusting PositionTracker's redeemable flag.
-      const isOnChainResolved = await this.checkOnChainResolved(
-        position.marketId,
-      );
-
-      if (!isOnChainResolved) {
-        // Position is NOT resolved on-chain - skip and do not treat as redeemable
-        skippedNotResolved++;
-        const positionValue = position.size * position.currentPrice;
-        this.logger.debug(
-          `[AutoRedeem] ⏭️ SKIP (not resolved on-chain): tokenId=${position.tokenId.slice(0, 12)}... ` +
-            `marketId=${position.marketId.slice(0, 16)}... value=$${positionValue.toFixed(2)} ` +
-            `(payoutDenominator=0, will retry next cycle)`,
-        );
-
-        // Set short cooldown to avoid rapid retries
-        this.redemptionAttempts.set(position.marketId, {
-          lastAttempt: Date.now(),
-          failures: 0, // Don't count as failure - just not ready yet
-        });
-        continue;
-      }
-
-      // On-chain confirmed - proceed with redemption
+      // On-chain already confirmed in getRedeemablePositions - proceed with redemption
       const result = await this.redeemPositionWithRetry(position);
 
       // Track attempts
@@ -227,41 +266,40 @@ export class AutoRedeemStrategy {
       }
     }
 
-    // Log summary if any positions were skipped
-    if (skippedNotResolved > 0) {
-      this.logger.info(
-        `[AutoRedeem] Summary: ${successCount} redeemed, ${skippedNotResolved} skipped (not resolved on-chain)`,
-      );
-    }
+    this.logger.info(
+      `[AutoRedeem] Summary: ${successCount} of ${redeemablePositions.length} redeemed successfully`,
+    );
 
     return successCount;
   }
 
   /**
    * Force redeem all positions (for CLI use)
-   * Includes on-chain preflight checks to avoid failed redemptions.
+   * Fetches positions directly from Data API and checks on-chain payoutDenominator.
+   *
+   * STRICT REDEEMABLE STATE MACHINE:
+   * Only redeems positions where payoutDenominator > 0 on-chain.
+   * Data API is only used to get the list of tokenIds to check.
    *
    * @param includeLosses - If true, includes $0 positions (losses). Default is true.
    * @returns Array of redemption results with detailed skip reasons
    */
   async forceRedeemAll(includeLosses = true): Promise<RedemptionResult[]> {
-    // Get all redeemable positions first (before min value filter)
-    const allRedeemable = this.positionTracker
-      .getPositions()
-      .filter((pos) => pos.redeemable === true);
+    // Fetch all positions directly from Data API (not from PositionTracker)
+    const allPositions = await this.fetchPositionsFromDataApi();
 
-    if (allRedeemable.length === 0) {
-      this.logger.info("[AutoRedeem] No redeemable positions found");
+    if (allPositions.length === 0) {
+      this.logger.info("[AutoRedeem] No positions found in wallet");
       return [];
     }
 
     this.logger.info(
-      `[AutoRedeem] Found ${allRedeemable.length} redeemable position(s), checking on-chain resolution...`,
+      `[AutoRedeem] Found ${allPositions.length} position(s), checking on-chain resolution...`,
     );
 
     const results: RedemptionResult[] = [];
 
-    for (const position of allRedeemable) {
+    for (const position of allPositions) {
       const positionValue = position.size * position.currentPrice;
 
       // Check min value filter:
@@ -302,6 +340,7 @@ export class AutoRedeemStrategy {
       }
 
       // On-chain preflight check: verify payoutDenominator > 0 before sending tx
+      // This is the ONLY authority for redeemability
       const isOnChainResolved = await this.checkOnChainResolved(
         position.marketId,
       );
@@ -327,7 +366,7 @@ export class AutoRedeemStrategy {
       results.push(result);
 
       // Longer delay between redemptions
-      if (allRedeemable.indexOf(position) < allRedeemable.length - 1) {
+      if (allPositions.indexOf(position) < allPositions.length - 1) {
         await this.sleep(AutoRedeemStrategy.REDEMPTION_DELAY_MS);
       }
     }
@@ -463,15 +502,98 @@ export class AutoRedeemStrategy {
   }
 
   /**
-   * Get positions that are marked as redeemable
+   * Fetch all positions from Data API.
+   * This is the source of tokenIds/conditionIds to check for redemption.
+   * The Data API `redeemable` flag is NOT used - on-chain payoutDenominator is authoritative.
+   *
+   * @returns Array of positions from wallet holdings
    */
-  private getRedeemablePositions(): Position[] {
-    return this.positionTracker
-      .getPositions()
-      .filter((pos) => pos.redeemable === true)
-      .filter(
-        (pos) => pos.size * pos.currentPrice >= this.config.minPositionUsd,
+  private async fetchPositionsFromDataApi(): Promise<RedeemablePosition[]> {
+    try {
+      const walletAddress = resolveSignerAddress(this.client);
+      if (!walletAddress || walletAddress === "unknown") {
+        this.logger.debug(
+          "[AutoRedeem] Cannot resolve wallet address for Data API fetch",
+        );
+        return [];
+      }
+
+      const url = POLYMARKET_API.POSITIONS_ENDPOINT(walletAddress);
+      const apiPositions = await httpGet<DataApiPosition[]>(url, {
+        timeout: AutoRedeemStrategy.API_TIMEOUT_MS,
+      });
+
+      if (!Array.isArray(apiPositions)) {
+        this.logger.debug(
+          "[AutoRedeem] Data API returned non-array response",
+        );
+        return [];
+      }
+
+      // Map to RedeemablePosition format
+      // Note: We do NOT filter by redeemable flag - on-chain check is authoritative
+      return apiPositions
+        .filter((p) => p.asset && p.conditionId && p.size > 0)
+        .map((p) => ({
+          tokenId: p.asset,
+          marketId: p.conditionId,
+          size: p.size,
+          currentPrice: p.curPrice ?? 0,
+        }));
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(
+        `[AutoRedeem] Failed to fetch positions from Data API: ${errMsg}`,
       );
+      return [];
+    }
+  }
+
+  /**
+   * Get positions that are redeemable ON-CHAIN.
+   *
+   * STRICT REDEEMABLE STATE MACHINE:
+   * ================================
+   * A position is ONLY redeemable if payoutDenominator(conditionId) > 0 on-chain.
+   * - Data API `redeemable` flag is NOT trusted (can be stale or wrong)
+   * - Price near 1.0 does NOT imply redeemable
+   * - Empty orderbook does NOT imply redeemable
+   * - Gamma "winner" field does NOT imply redeemable
+   *
+   * ONLY on-chain payoutDenominator > 0 is authoritative.
+   *
+   * @returns Array of positions that are confirmed redeemable on-chain
+   */
+  private async getRedeemablePositions(): Promise<RedeemablePosition[]> {
+    // 1. Fetch all positions from Data API (source of tokenIds)
+    const allPositions = await this.fetchPositionsFromDataApi();
+
+    if (allPositions.length === 0) {
+      return [];
+    }
+
+    // 2. Filter by minimum value threshold
+    const aboveMinValue = allPositions.filter(
+      (pos) => pos.size * pos.currentPrice >= this.config.minPositionUsd,
+    );
+
+    // 3. Check on-chain payoutDenominator for each position
+    // This is the AUTHORITATIVE check for redeemability
+    const redeemable: RedeemablePosition[] = [];
+
+    for (const pos of aboveMinValue) {
+      // Skip if in cooldown due to recent failures
+      if (this.shouldSkipRedemption(pos.marketId)) {
+        continue;
+      }
+
+      const isOnChainResolved = await this.checkOnChainResolved(pos.marketId);
+      if (isOnChainResolved) {
+        redeemable.push(pos);
+      }
+    }
+
+    return redeemable;
   }
 
   /**
@@ -546,7 +668,7 @@ export class AutoRedeemStrategy {
    * Redeem a position with retry logic for transient errors (rate limiting, nonce issues)
    */
   private async redeemPositionWithRetry(
-    position: Position,
+    position: RedeemablePosition,
   ): Promise<RedemptionResult> {
     let lastResult: RedemptionResult | null = null;
 
@@ -598,7 +720,9 @@ export class AutoRedeemStrategy {
    * Redeem a single position
    * Based on: https://github.com/milanzandbak/polymarketredeemer/blob/main/polyredeemer.js
    */
-  private async redeemPosition(position: Position): Promise<RedemptionResult> {
+  private async redeemPosition(
+    position: RedeemablePosition,
+  ): Promise<RedemptionResult> {
     const wallet = (this.client as { wallet?: Wallet }).wallet;
 
     if (!wallet) {

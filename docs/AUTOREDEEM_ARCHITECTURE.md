@@ -1,208 +1,80 @@
-# AutoRedeem Architecture: Why PositionTracker, Not On-Chain Scanning
+# AutoRedeem Architecture: Direct On-Chain Scanning
 
 ## Overview
 
-AutoRedeem uses `PositionTracker` as its source of truth for redeemable positions instead of directly scanning on-chain wallet holdings. This design choice is intentional and provides significant advantages in terms of reliability, efficiency, and correctness.
+AutoRedeem **does NOT use PositionTracker**. Instead, it fetches wallet holdings directly from the Data API and uses on-chain `payoutDenominator` checks as the **sole authority** for redeemability.
 
-## Why Not Scan On-Chain Wallet Holdings Directly?
+## Why Not Use PositionTracker?
 
-### 1. **State Complexity**
+### 1. **Separation of Concerns**
 
-Scanning on-chain ERC-1155 token balances (Conditional Tokens) directly would require:
-- Enumerating all possible tokenIds the user has ever held
-- Querying balanceOf for each tokenId
-- Mapping tokenIds back to conditionIds/marketIds for redemption
-- Tracking which markets are resolved vs still active
+AutoRedeem's responsibility is simple: find positions where `payoutDenominator > 0` on-chain and redeem them. It doesn't need:
+- PositionTracker's complex state machine
+- P&L calculations
+- Orderbook data
+- Price tracking
 
-The PositionTracker already maintains this mapping efficiently through Polymarket's Data API, which provides position data with metadata like `conditionId`, `marketId`, and `redeemable` flags.
+### 2. **On-Chain is the Only Authority**
 
-### 2. **The Redeemable Flag Problem**
+The Data API's `redeemable` flag can be:
+- Stale (not yet updated after market resolution)
+- Incorrect (edge cases, bugs)
+- Optimistic (set before on-chain resolution is posted)
 
-A raw on-chain scan cannot distinguish between:
-- **ACTIVE positions**: Market still trading, shares have value
-- **REDEEMABLE positions**: Market resolved, shares can be redeemed
-- **CLOSED_NOT_REDEEMABLE**: Market ended but on-chain resolution not posted yet
+Only the on-chain `payoutDenominator > 0` check is authoritative.
 
-PositionTracker solves this through its **strict redeemable state machine**.
+### 3. **Self-Contained Strategy**
 
-### 3. **RPC Cost and Latency**
-
-Directly querying on-chain state for every position on every cycle would:
-- Require N RPC calls per position (balance check + payout check)
-- Incur significant latency (100-500ms per call)
-- Risk rate limiting from RPC providers
-
-PositionTracker batches these efficiently and caches results.
+By fetching directly from Data API and checking on-chain, AutoRedeem is:
+- Independent of PositionTracker's refresh cycle
+- Not affected by PositionTracker bugs or state issues
+- Simpler to test and reason about
 
 ---
 
 ## The Strict Redeemable State Machine
 
-Located in `src/strategies/position-tracker.ts`, the state machine defines **non-negotiable state definitions**:
+AutoRedeem implements its own strict state machine in `checkOnChainResolved()`:
 
 ```typescript
 /**
- * STRICT POSITION STATE MACHINE (Jan 2025 Refactor)
+ * STRICT REDEEMABLE STATE MACHINE:
+ * ================================
+ * A position is ONLY redeemable if payoutDenominator(conditionId) > 0 on-chain.
+ * - Data API `redeemable` flag is NOT trusted (can be stale or wrong)
+ * - Price near 1.0 does NOT imply redeemable
+ * - Empty orderbook does NOT imply redeemable
+ * - Gamma "winner" field does NOT imply redeemable
  *
- * NON-NEGOTIABLE STATE DEFINITIONS:
- *
- * ACTIVE:
- *   - Default state for all positions with shares > 0
- *   - Position remains ACTIVE unless we have EXPLICIT PROOF it's REDEEMABLE
- *   - Price near 1.0 does NOT imply resolved
- *   - Empty orderbook does NOT imply resolved
- *   - Gamma "winner" metadata does NOT imply redeemable (only market closed)
- *
- * REDEEMABLE:
- *   - Only if EITHER:
- *     (a) Data-API positions payload explicitly flags redeemable=true, OR
- *     (b) On-chain ConditionalTokens.payoutDenominator(conditionId) > 0
- *   - DO NOT infer from price ≈ 1.0
- *   - DO NOT infer from empty orderbook
- *   - DO NOT infer from Gamma "winner" field alone
- *
- * CLOSED_NOT_REDEEMABLE:
- *   - Market is closed/ended (Gamma says closed=true or end_date passed)
- *   - BUT on-chain resolution not yet posted (payoutDenominator == 0)
- *   - Trading strategies should STOP acting, but NOT treat as redeemable
+ * ONLY on-chain payoutDenominator > 0 is authoritative.
  */
-export type PositionState =
-  | "ACTIVE"
-  | "REDEEMABLE"
-  | "CLOSED_NOT_REDEEMABLE"
-  | "UNKNOWN";
 ```
 
-### Redeemable Proof Sources
+### Implementation in `checkOnChainResolved()`
 
-The state machine tracks HOW a position was determined to be redeemable:
-
-```typescript
-export type RedeemableProofSource =
-  | "DATA_API_FLAG"        // Data-API returned redeemable=true AND on-chain verified
-  | "DATA_API_UNCONFIRMED" // Data-API says redeemable but on-chain NOT verified
-  | "ONCHAIN_DENOM"        // On-chain payoutDenominator > 0
-  | "NONE";                // Not redeemable
-```
-
-**Critical**: `DATA_API_UNCONFIRMED` positions are routed to AutoSell (if bids exist), NOT AutoRedeem.
-
----
-
-## How AutoRedeem Filters from PositionTracker
-
-### Primary Filter: `getRedeemablePositions()`
-
-In `src/strategies/auto-redeem.ts` (line 468-475):
-
-```typescript
-/**
- * Get positions that are marked as redeemable
- */
-private getRedeemablePositions(): Position[] {
-  return this.positionTracker
-    .getPositions()
-    .filter((pos) => pos.redeemable === true)
-    .filter(
-      (pos) => pos.size * pos.currentPrice >= this.config.minPositionUsd,
-    );
-}
-```
-
-This filters to positions where:
-1. `redeemable === true` (set by PositionTracker's state machine)
-2. Position value >= `minPositionUsd` config threshold
-
-### Force Redeem Filter: `forceRedeemAll()`
-
-For CLI-triggered redemption (line 247-256):
-
-```typescript
-async forceRedeemAll(includeLosses = true): Promise<RedemptionResult[]> {
-  // Get all redeemable positions first (before min value filter)
-  const allRedeemable = this.positionTracker
-    .getPositions()
-    .filter((pos) => pos.redeemable === true);
-
-  if (allRedeemable.length === 0) {
-    this.logger.info("[AutoRedeem] No redeemable positions found");
-    return [];
-  }
-  // ...
-}
-```
-
----
-
-## The On-Chain Preflight Check
-
-**Even when PositionTracker says a position is redeemable**, AutoRedeem performs an on-chain verification before sending any transaction. This is the **preflight check**.
-
-### Why Preflight?
-
-1. **Data API Latency**: The Data API may mark positions redeemable before on-chain resolution is posted
-2. **Race Conditions**: Market resolution happens asynchronously
-3. **Failed Transaction Prevention**: Sending redemption tx to unresolved market wastes gas and fails
-
-### Implementation
-
-In `src/strategies/auto-redeem.ts` (lines 185-209):
-
-```typescript
-// === PREFLIGHT ON-CHAIN CHECK (Jan 2025 Fix) ===
-// Verify payoutDenominator > 0 before attempting redemption.
-// This makes AutoRedeem the source of truth during continuous runs
-// instead of blindly trusting PositionTracker's redeemable flag.
-const isOnChainResolved = await this.checkOnChainResolved(
-  position.marketId,
-);
-
-if (!isOnChainResolved) {
-  // Position is NOT resolved on-chain - skip and do not treat as redeemable
-  skippedNotResolved++;
-  const positionValue = position.size * position.currentPrice;
-  this.logger.debug(
-    `[AutoRedeem] ⏭️ SKIP (not resolved on-chain): tokenId=${position.tokenId.slice(0, 12)}... ` +
-      `marketId=${position.marketId.slice(0, 16)}... value=$${positionValue.toFixed(2)} ` +
-      `(payoutDenominator=0, will retry next cycle)`,
-  );
-  // ...
-  continue;
-}
-
-// On-chain confirmed - proceed with redemption
-const result = await this.redeemPositionWithRetry(position);
-```
-
-### The `checkOnChainResolved()` Method
-
-Located at lines 374-463, this method:
-
-1. **Validates conditionId format** (must be bytes32)
-2. **Checks cache** to avoid redundant RPC calls (5-minute TTL)
-3. **Queries CTF contract** for `payoutDenominator(conditionId)`
-4. **Returns true only if** `payoutDenominator > 0`
+Located in `src/strategies/auto-redeem.ts`:
 
 ```typescript
 private async checkOnChainResolved(conditionId: string): Promise<boolean> {
-  // Validate conditionId format (bytes32)
+  // 1. Validate conditionId format (bytes32)
   if (!conditionId?.startsWith("0x") || conditionId.length !== 66) {
     return false;
   }
 
-  // Check cache first
+  // 2. Check cache (5-minute TTL to reduce RPC calls)
   const cached = this.payoutDenominatorCache.get(conditionId);
-  if (cached && now - cached.checkedAt < 300_000) { // 5 min TTL
+  if (cached && now - cached.checkedAt < 300_000) {
     return cached.resolved;
   }
 
-  // Query on-chain
+  // 3. Query on-chain CTF contract
   const ctfContract = new Contract(ctfAddress, CTF_ABI, wallet.provider);
   const denominator = await ctfContract.payoutDenominator(conditionId);
   
+  // 4. ONLY if denominator > 0 is position redeemable
   const isResolved = denominator > 0n;
   
-  // Cache result
+  // 5. Cache result
   this.payoutDenominatorCache.set(conditionId, {
     resolved: isResolved,
     checkedAt: now,
@@ -214,29 +86,73 @@ private async checkOnChainResolved(conditionId: string): Promise<boolean> {
 
 ---
 
-## Summary: The Three-Layer Safety Model
+## How AutoRedeem Fetches Positions
+
+### Step 1: Fetch from Data API
+
+AutoRedeem calls the Data API `/positions` endpoint directly:
+
+```typescript
+private async fetchPositionsFromDataApi(): Promise<RedeemablePosition[]> {
+  const walletAddress = resolveSignerAddress(this.client);
+  const url = POLYMARKET_API.POSITIONS_ENDPOINT(walletAddress);
+  const apiPositions = await httpGet<DataApiPosition[]>(url);
+  
+  // Map to minimal position format (tokenId, marketId, size, currentPrice)
+  // Note: We do NOT filter by redeemable flag - on-chain check is authoritative
+  return apiPositions
+    .filter((p) => p.asset && p.conditionId && p.size > 0)
+    .map((p) => ({
+      tokenId: p.asset,
+      marketId: p.conditionId,
+      size: p.size,
+      currentPrice: p.curPrice ?? 0,
+    }));
+}
+```
+
+### Step 2: Filter by On-Chain Status
+
+```typescript
+private async getRedeemablePositions(): Promise<RedeemablePosition[]> {
+  // 1. Fetch all positions from Data API (source of tokenIds)
+  const allPositions = await this.fetchPositionsFromDataApi();
+
+  // 2. Filter by minimum value threshold
+  const aboveMinValue = allPositions.filter(
+    (pos) => pos.size * pos.currentPrice >= this.config.minPositionUsd,
+  );
+
+  // 3. Check on-chain payoutDenominator for each position
+  // This is the AUTHORITATIVE check for redeemability
+  const redeemable: RedeemablePosition[] = [];
+  for (const pos of aboveMinValue) {
+    const isOnChainResolved = await this.checkOnChainResolved(pos.marketId);
+    if (isOnChainResolved) {
+      redeemable.push(pos);
+    }
+  }
+
+  return redeemable;
+}
+```
+
+---
+
+## On-Chain Preflight Check
+
+Before EVERY redemption transaction, AutoRedeem verifies on-chain status:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        LAYER 1: Data API                        │
-│         PositionTracker fetches redeemable=true flag            │
-│         ↓                                                       │
-│         Filters to redeemable positions                         │
+│                    1. Fetch from Data API                        │
+│         Get list of tokenIds/conditionIds in wallet              │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    LAYER 2: State Machine                        │
-│         Strict redeemable proof sources:                         │
-│         - DATA_API_FLAG (verified)                               │
-│         - ONCHAIN_DENOM (authoritative)                          │
-│         - DATA_API_UNCONFIRMED → routes to AutoSell              │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   LAYER 3: Preflight Check                       │
-│         Before EVERY redemption tx:                              │
+│                2. On-Chain Preflight Check                       │
+│         For EACH position:                                       │
 │         checkOnChainResolved(conditionId) must return true       │
 │         ↓                                                       │
 │         payoutDenominator > 0 required                           │
@@ -245,26 +161,27 @@ private async checkOnChainResolved(conditionId: string): Promise<boolean> {
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     REDEMPTION EXECUTED                          │
-│         Only after passing all three layers                      │
+│         Only positions with payoutDenominator > 0                │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## Benefits of This Architecture
 
 | Benefit | Description |
 |---------|-------------|
-| **Efficiency** | Single Data API call fetches all positions with metadata |
-| **Accuracy** | State machine prevents false positives from price/book heuristics |
-| **Safety** | Preflight prevents wasted gas on unresolved markets |
-| **Caching** | Reduces RPC load with 5-minute TTL on payoutDenominator |
-| **Auditability** | `redeemableProofSource` tracks how each decision was made |
-| **Separation of Concerns** | PositionTracker handles state, AutoRedeem handles execution |
+| **Independence** | AutoRedeem is self-contained, not coupled to PositionTracker |
+| **Accuracy** | On-chain check prevents failed redemptions |
+| **Simplicity** | Single source of truth (on-chain payoutDenominator) |
+| **Efficiency** | 5-minute cache reduces RPC calls |
+| **Safety** | Never sends tx to unresolved markets |
 
 ---
 
 ## Related Files
 
-- `src/strategies/position-tracker.ts` - State machine and position management
-- `src/strategies/auto-redeem.ts` - Redemption strategy with preflight checks
+- `src/strategies/auto-redeem.ts` - Redemption strategy with direct Data API fetch and on-chain checks
 - `src/trading/exchange-abi.ts` - CTF contract ABI (includes `payoutDenominator`)
 - `src/polymarket/contracts.ts` - Contract address resolution
+- `src/constants/polymarket.constants.ts` - Data API endpoint URLs
