@@ -137,10 +137,11 @@ export interface SmartHedgingConfig {
   hedgeUpMaxPrice: number;
 
   /**
-   * Allow "hedging up" at any time, not just near market close (default: true)
+   * Allow "hedging up" at any time, not just near market close (default: false)
    * When true, positions at high win probability (>= hedgeUpPriceThreshold) can be
    * hedged up immediately, regardless of time to close.
-   * When false, hedging up only occurs within hedgeUpWindowMinutes of market close.
+   * When false (default), hedging up only occurs within hedgeUpWindowMinutes of market close.
+   * This is the safer default - near close, the outcome is more certain.
    */
   hedgeUpAnytime: boolean;
 }
