@@ -87,6 +87,9 @@ async function main(): Promise<void> {
         `ABSOLUTE_MAX=$${strategyConfig.smartHedgingAbsoluteMaxUsd}`,
     );
 
+    // Load env config for balance fetching (needed for dynamic reserves)
+    const envForBalances = loadMonitorConfig(cliOverrides);
+
     // Create orchestrator with user's config
     orchestrator = new Orchestrator({
       client,
@@ -96,6 +99,15 @@ async function main(): Promise<void> {
         | "conservative"
         | "balanced"
         | "aggressive",
+      // Provide wallet balance fetcher for dynamic reserves to work
+      // This enables the reserve system to track USDC balance and gate BUY orders
+      getWalletBalances: async () => ({
+        usdcBalance: await getUsdBalanceApprox(
+          client.wallet,
+          envForBalances.collateralTokenAddress,
+          envForBalances.collateralTokenDecimals,
+        ),
+      }),
       // Pass hedging config from env
       hedgingConfig: {
         enabled: strategyConfig.smartHedgingEnabled,
@@ -151,11 +163,10 @@ async function main(): Promise<void> {
 
     // Set session start balance for accurate drawdown calculation
     try {
-      const mempoolEnv = loadMonitorConfig(cliOverrides);
       const usdcBalance = await getUsdBalanceApprox(
         client.wallet,
-        mempoolEnv.collateralTokenAddress,
-        mempoolEnv.collateralTokenDecimals,
+        envForBalances.collateralTokenAddress,
+        envForBalances.collateralTokenDecimals,
       );
       orchestrator.getRiskManager().setSessionStartBalance(usdcBalance);
       logger.info(`💰 Session start balance: $${usdcBalance.toFixed(2)}`);
