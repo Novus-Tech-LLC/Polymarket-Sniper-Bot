@@ -206,11 +206,17 @@ export class OnChainExitStrategy {
         continue;
       }
 
-      // Position is redeemable on-chain - mark as redeemable for AutoRedeem to handle
+      // Position is redeemable on-chain!
+      // Log this discovery - AutoRedeem will pick it up once PositionTracker updates.
+      // The on-chain payoutDenominator check we performed will be cached, so AutoRedeem
+      // won't need to repeat it. If PositionTracker hasn't marked this as redeemable yet,
+      // it will on the next refresh cycle.
       const tokenIdShort = position.tokenId.slice(0, 12);
+      const positionValue = position.size * position.currentPrice;
       this.logger.info(
-        `[OnChainExit] ✅ ROUTED TO REDEMPTION: tokenId=${tokenIdShort}... marketId=${position.marketId.slice(0, 16)}... ` +
-          `currentPrice=${(position.currentPrice * 100).toFixed(1)}¢ payoutDenominator=${checkResult.payoutDenominator}`,
+        `[OnChainExit] ✅ ON-CHAIN REDEEMABLE FOUND: tokenId=${tokenIdShort}... marketId=${position.marketId.slice(0, 16)}... ` +
+          `currentPrice=${(position.currentPrice * 100).toFixed(1)}¢ value=$${positionValue.toFixed(2)} ` +
+          `payoutDenominator=${checkResult.payoutDenominator} (AutoRedeem will claim on next cycle)`,
       );
 
       // Mark as processed
@@ -221,7 +227,7 @@ export class OnChainExitStrategy {
     // Log summary
     if (scannedCount > 0 || routedToRedemption > 0) {
       this.logger.info(
-        `[OnChainExit] scanned=${scannedCount} routed_to_redemption=${routedToRedemption} ` +
+        `[OnChainExit] scanned=${scannedCount} found_redeemable=${routedToRedemption} ` +
           `skipped_tradable=${skipReasons.tradableOnClob} skipped_below_threshold=${skipReasons.belowPriceThreshold} ` +
           `skipped_not_redeemable=${skipReasons.notRedeemableOnchain}`,
       );

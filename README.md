@@ -121,15 +121,15 @@ ON_CHAIN_EXIT_MIN_POSITION_USD=0.01     # Skip positions below this value
 When OnChainExit processes positions, you'll see logs like:
 
 ```
-[OnChainExit] scanned=5 routed_to_redemption=1 skipped_tradable=3 skipped_below_threshold=0 skipped_not_redeemable=1
-[OnChainExit] ✅ ROUTED TO REDEMPTION: tokenId=0xabc123... marketId=0xdef456... currentPrice=99.5¢ payoutDenominator=1
+[OnChainExit] scanned=5 found_redeemable=1 skipped_tradable=3 skipped_below_threshold=0 skipped_not_redeemable=1
+[OnChainExit] ✅ ON-CHAIN REDEEMABLE FOUND: tokenId=0xabc123... marketId=0xdef456... currentPrice=99.5¢ value=$50.00 payoutDenominator=1 (AutoRedeem will claim on next cycle)
 ```
 
 **Skip Reasons:**
 - `TRADABLE_ON_CLOB` - Position is tradable via CLOB (AutoSell handles it)
 - `BELOW_PRICE_THRESHOLD` - Price below configured threshold
 - `NOT_REDEEMABLE_ONCHAIN` - Market not resolved on-chain yet (will retry next cycle)
-- `NO_SETTLEMENT_PATH` - No on-chain exit path available
+- `RPC_ERROR` - Error checking on-chain state
 
 ### Execution Order
 
@@ -137,7 +137,7 @@ OnChainExit runs in the orchestrator after AutoSell but before AutoRedeem:
 
 1. SellEarly (99.9¢+)
 2. AutoSell (99¢+ tradable positions)
-3. **OnChainExit** (99¢+ NOT_TRADABLE positions → routes to redemption)
+3. **OnChainExit** (99¢+ NOT_TRADABLE positions → checks on-chain redeemability)
 4. AutoRedeem (claims REDEEMABLE positions)
 5. Smart Hedging, Stop-Loss, etc.
 
