@@ -23,6 +23,16 @@
  * outcome type (YES/NO, Over/Under, TeamA/TeamB, etc.) because each outcome
  * has a unique tokenId regardless of outcome name.
  *
+ * UNTRUSTED_ENTRY VALIDATION (Jan 2025):
+ * Entry metadata can be marked as UNTRUSTED when:
+ * - Computed netShares differs from Data API position shares by >2% or >0.5 shares
+ *
+ * When trusted === false:
+ * - untrustedReason contains the specific mismatch details
+ * - Strategies SHOULD NOT use this metadata for P&L calculation or scalp sizing
+ * - This prevents the bug where trade history is incorrectly mapped (e.g., multiple
+ *   tokenIds getting identical reconstructed values due to grouping errors)
+ *
  * CACHING:
  * In-memory cache with short TTL (default 90s) for performance within a
  * single runtime. Cache is reconstructable after restart from API data.

@@ -620,15 +620,21 @@ describe("Illiquid Exit Detection", () => {
   });
 
   test("Tiny bid does not trigger illiquid when target is also low", () => {
-    // bestBid=1¢, target=10¢ -> bid ≤ 2¢ but target < 50¢
+    // bestBid=1¢, bestAsk=5¢ (spread=4¢ < 30¢, no extreme spread)
+    // bid=1¢ ≤ 2¢ BUT target=10¢ < 50¢ (tiny bid threshold won't trigger)
+    // minAcceptable=8¢ * 0.5 = 4¢, and bid=1¢ < 4¢ (far below acceptable WILL trigger)
     const result = checkIlliquidExit(0.01, 0.05, 0.10, 0.08);
 
-    // This won't trigger tiny bid check because target < 50¢
-    // But it might trigger the "far below acceptable" check
-    // Let's verify the logic handles this case
+    // In this case, the "far below acceptable" condition triggers because
+    // bestBid (1¢) < minAcceptable (8¢) * 0.5 = 4¢
+    assert.strictEqual(
+      result.isIlliquid,
+      true,
+      "Should still detect illiquid due to bid far below acceptable",
+    );
     assert.ok(
-      result.isIlliquid || !result.isIlliquid,
-      "Should handle low target case",
+      result.reason?.includes("far below acceptable"),
+      `Expected far below acceptable reason, got: ${result.reason}`,
     );
   });
 

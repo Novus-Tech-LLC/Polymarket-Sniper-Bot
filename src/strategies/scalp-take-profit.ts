@@ -30,10 +30,23 @@
  *   - Sell at bestBid immediately, even at loss
  *   - Frees capital, prevents stuck positions
  *
+ * Stage D - EXIT_DEFERRED_ILLQ (illiquid book detected):
+ *   - When bestBid is far below target/minAcceptable OR spread is extreme
+ *   - DO NOT spam market-sell attempts (price protection would block anyway)
+ *   - Transition to deferred state with escalating backoff (1m, 5m, 15m)
+ *   - Periodically recheck liquidity; resume normal exit ladder when book normalizes
+ *   - After MAX_ILLIQUID_RECHECKS (10), abandon the exit plan
+ *
+ * ILLIQUID EXIT CONDITIONS:
+ * - Extreme spread: bestAsk - bestBid > 30¢
+ * - Tiny bid: bestBid ≤ 2¢ while target > 50¢
+ * - Bid far below acceptable: bestBid < minAcceptable * 0.5
+ *
  * NON-NEGOTIABLES:
  * - Sell sizing uses position notional (sharesHeld * limitPrice), NOT profitUsd
  * - If notional < MIN_ORDER_USD, treat as DUST and skip
  * - If no bestBid (NO_BOOK), mark as BLOCKED and retry with backoff
+ * - If ILLIQUID, defer exits with escalating backoff to prevent infinite retry loops
  *
  * This strategy is designed to churn out consistent winners by
  * taking profits when momentum is fading, rather than waiting
