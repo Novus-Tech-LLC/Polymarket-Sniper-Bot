@@ -322,8 +322,8 @@ export class DynamicReservesController {
       )
     ) {
       this.logger.info(
-        `[DynamicReserves] balance=$${availableCash.toFixed(2)} reserves=$${reserveRequired.toFixed(2)} ` +
-          `mode=${mode} equity=$${equityUsd.toFixed(2)} positions=${snapshot.activePositions.length}`,
+        `[DynamicReserves] balance=$${availableCash.toFixed(2)} positionValue=$${positionValue.toFixed(2)} ` +
+          `reserves=$${reserveRequired.toFixed(2)} mode=${mode} equity=$${equityUsd.toFixed(2)} positions=${snapshot.activePositions.length}`,
       );
     }
 
