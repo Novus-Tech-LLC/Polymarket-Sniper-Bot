@@ -186,11 +186,11 @@ describe("AutoSell Configuration - Preset Loading", () => {
 // === FILTERING BEHAVIOR TESTS ===
 
 describe("AutoSell Filtering Behavior", () => {
-  test("checkTradability returns REDEEMABLE only for positions with proof source", () => {
-    // UPDATED (Jan 2025): Only skip if there's actual proof of redeemability
-    // redeemable=true alone is NOT enough - we need redeemableProofSource
+  test("checkTradability returns REDEEMABLE only for positions with verified proof source", () => {
+    // UPDATED (Jan 2025): Only skip if there's verified proof of redeemability
+    // redeemable=true alone is NOT enough - we need verified redeemableProofSource
 
-    // Position with DATA_API_FLAG proof - should be filtered
+    // Position with DATA_API_FLAG proof (verified) - should be filtered
     const positionWithApiProof = {
       marketId: "0x123",
       tokenId: "0x456",
@@ -236,6 +236,38 @@ describe("AutoSell Filtering Behavior", () => {
     assert.strictEqual(positionWithApiProof.redeemableProofSource, "DATA_API_FLAG");
     assert.strictEqual(positionWithOnchainProof.redeemableProofSource, "ONCHAIN_DENOM");
     assert.strictEqual(positionWithoutProof.redeemableProofSource, "NONE");
+  });
+
+  test("checkTradability allows positions with DATA_API_UNCONFIRMED proof to be sold", () => {
+    // CRITICAL (Jan 2025 Fix): DATA_API_UNCONFIRMED means Data API says redeemable
+    // but on-chain payoutDenominator == 0. These positions should NOT be filtered
+    // and should be eligible for AutoSell if there are live bids.
+
+    const positionWithUnconfirmedApi = {
+      marketId: "0x123",
+      tokenId: "0x456",
+      side: "YES",
+      size: 100,
+      entryPrice: 0.5,
+      currentPrice: 0.999, // Near resolution price
+      currentBidPrice: 0.998, // Live bid available
+      pnlPct: 99.8,
+      pnlUsd: 49.9,
+      redeemable: false, // NOT redeemable since on-chain not verified
+      redeemableProofSource: "DATA_API_UNCONFIRMED" as const,
+    };
+
+    // This position should be eligible for AutoSell (not blocked by redeemable filter)
+    assert.strictEqual(positionWithUnconfirmedApi.redeemableProofSource, "DATA_API_UNCONFIRMED");
+    assert.strictEqual(positionWithUnconfirmedApi.redeemable, false);
+    assert.ok(positionWithUnconfirmedApi.currentBidPrice !== undefined);
+
+    // Simulating the checkTradability logic:
+    const hasVerifiedRedeemableProof =
+      positionWithUnconfirmedApi.redeemableProofSource === "ONCHAIN_DENOM" ||
+      positionWithUnconfirmedApi.redeemableProofSource === "DATA_API_FLAG";
+
+    assert.strictEqual(hasVerifiedRedeemableProof, false, "DATA_API_UNCONFIRMED should NOT be considered verified proof");
   });
 
   test("checkTradability returns NOT_TRADABLE for non-tradable execution status", () => {

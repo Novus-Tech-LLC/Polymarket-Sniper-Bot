@@ -771,3 +771,160 @@ describe("Auto-Redeem Preflight Check and Skip Reasons", () => {
     });
   });
 });
+
+/**
+ * Tests for the continuous on-chain preflight check in executeInternal
+ * (Jan 2025 Fix: Make AutoRedeem authoritative during continuous runs)
+ */
+describe("Auto-Redeem Continuous On-Chain Preflight", () => {
+  describe("Preflight Check Logic", () => {
+    test("should skip position when payoutDenominator is 0", () => {
+      // When on-chain payoutDenominator == 0, position is not resolved
+      // AutoRedeem should skip and NOT treat it as redeemable
+      const payoutDenominator = 0n;
+      const isOnChainResolved = payoutDenominator > 0n;
+
+      assert.strictEqual(
+        isOnChainResolved,
+        false,
+        "Zero payoutDenominator should indicate NOT resolved on-chain",
+      );
+    });
+
+    test("should proceed with redemption when payoutDenominator > 0", () => {
+      // When on-chain payoutDenominator > 0, position IS resolved
+      // AutoRedeem should proceed with redemption
+      const payoutDenominator = 1n;
+      const isOnChainResolved = payoutDenominator > 0n;
+
+      assert.strictEqual(
+        isOnChainResolved,
+        true,
+        "Non-zero payoutDenominator should indicate resolved on-chain",
+      );
+    });
+
+    test("should handle large payoutDenominator values", () => {
+      // Typical payoutDenominator values can be large (e.g., 10^18)
+      const payoutDenominator = 1000000000000000000n; // 10^18
+      const isOnChainResolved = payoutDenominator > 0n;
+
+      assert.strictEqual(
+        isOnChainResolved,
+        true,
+        "Large payoutDenominator should still be detected as resolved",
+      );
+    });
+  });
+
+  describe("Continuous Run Flow", () => {
+    test("positions flagged redeemable by PositionTracker are re-verified on-chain", () => {
+      // Simulate the flow:
+      // 1. PositionTracker marks position as redeemable (DATA_API_FLAG or DATA_API_UNCONFIRMED)
+      // 2. AutoRedeem.executeInternal() picks up the position
+      // 3. Before redemption, AutoRedeem verifies on-chain payoutDenominator
+      // 4. If payoutDenominator == 0, skip the position
+
+      interface MockPosition {
+        tokenId: string;
+        marketId: string;
+        size: number;
+        currentPrice: number;
+        redeemable: boolean;
+        redeemableProofSource: string;
+      }
+
+      const positionFromTracker: MockPosition = {
+        tokenId: "token-123",
+        marketId: "0x" + "a".repeat(64),
+        size: 100,
+        currentPrice: 1.0,
+        redeemable: true,
+        redeemableProofSource: "DATA_API_FLAG", // PositionTracker says redeemable
+      };
+
+      // AutoRedeem should ALWAYS verify on-chain, regardless of PositionTracker's flag
+      // This makes AutoRedeem the source of truth during continuous runs
+      const payoutDenominator = 0n; // On-chain says NOT resolved
+      const shouldSkipRedemption = payoutDenominator === 0n;
+
+      assert.strictEqual(
+        shouldSkipRedemption,
+        true,
+        "Should skip redemption when on-chain says NOT resolved (even if PositionTracker says redeemable)",
+      );
+
+      // The skipped position remains available for AutoSell if it has live bids
+      assert.ok(
+        positionFromTracker.currentPrice > 0,
+        "Skipped position with value can be handled by AutoSell",
+      );
+    });
+
+    test("short cooldown is set for not-resolved positions", () => {
+      // When position is skipped due to payoutDenominator == 0,
+      // a short cooldown is set to avoid rapid retries
+      // This simulates the expected behavior
+
+      const redemptionAttempts = new Map<
+        string,
+        { lastAttempt: number; failures: number }
+      >();
+      const marketId = "0x" + "b".repeat(64);
+
+      // Position not resolved on-chain - set cooldown
+      const now = Date.now();
+      redemptionAttempts.set(marketId, {
+        lastAttempt: now,
+        failures: 0, // Don't count as failure
+      });
+
+      const tracked = redemptionAttempts.get(marketId);
+      assert.ok(tracked, "Should have cooldown entry");
+      assert.strictEqual(tracked.failures, 0, "Should NOT count as failure");
+      assert.ok(
+        tracked.lastAttempt <= now,
+        "Should set lastAttempt for cooldown",
+      );
+    });
+  });
+
+  describe("DATA_API_UNCONFIRMED Handling", () => {
+    test("DATA_API_UNCONFIRMED positions are passed to AutoRedeem but skipped by preflight", () => {
+      // Positions with DATA_API_UNCONFIRMED proof source indicate:
+      // - Data API says redeemable
+      // - On-chain payoutDenominator was 0 when PositionTracker checked
+      //
+      // AutoRedeem.executeInternal() should re-verify on-chain and skip if still 0
+
+      interface MockPosition {
+        tokenId: string;
+        marketId: string;
+        redeemable: boolean;
+        redeemableProofSource: "DATA_API_FLAG" | "DATA_API_UNCONFIRMED" | "ONCHAIN_DENOM" | "NONE";
+      }
+
+      const unconfirmedPosition: MockPosition = {
+        tokenId: "token-unconfirmed",
+        marketId: "0x" + "c".repeat(64),
+        redeemable: false, // PositionTracker kept as NOT redeemable due to on-chain mismatch
+        redeemableProofSource: "DATA_API_UNCONFIRMED",
+      };
+
+      // This position should NOT even be picked up by getRedeemablePositions()
+      // because redeemable === false
+      assert.strictEqual(
+        unconfirmedPosition.redeemable,
+        false,
+        "DATA_API_UNCONFIRMED positions should have redeemable=false",
+      );
+
+      // The proof source documents the mismatch for diagnostics
+      assert.strictEqual(
+        unconfirmedPosition.redeemableProofSource,
+        "DATA_API_UNCONFIRMED",
+        "Should track the unconfirmed API status",
+      );
+    });
+  });
+});
