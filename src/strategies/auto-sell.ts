@@ -8,6 +8,7 @@ import {
   HIGH_VALUE_PRICE_THRESHOLD,
   HIGH_VALUE_NO_BID_LOG_TTL_MS,
 } from "../utils/log-deduper.util";
+import { notifySell } from "../services/trade-notification.service";
 
 export interface AutoSellConfig {
   enabled: boolean;
@@ -610,6 +611,25 @@ export class AutoSellStrategy {
         this.logger.info(
           `[AutoSell] ✓ Stale sell submitted: ${position.size.toFixed(2)} shares, expected $${expectedProfit.toFixed(2)} profit`,
         );
+
+        // Send telegram notification for stale position sell
+        const tradePnl = (bestBid - position.entryPrice) * position.size;
+        void notifySell(
+          position.marketId,
+          position.tokenId,
+          position.size,
+          bestBid,
+          sizeUsd,
+          {
+            strategy: "AutoSell (Stale)",
+            entryPrice: position.entryPrice,
+            pnl: tradePnl,
+            outcome: position.side,
+          },
+        ).catch(() => {
+          // Ignore notification errors
+        });
+
         return true;
       } else if (result.status === "skipped") {
         this.logger.warn(
@@ -781,6 +801,22 @@ export class AutoSellStrategy {
         this.logger.info(
           `[AutoSell] ✓ Sold ${size.toFixed(2)} shares, freed $${freedCapital.toFixed(2)} capital`,
         );
+
+        // Send telegram notification for auto-sell
+        // Note: entry price not available in this context, so no P&L calculation
+        void notifySell(
+          marketId,
+          tokenId,
+          size,
+          bestBid,
+          sizeUsd,
+          {
+            strategy: "AutoSell",
+          },
+        ).catch(() => {
+          // Ignore notification errors
+        });
+
         return true;
       } else if (result.status === "skipped") {
         this.logger.warn(

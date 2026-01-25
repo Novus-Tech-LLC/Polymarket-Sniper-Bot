@@ -3,6 +3,7 @@ import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker, Position } from "./position-tracker";
 import { getDynamicStopLoss, PRICE_TIERS } from "./trade-quality";
+import { notifyStopLoss } from "../services/trade-notification.service";
 
 export interface UniversalStopLossConfig {
   enabled: boolean;
@@ -384,6 +385,21 @@ export class UniversalStopLossStrategy {
       });
 
       if (result.status === "submitted") {
+        // Send telegram notification for stop-loss trigger
+        // Note: entry price not available in this context, reporting loss percentage instead
+        void notifyStopLoss(
+          marketId,
+          tokenId,
+          size,
+          bestBid,
+          sizeUsd,
+          {
+            // P&L not calculable without entry price, but loss % is known
+          },
+        ).catch(() => {
+          // Ignore notification errors - logging is handled by the service
+        });
+
         return true;
       } else if (result.status === "skipped") {
         this.logger.warn(

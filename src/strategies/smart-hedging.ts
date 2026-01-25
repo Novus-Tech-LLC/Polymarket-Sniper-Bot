@@ -23,6 +23,11 @@ import {
 } from "../utils/log-deduper.util";
 import { formatCents, assessOrderbookQuality } from "../utils/price.util";
 import type { ReservePlan } from "../risk";
+import {
+  notifyHedge,
+  notifyHedgeExit,
+  notifySell,
+} from "../services/trade-notification.service";
 
 /**
  * Smart Hedging Direction - determines when smart hedging is active
@@ -1383,6 +1388,21 @@ export class SmartHedgingStrategy {
         // Deduct from per-cycle hedge budget to prevent exceeding reserves
         this.deductFromCycleHedgeBudget(hedgeUsd);
         this.logger.info(`[SmartHedging] ✅ Hedge executed successfully`);
+
+        // Send telegram notification for hedge placement
+        void notifyHedge(
+          position.marketId,
+          oppositeTokenId,
+          hedgeUsd / oppositePrice, // Estimate shares from USD
+          oppositePrice,
+          hedgeUsd,
+          {
+            outcome: oppositeSide,
+          },
+        ).catch(() => {
+          // Ignore notification errors - logging is handled by the service
+        });
+
         return { success: true, hedgeTokenId: oppositeTokenId };
       }
 
@@ -1483,6 +1503,49 @@ export class SmartHedgingStrategy {
 
       if (result.status === "submitted") {
         this.logger.info(`[SmartHedging] ✅ Position sold`);
+
+        // Calculate P&L for the trade
+        const tradePnl = (position.currentPrice - position.entryPrice) * position.size;
+
+        // Determine if this is a hedge exit or regular sell
+        // Check if the position's tokenId was tracked as a hedge
+        const isHedgeExit = this.hedgedPositions.has(position.tokenId);
+
+        if (isHedgeExit) {
+          // This is a hedge position being exited
+          void notifyHedgeExit(
+            position.marketId,
+            position.tokenId,
+            position.size,
+            position.currentPrice,
+            currentValue,
+            {
+              entryPrice: position.entryPrice,
+              pnl: tradePnl,
+              outcome: position.side,
+            },
+          ).catch(() => {
+            // Ignore notification errors - logging is handled by the service
+          });
+        } else {
+          // Regular position being sold (force liquidation or stop loss)
+          void notifySell(
+            position.marketId,
+            position.tokenId,
+            position.size,
+            position.currentPrice,
+            currentValue,
+            {
+              strategy: "SmartHedging",
+              entryPrice: position.entryPrice,
+              pnl: tradePnl,
+              outcome: position.side,
+            },
+          ).catch(() => {
+            // Ignore notification errors - logging is handled by the service
+          });
+        }
+
         return true;
       }
 

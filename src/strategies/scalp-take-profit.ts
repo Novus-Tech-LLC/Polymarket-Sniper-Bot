@@ -72,6 +72,7 @@ import {
   SKIP_LOG_TTL_MS,
   TOKEN_ID_DISPLAY_LENGTH,
 } from "../utils/log-deduper.util";
+import { notifyScalp } from "../services/trade-notification.service";
 
 /**
  * Scalp Take-Profit Configuration
@@ -2012,6 +2013,27 @@ export class ScalpTakeProfitStrategy {
           `[ProfitTaker] ✅ Scalp sell executed: notional=$${notionalUsd.toFixed(2)} ` +
             `limit=${effectiveLimitCents.toFixed(1)}¢`,
         );
+
+        // Calculate P&L for the trade
+        const tradePnl =
+          (effectiveLimitPrice - position.entryPrice) * position.size;
+
+        // Send telegram notification for scalp profit taking
+        void notifyScalp(
+          position.marketId,
+          position.tokenId,
+          position.size,
+          effectiveLimitPrice,
+          notionalUsd,
+          {
+            entryPrice: position.entryPrice,
+            pnl: tradePnl,
+            outcome: position.side,
+          },
+        ).catch(() => {
+          // Ignore notification errors - logging is handled by the service
+        });
+
         return true;
       }
 

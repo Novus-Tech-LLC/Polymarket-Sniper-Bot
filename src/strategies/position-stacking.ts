@@ -42,6 +42,7 @@ import { postOrder } from "../utils/post-order.util";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 import type { ReservePlan } from "../risk";
 import { LogDeduper } from "../utils/log-deduper.util";
+import { notifyStack } from "../services/trade-notification.service";
 
 /**
  * Position Stacking Configuration
@@ -556,6 +557,25 @@ export class PositionStackingStrategy {
           `[PositionStacking] ✅ Stacked ${position.tokenId.slice(0, 8)}... ` +
             `$${sizeUsd.toFixed(2)} at ${(position.currentPrice * 100).toFixed(1)}¢`,
         );
+
+        // Send telegram notification for position stacking
+        const entryPrice = position.avgEntryPriceCents
+          ? position.avgEntryPriceCents / 100
+          : position.entryPrice;
+        void notifyStack(
+          position.marketId,
+          position.tokenId,
+          sizeUsd / position.currentPrice, // Estimate shares from USD
+          position.currentPrice,
+          sizeUsd,
+          {
+            entryPrice,
+            outcome: outcome,
+          },
+        ).catch(() => {
+          // Ignore notification errors - logging is handled by the service
+        });
+
         return true;
       }
 

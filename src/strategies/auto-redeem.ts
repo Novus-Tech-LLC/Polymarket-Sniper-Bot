@@ -24,6 +24,7 @@ import { POLYMARKET_API } from "../constants/polymarket.constants";
 import { resolvePolymarketContracts } from "../polymarket/contracts";
 import { CTF_ABI, PROXY_WALLET_ABI } from "../trading/exchange-abi";
 import { resolveSignerAddress } from "../utils/funds-allowance.util";
+import { notifyRedeem } from "../services/trade-notification.service";
 
 /**
  * Minimal position data needed for redemption.
@@ -892,6 +893,22 @@ export class AutoRedeemStrategy {
       this.logger.info(
         `[AutoRedeem] ✅ Confirmed in block ${receipt.blockNumber}. View: https://polygonscan.com/tx/${tx.hash}`,
       );
+
+      // Send telegram notification for successful redemption
+      // Estimate value as size * 1.0 since resolved positions pay $1
+      const estimatedValue = position.size;
+      void notifyRedeem(
+        position.marketId,
+        position.tokenId,
+        position.size,
+        1.0, // Redemption price is always $1
+        estimatedValue,
+        {
+          txHash: tx.hash,
+        },
+      ).catch(() => {
+        // Ignore notification errors - logging is handled by the service
+      });
 
       return {
         tokenId: position.tokenId,
