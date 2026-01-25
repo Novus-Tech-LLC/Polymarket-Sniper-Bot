@@ -3837,10 +3837,17 @@ export class PositionTracker {
                 }
               }
 
-              // Log significant profits at DEBUG level for monitoring
+              // Log significant profits at INFO level for monitoring
               if (pnlPct >= 10 && !finalRedeemable) {
-                this.logger.debug(
-                  `[PositionTracker] 💰 High profit position: ${side} entry=${(entryPrice * 100).toFixed(1)}¢ → current=${(currentPrice * 100).toFixed(1)}¢ = +${pnlPct.toFixed(1)}% ($${pnlUsd.toFixed(2)}) [source=${pnlSource}]`,
+                // Convert pnlSource to plain English for clarity
+                const sourceDescription =
+                  pnlSource === "DATA_API"
+                    ? "Polymarket Data API"
+                    : pnlSource === "EXECUTABLE_BOOK"
+                      ? "CLOB order book best bid"
+                      : "fallback price API";
+                this.logger.info(
+                  `[PositionTracker] 💰 High profit position: ${side} entry=${(entryPrice * 100).toFixed(1)}¢ → current=${(currentPrice * 100).toFixed(1)}¢ = +${pnlPct.toFixed(1)}% ($${pnlUsd.toFixed(2)}) [source: ${sourceDescription}]`,
                 );
               }
 
