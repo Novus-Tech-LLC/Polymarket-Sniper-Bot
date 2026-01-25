@@ -3552,8 +3552,27 @@ export class PositionTracker {
                   // Log diagnostic: price suggests resolved but Data-API says NOT redeemable
                   // This is EXPECTED behavior - we keep it ACTIVE until Data-API confirms
                   // RENAMED: "price_near_resolution" -> "near_resolution_candidate" for clarity
+                  // UPDATED: Include bid info using bookStatus for more accurate diagnostics
+                  const bookStatusReason = (() => {
+                    switch (bookStatus) {
+                      case "NO_BOOK_404":
+                        return "orderbook returned 404";
+                      case "EMPTY_BOOK":
+                        return "orderbook is empty";
+                      case "BOOK_ANOMALY":
+                        return "orderbook has anomalies";
+                      case "NOT_FETCHED":
+                        return "orderbook not fetched";
+                      default:
+                        return "no bids";
+                    }
+                  })();
+                  const bidInfo =
+                    bestBidPrice !== undefined && bestBidPrice > 0
+                      ? `bid=${formatCents(bestBidPrice)}`
+                      : `bid=N/A (${bookStatusReason})`;
                   this.logger.debug(
-                    `[PositionTracker] near_resolution_candidate tokenId=${tokenId.slice(0, 16)}... price=${formatCents(currentPrice)} but redeemable=false, keeping ACTIVE`,
+                    `[PositionTracker] near_resolution_candidate tokenId=${tokenId.slice(0, 16)}... price=${formatCents(currentPrice)} ${bidInfo} redeemable=false, keeping ACTIVE`,
                   );
 
                   // === ON-CHAIN REDEEMABLE CHECK ===

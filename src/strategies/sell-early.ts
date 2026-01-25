@@ -29,7 +29,12 @@ import type { Wallet } from "ethers";
 import type { ConsoleLogger } from "../utils/logger.util";
 import type { PositionTracker, Position } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
-import { LogDeduper, SKIP_LOG_TTL_MS } from "../utils/log-deduper.util";
+import {
+  LogDeduper,
+  SKIP_LOG_TTL_MS,
+  HIGH_VALUE_PRICE_THRESHOLD,
+  HIGH_VALUE_NO_BID_LOG_TTL_MS,
+} from "../utils/log-deduper.util";
 
 /**
  * Sell Early Configuration
@@ -316,10 +321,31 @@ export class SellEarlyStrategy {
     // === BID PRICE CHECK ===
     if (position.currentBidPrice === undefined) {
       skipReasons.noBid++;
-      this.logSkipOnce(
-        "NO_BID",
-        `[SellEarly] skip tokenId=${tokenIdShort}... reason=NO_BID ${diagInfo}`,
-      );
+      // For high-value positions (>= HIGH_VALUE_PRICE_THRESHOLD), log at INFO level
+      // since this represents potentially stuck capital that users need to know about
+      const isHighValue =
+        position.currentPrice >= HIGH_VALUE_PRICE_THRESHOLD;
+      const bookStatusInfo = position.bookStatus ?? "UNKNOWN";
+      const noBidMessage =
+        `[SellEarly] ⚠️ NO_BID: tokenId=${tokenIdShort}... ${diagInfo} bookStatus=${bookStatusInfo}` +
+        (isHighValue
+          ? ` — Position at ${currentPriceCents}¢ cannot be sold via CLOB (no orderbook bids). ` +
+            `Check if market is in dispute window or orderbook is temporarily unavailable.`
+          : ``);
+
+      if (isHighValue) {
+        // Log at INFO for high-value positions so users see why their capital is stuck
+        // Rate-limited with shorter TTL to ensure visibility while avoiding spam
+        const now = Date.now();
+        const lastLog =
+          this.skipLogTimestamps.get(`NO_BID_HIGH_VALUE:${tokenIdShort}`) ?? 0;
+        if (now - lastLog >= HIGH_VALUE_NO_BID_LOG_TTL_MS) {
+          this.logger.info(noBidMessage);
+          this.skipLogTimestamps.set(`NO_BID_HIGH_VALUE:${tokenIdShort}`, now);
+        }
+      } else {
+        this.logSkipOnce("NO_BID", noBidMessage);
+      }
       return null;
     }
 

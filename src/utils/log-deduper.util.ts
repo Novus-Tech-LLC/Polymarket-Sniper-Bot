@@ -139,6 +139,19 @@ export const TRACKER_HEARTBEAT_MS = parseTrackerHeartbeat();
 export const TOKEN_ID_DISPLAY_LENGTH = 16;
 
 /**
+ * Price threshold (95¢) for elevated logging of NO_BID skips.
+ * Positions at or above this price represent potentially stuck capital,
+ * so we log at INFO level instead of DEBUG.
+ */
+export const HIGH_VALUE_PRICE_THRESHOLD = 0.95;
+
+/**
+ * Rate limit for high-value NO_BID logs.
+ * Set shorter than the normal skip log TTL (SKIP_LOG_TTL_MS) to ensure visibility.
+ */
+export const HIGH_VALUE_NO_BID_LOG_TTL_MS = SKIP_LOG_TTL_MS / 4; // 30s when default SKIP_LOG_TTL_MS is 120s
+
+/**
  * Cycle context passed to all strategies/modules for cycle-aware logging.
  * This ensures that each component logs at most ONCE per orchestrator cycle.
  */
