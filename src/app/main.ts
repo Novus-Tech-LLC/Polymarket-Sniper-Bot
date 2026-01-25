@@ -8,6 +8,7 @@ import {
 import { createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
 import { MempoolMonitorService } from "../services/mempool-monitor.service";
 import { TradeExecutorService } from "../services/trade-executor.service";
+import { createTelegramService, TelegramService } from "../services/telegram.service";
 import { ConsoleLogger } from "../utils/logger.util";
 import { getUsdBalanceApprox, getPolBalance } from "../utils/get-balance.util";
 import { startArbitrageEngine } from "../arbitrage/runtime";
@@ -197,6 +198,14 @@ async function main(): Promise<void> {
       logger.warn(
         `[Orchestrator] Could not set session balance: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+
+    // Start Telegram P&L updates if configured
+    const telegramService = createTelegramService(logger);
+    if (telegramService.isEnabled()) {
+      const pnlLedger = orchestrator.getPnLLedger();
+      telegramService.startPnlUpdates(() => pnlLedger.getSummary());
+      logger.info("📱 Telegram P&L notifications started");
     }
   } else if (strategyConfig && !strategyConfig.enabled) {
     logger.info(
