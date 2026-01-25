@@ -1495,11 +1495,12 @@ export type StrategyConfig = {
    *
    * Options:
    * - "skip": Skip all positions with untrusted entry metadata (safest, may block valid exits)
-   * - "allow_profitable_only": Allow exits ONLY if position is profitable AND P&L is trusted
-   *   (default - safer behavior that avoids treating legacy positions as scalp opportunities
-   *   but still allows taking profits when we're confident about the P&L)
+   * - "allow_profitable_only": Allow exits ONLY if position is profitable AND P&L is trusted.
+   *   IMPORTANT: This mode uses P&L-only evaluation (bypasses hold-time checks entirely)
+   *   since the unreliable timeHeldSec cannot be trusted for timing decisions.
+   *   Positions meeting minProfitPct and minProfitUsd thresholds will be exited.
    * - "allow_all": Allow all positions regardless of entry metadata trust
-   *   (legacy behavior - may incorrectly treat long-held positions as scalp candidates)
+   *   (legacy behavior - may incorrectly use unreliable timeHeldSec for hold-time decisions)
    *
    * Default: "allow_profitable_only"
    */
