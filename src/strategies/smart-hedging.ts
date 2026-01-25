@@ -116,9 +116,8 @@ export interface SmartHedgingConfig {
 
   /**
    * Minutes before market close to enable "hedging up" behavior (default: 30)
-   * Only buy more shares when within this window AND price >= hedgeUpPriceThreshold
-   * Set to 0 to disable time window restriction (hedge up anytime price is in range).
-   * Note: If hedgeUpAnytime is true, this setting is ignored.
+   * Only buy more shares when within this window AND price >= hedgeUpPriceThreshold.
+   * To hedge up without any time restriction, use the hedgeUpAnytime setting instead.
    */
   hedgeUpWindowMinutes: number;
 
@@ -471,21 +470,23 @@ export class SmartHedgingStrategy {
       // untrusted P&L because the risk of inaction is greater than the risk of acting on
       // imperfect data. A 50% loss is a 50% loss regardless of P&L source precision.
       if (!position.pnlTrusted) {
-        const lossPct = Math.abs(position.pnlPct);
-        const isCatastrophicLoss = lossPct >= this.config.forceLiquidationPct;
+        // Only consider catastrophic loss exception when pnlPct is actually negative
+        const isActualLoss = position.pnlPct < 0;
+        const lossPctMagnitude = Math.abs(position.pnlPct);
+        const isCatastrophicLoss = isActualLoss && lossPctMagnitude >= this.config.forceLiquidationPct;
         
         if (isCatastrophicLoss) {
           // CATASTROPHIC LOSS with untrusted P&L - ALLOW hedging/liquidation with warning
           // The risk of doing nothing is greater than the risk of acting on imperfect data
           this.logger.warn(
-            `[SmartHedging] 🚨 CATASTROPHIC LOSS (${lossPct.toFixed(1)}% >= ${this.config.forceLiquidationPct}%) with untrusted P&L ` +
+            `[SmartHedging] 🚨 CATASTROPHIC LOSS (${lossPctMagnitude.toFixed(1)}% >= ${this.config.forceLiquidationPct}%) with untrusted P&L ` +
             `(${position.pnlUntrustedReason ?? "unknown reason"}) - PROCEEDING WITH HEDGE/LIQUIDATION despite data uncertainty`,
           );
           // Fall through to continue processing - don't skip
-        } else if (lossPct >= this.config.triggerLossPct) {
+        } else if (isActualLoss && lossPctMagnitude >= this.config.triggerLossPct) {
           // Significant loss but not catastrophic - log warning but still skip
           this.logger.warn(
-            `[SmartHedging] ⚠️ Skip hedge (UNTRUSTED_PNL): ${position.side} ${tokenIdShort}... at ${lossPct.toFixed(1)}% loss has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"}) - CANNOT HEDGE until P&L is trusted`,
+            `[SmartHedging] ⚠️ Skip hedge (UNTRUSTED_PNL): ${position.side} ${tokenIdShort}... at ${lossPctMagnitude.toFixed(1)}% loss has untrusted P&L (${position.pnlUntrustedReason ?? "unknown reason"}) - CANNOT HEDGE until P&L is trusted`,
           );
           skipAggregator.add(tokenIdShort, "untrusted_pnl");
           continue;
@@ -505,11 +506,12 @@ export class SmartHedgingStrategy {
         position.executionStatus === "NOT_TRADABLE_ON_CLOB" ||
         position.executionStatus === "EXECUTION_BLOCKED"
       ) {
-        // Log at warn level for significant losses
-        const lossPct = Math.abs(position.pnlPct);
-        if (lossPct >= this.config.triggerLossPct) {
+        // Log at warn level for significant actual losses (pnlPct must be negative)
+        const pnlPct = position.pnlPct;
+        const lossPctMagnitude = Math.abs(pnlPct);
+        if (pnlPct < 0 && lossPctMagnitude >= this.config.triggerLossPct) {
           this.logger.warn(
-            `[SmartHedging] ⚠️ Skip hedge (NOT_TRADABLE): ${position.side} ${tokenIdShort}... at ${lossPct.toFixed(1)}% loss - position not tradable on CLOB (status=${position.executionStatus})`,
+            `[SmartHedging] ⚠️ Skip hedge (NOT_TRADABLE): ${position.side} ${tokenIdShort}... at ${lossPctMagnitude.toFixed(1)}% loss - position not tradable on CLOB (status=${position.executionStatus})`,
           );
         }
         skipAggregator.add(tokenIdShort, "not_tradable");

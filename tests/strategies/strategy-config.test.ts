@@ -372,3 +372,60 @@ test("SMART_HEDGING_NO_HEDGE_WINDOW_MINUTES env variable overrides default", () 
   // Env override should take precedence
   assert.equal(config.smartHedgingNoHedgeWindowMinutes, 2);
 });
+
+// === SMART_HEDGING_HEDGE_UP_ANYTIME tests ===
+
+test("SMART_HEDGING_HEDGE_UP_ANYTIME defaults to false", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+  });
+
+  const config = loadStrategyConfig();
+  // Default is false (safer - only hedge up near close)
+  assert.equal(config.smartHedgingHedgeUpAnytime, false);
+});
+
+test("SMART_HEDGING_HEDGE_UP_ANYTIME=true enables anytime hedge up", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_HEDGE_UP_ANYTIME: "true",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config.smartHedgingHedgeUpAnytime, true);
+});
+
+test("SMART_HEDGING_HEDGE_UP_ANYTIME=1 enables anytime hedge up", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_HEDGE_UP_ANYTIME: "1",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config.smartHedgingHedgeUpAnytime, true);
+});
+
+test("SMART_HEDGING_HEDGE_UP_ANYTIME=false disables anytime hedge up", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_HEDGE_UP_ANYTIME: "false",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config.smartHedgingHedgeUpAnytime, false);
+});
+
+test("SMART_HEDGING_HEDGE_UP_ANYTIME=0 disables anytime hedge up", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "aggressive",
+    SMART_HEDGING_HEDGE_UP_ANYTIME: "0",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config.smartHedgingHedgeUpAnytime, false);
+});

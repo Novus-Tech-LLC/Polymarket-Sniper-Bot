@@ -1379,7 +1379,7 @@ export type StrategyConfig = {
    * Hedge Up: Allow hedging up at any time, not just near market close.
    * When true, positions at high win probability can be hedged up immediately.
    * When false, hedging up only occurs within hedgeUpWindowMinutes of market close.
-   * Default: true
+   * Default: false
    */
   smartHedgingHedgeUpAnytime: boolean;
   /**
