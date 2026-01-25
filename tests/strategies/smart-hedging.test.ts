@@ -3,6 +3,7 @@ import { test, describe } from "node:test";
 import {
   DEFAULT_HEDGING_CONFIG,
   type SmartHedgingConfig,
+  type SmartHedgingDirection,
 } from "../../src/strategies/smart-hedging";
 
 /**
@@ -1402,5 +1403,390 @@ describe("Smart Hedging Partial Fill Protection", () => {
       true,
       "Position should be marked as hedged on successful hedge",
     );
+  });
+});
+
+/**
+ * Unit tests for Smart Hedging "Hedge Up" Feature
+ *
+ * Tests the new "hedging up" behavior that buys additional shares
+ * of high win probability positions (85¢+) near market close to maximize gains.
+ */
+describe("Smart Hedging Up (High Win Probability)", () => {
+  // Helper function to simulate the hedge up eligibility logic
+  function shouldHedgeUp(
+    config: SmartHedgingConfig,
+    position: {
+      currentPrice: number;
+      marketEndTime?: number;
+      redeemable?: boolean;
+      nearResolutionCandidate?: boolean;
+      executionStatus?: string;
+    },
+    now: number,
+  ): { eligible: boolean; reason: string } {
+    // Check direction setting
+    if (config.direction === "down") {
+      return { eligible: false, reason: "direction_is_down_only" };
+    }
+
+    // Check price threshold
+    if (position.currentPrice < config.hedgeUpPriceThreshold) {
+      return { eligible: false, reason: "price_below_threshold" };
+    }
+
+    // Check max price (don't buy at essentially closed prices)
+    if (position.currentPrice >= config.hedgeUpMaxPrice) {
+      return { eligible: false, reason: "price_too_high" };
+    }
+
+    // Check if not tradable
+    if (
+      position.executionStatus === "NOT_TRADABLE_ON_CLOB" ||
+      position.executionStatus === "EXECUTION_BLOCKED"
+    ) {
+      return { eligible: false, reason: "not_tradable" };
+    }
+
+    // Check if redeemable
+    if (position.redeemable) {
+      return { eligible: false, reason: "redeemable" };
+    }
+
+    // Check if near resolution
+    if (position.nearResolutionCandidate) {
+      return { eligible: false, reason: "near_resolution" };
+    }
+
+    // Check time window
+    if (!position.marketEndTime || position.marketEndTime <= now) {
+      return { eligible: false, reason: "no_end_time" };
+    }
+
+    const minutesToClose = (position.marketEndTime - now) / (60 * 1000);
+
+    // Must be within hedge up window
+    if (minutesToClose > config.hedgeUpWindowMinutes) {
+      return { eligible: false, reason: "outside_window" };
+    }
+
+    // Don't hedge up in no-hedge window
+    if (minutesToClose <= config.noHedgeWindowMinutes) {
+      return { eligible: false, reason: "no_hedge_window" };
+    }
+
+    return { eligible: true, reason: "eligible" };
+  }
+
+  describe("Direction setting", () => {
+    test("should not hedge up when direction is 'down'", () => {
+      const direction: SmartHedgingDirection = "down";
+      const config = { ...DEFAULT_HEDGING_CONFIG, direction };
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000; // 15 minutes from now
+
+      const result = shouldHedgeUp(
+        config,
+        {
+          currentPrice: 0.87, // 87¢ - within range
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "direction_is_down_only");
+    });
+
+    test("should hedge up when direction is 'up'", () => {
+      const direction: SmartHedgingDirection = "up";
+      const config = { ...DEFAULT_HEDGING_CONFIG, direction };
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        config,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, true);
+    });
+
+    test("should hedge up when direction is 'both' (default)", () => {
+      const config = { ...DEFAULT_HEDGING_CONFIG }; // direction defaults to 'both'
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        config,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, true);
+    });
+  });
+
+  describe("Price thresholds", () => {
+    test("should not hedge up when price is below threshold (84¢)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.84, // Below 85¢ threshold
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "price_below_threshold");
+    });
+
+    test("should hedge up when price is at threshold (85¢)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.85, // Exactly at 85¢ threshold
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, true);
+    });
+
+    test("should hedge up when price is in sweet spot (90¢)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.90, // 90¢ - good profit margin
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, true);
+    });
+
+    test("should NOT hedge up when price is too high (95¢) - minimal profit margin", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.95, // At max price threshold - essentially closed
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "price_too_high");
+    });
+
+    test("should NOT hedge up when price is 99¢ - definitely closed", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.99,
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "price_too_high");
+    });
+  });
+
+  describe("Time window", () => {
+    test("should not hedge up when outside window (45 minutes to close)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 45 * 60 * 1000; // 45 minutes (outside 30min window)
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "outside_window");
+    });
+
+    test("should hedge up when inside window (25 minutes to close)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 25 * 60 * 1000; // 25 minutes (inside 30min window)
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, true);
+    });
+
+    test("should not hedge up in no-hedge window (2 minutes to close)", () => {
+      const now = Date.now();
+      const marketEndTime = now + 2 * 60 * 1000; // 2 minutes (inside no-hedge window)
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "no_hedge_window");
+    });
+
+    test("should not hedge up when no market end time", () => {
+      const now = Date.now();
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.87,
+          marketEndTime: undefined,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "no_end_time");
+    });
+  });
+
+  describe("Position status checks", () => {
+    test("should not hedge up redeemable positions", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+          redeemable: true,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "redeemable");
+    });
+
+    test("should not hedge up near-resolution positions", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+          nearResolutionCandidate: true,
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "near_resolution");
+    });
+
+    test("should not hedge up NOT_TRADABLE_ON_CLOB positions", () => {
+      const now = Date.now();
+      const marketEndTime = now + 15 * 60 * 1000;
+
+      const result = shouldHedgeUp(
+        DEFAULT_HEDGING_CONFIG,
+        {
+          currentPrice: 0.87,
+          marketEndTime,
+          executionStatus: "NOT_TRADABLE_ON_CLOB",
+        },
+        now,
+      );
+
+      assert.strictEqual(result.eligible, false);
+      assert.strictEqual(result.reason, "not_tradable");
+    });
+  });
+
+  describe("Config defaults", () => {
+    test("DEFAULT_HEDGING_CONFIG has correct hedge up defaults", () => {
+      assert.strictEqual(
+        DEFAULT_HEDGING_CONFIG.direction,
+        "both",
+        "direction should default to 'both'",
+      );
+      assert.strictEqual(
+        DEFAULT_HEDGING_CONFIG.hedgeUpPriceThreshold,
+        0.85,
+        "hedgeUpPriceThreshold should be 0.85 (85¢)",
+      );
+      assert.strictEqual(
+        DEFAULT_HEDGING_CONFIG.hedgeUpMaxPrice,
+        0.95,
+        "hedgeUpMaxPrice should be 0.95 (95¢)",
+      );
+      assert.strictEqual(
+        DEFAULT_HEDGING_CONFIG.hedgeUpWindowMinutes,
+        30,
+        "hedgeUpWindowMinutes should be 30",
+      );
+      assert.strictEqual(
+        DEFAULT_HEDGING_CONFIG.hedgeUpMaxUsd,
+        25,
+        "hedgeUpMaxUsd should be 25",
+      );
+    });
+
+    test("hedge up price range provides meaningful profit margin", () => {
+      // At 85¢, profit margin is 15¢ per share (17.6% return)
+      const minProfitMargin = 1 - DEFAULT_HEDGING_CONFIG.hedgeUpPriceThreshold;
+      assert.ok(
+        minProfitMargin >= 0.15,
+        `Min profit margin should be at least 15¢, got ${(minProfitMargin * 100).toFixed(0)}¢`,
+      );
+
+      // At 95¢, profit margin is only 5¢ per share (5.3% return) - too low to be worth it
+      // We stop buying at hedgeUpMaxPrice to avoid minimal profit margins
+      const maxProfitMargin = 1 - DEFAULT_HEDGING_CONFIG.hedgeUpMaxPrice;
+      assert.ok(
+        maxProfitMargin <= 0.06, // Allow up to 6¢ margin at the cutoff
+        `Max threshold should have at most 6¢ margin, got ${(maxProfitMargin * 100).toFixed(0)}¢`,
+      );
+    });
   });
 });
