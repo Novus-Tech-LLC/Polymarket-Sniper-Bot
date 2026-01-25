@@ -137,6 +137,17 @@ export class SellEarlyStrategy {
   private static readonly CENTS_TO_DECIMAL = 100;
   // Tolerance for depth calculation (within 0.1¢ of best bid)
   private static readonly DEPTH_TOLERANCE_CENTS = 0.1;
+  /**
+   * Price threshold (95¢) for elevated logging of NO_BID skips.
+   * Positions at or above this price represent potentially stuck capital,
+   * so we log at INFO level instead of DEBUG.
+   */
+  private static readonly HIGH_VALUE_PRICE_THRESHOLD = 0.95;
+  /**
+   * Rate limit (30 seconds) for high-value NO_BID logs.
+   * Shorter than normal skip log TTL to ensure visibility.
+   */
+  private static readonly HIGH_VALUE_NO_BID_LOG_TTL_MS = 30_000;
 
   constructor(options: SellEarlyStrategyOptions) {
     this.client = options.client;
@@ -316,22 +327,25 @@ export class SellEarlyStrategy {
     // === BID PRICE CHECK ===
     if (position.currentBidPrice === undefined) {
       skipReasons.noBid++;
-      // For near-resolution positions (>= 95¢), log at INFO level since this represents potentially stuck capital
-      const isNearResolution = position.currentPrice >= 0.95;
+      // For high-value positions (>= HIGH_VALUE_PRICE_THRESHOLD), log at INFO level
+      // since this represents potentially stuck capital that users need to know about
+      const isHighValue =
+        position.currentPrice >= SellEarlyStrategy.HIGH_VALUE_PRICE_THRESHOLD;
       const bookStatusInfo = position.bookStatus ?? "UNKNOWN";
       const noBidMessage =
         `[SellEarly] ⚠️ NO_BID: tokenId=${tokenIdShort}... ${diagInfo} bookStatus=${bookStatusInfo}` +
-        (isNearResolution
+        (isHighValue
           ? ` — Position at ${currentPriceCents}¢ cannot be sold via CLOB (no orderbook bids). ` +
             `Check if market is in dispute window or orderbook is temporarily unavailable.`
           : ``);
 
-      if (isNearResolution) {
+      if (isHighValue) {
         // Log at INFO for high-value positions so users see why their capital is stuck
-        // Use rate-limiting with 30s TTL for high-value positions
+        // Rate-limited with shorter TTL to ensure visibility while avoiding spam
         const now = Date.now();
-        const lastLog = this.skipLogTimestamps.get(`NO_BID_HIGH_VALUE:${tokenIdShort}`) ?? 0;
-        if (now - lastLog >= 30_000) {
+        const lastLog =
+          this.skipLogTimestamps.get(`NO_BID_HIGH_VALUE:${tokenIdShort}`) ?? 0;
+        if (now - lastLog >= SellEarlyStrategy.HIGH_VALUE_NO_BID_LOG_TTL_MS) {
           this.logger.info(noBidMessage);
           this.skipLogTimestamps.set(`NO_BID_HIGH_VALUE:${tokenIdShort}`, now);
         }

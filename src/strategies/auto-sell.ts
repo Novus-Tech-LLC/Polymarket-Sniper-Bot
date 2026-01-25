@@ -86,6 +86,19 @@ export class AutoSellStrategy {
   // === LOG DEDUPLICATION ===
   private logDeduper = new LogDeduper();
 
+  // === CONSTANTS ===
+  /**
+   * Price threshold (95¢) for elevated logging of NO_BID skips.
+   * Positions at or above this price represent potentially stuck capital,
+   * so we log at INFO level instead of DEBUG.
+   */
+  private static readonly HIGH_VALUE_PRICE_THRESHOLD = 0.95;
+  /**
+   * Rate limit (30 seconds) for high-value NO_BID logs.
+   * Shorter than normal skip log TTL to ensure visibility.
+   */
+  private static readonly HIGH_VALUE_NO_BID_LOG_TTL_MS = 30_000;
+
   constructor(strategyConfig: AutoSellStrategyConfig) {
     this.client = strategyConfig.client;
     this.logger = strategyConfig.logger;
@@ -284,25 +297,27 @@ export class AutoSellStrategy {
           break;
         case "NO_BID":
           skipReasons.noBid++;
-          // For near-resolution positions (>= 95¢), log at INFO level since this represents potentially stuck capital
-          // This helps users understand why high-value positions aren't being sold
+          // For near-resolution positions (>= HIGH_VALUE_PRICE_THRESHOLD), log at INFO level
+          // since this represents potentially stuck capital that users need to know about
           {
-            const isNearResolution = position.currentPrice >= 0.95;
+            const isHighValue =
+              position.currentPrice >=
+              AutoSellStrategy.HIGH_VALUE_PRICE_THRESHOLD;
             const bookStatusInfo = position.bookStatus ?? "UNKNOWN";
             const noBidMessage =
               `[AutoSell] ⚠️ NO_BID: tokenId=${tokenIdShort}... ${diagInfo} bookStatus=${bookStatusInfo}` +
-              (isNearResolution
+              (isHighValue
                 ? ` — Position at ${currentPriceCents}¢ cannot be sold via CLOB (no orderbook bids). ` +
                   `Check if market is in dispute window or orderbook is temporarily unavailable.`
                 : ` (cannot sell without bid)`);
 
-            if (isNearResolution) {
+            if (isHighValue) {
               // Log at INFO for high-value positions so users see why their capital is stuck
-              // Use rate-limiting but with shorter TTL (30s) for high-value positions
+              // Rate-limited with shorter TTL to ensure visibility while avoiding spam
               if (
                 this.logDeduper.shouldLog(
                   `AutoSell:NO_BID_HIGH_VALUE:${tokenIdShort}`,
-                  30_000,
+                  AutoSellStrategy.HIGH_VALUE_NO_BID_LOG_TTL_MS,
                 )
               ) {
                 this.logger.info(noBidMessage);
