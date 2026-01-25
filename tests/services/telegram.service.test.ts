@@ -208,30 +208,6 @@ describe("Telegram Trade Notification Types - getTradeEmoji", () => {
   test("should return correct emoji for REDEEM", () => {
     assert.strictEqual(getTradeEmoji("REDEEM"), "🏦");
   });
-
-  test("should return correct emoji for HEDGE", () => {
-    assert.strictEqual(getTradeEmoji("HEDGE"), "🛡️");
-  });
-
-  test("should return correct emoji for HEDGE_EXIT", () => {
-    assert.strictEqual(getTradeEmoji("HEDGE_EXIT"), "🔓");
-  });
-
-  test("should return correct emoji for STACK", () => {
-    assert.strictEqual(getTradeEmoji("STACK"), "📦");
-  });
-
-  test("should return correct emoji for STOP_LOSS", () => {
-    assert.strictEqual(getTradeEmoji("STOP_LOSS"), "🛑");
-  });
-
-  test("should return correct emoji for SCALP", () => {
-    assert.strictEqual(getTradeEmoji("SCALP"), "⚡");
-  });
-
-  test("should return correct emoji for FRONTRUN", () => {
-    assert.strictEqual(getTradeEmoji("FRONTRUN"), "🏃");
-  });
 });
 
 describe("Telegram Trade Notification Types - getTradeAction", () => {
@@ -245,30 +221,6 @@ describe("Telegram Trade Notification Types - getTradeAction", () => {
 
   test("should return correct action text for REDEEM", () => {
     assert.strictEqual(getTradeAction("REDEEM"), "Position Redeemed");
-  });
-
-  test("should return correct action text for HEDGE", () => {
-    assert.strictEqual(getTradeAction("HEDGE"), "Hedge Placed");
-  });
-
-  test("should return correct action text for HEDGE_EXIT", () => {
-    assert.strictEqual(getTradeAction("HEDGE_EXIT"), "Hedge Exited");
-  });
-
-  test("should return correct action text for STACK", () => {
-    assert.strictEqual(getTradeAction("STACK"), "Position Stacked");
-  });
-
-  test("should return correct action text for STOP_LOSS", () => {
-    assert.strictEqual(getTradeAction("STOP_LOSS"), "Stop-Loss Triggered");
-  });
-
-  test("should return correct action text for SCALP", () => {
-    assert.strictEqual(getTradeAction("SCALP"), "Scalp Profit Taken");
-  });
-
-  test("should return correct action text for FRONTRUN", () => {
-    assert.strictEqual(getTradeAction("FRONTRUN"), "Copy Trade Executed");
   });
 });
 
@@ -538,131 +490,6 @@ describe("TelegramService Class", () => {
     const [, options] = mockFetch.mock.calls[0].arguments;
     const body = JSON.parse(options.body);
     assert.strictEqual(body.message_thread_id, 789);
-  });
-
-  test("sendTradeNotificationWithPnL sends trade with P&L snapshot", async () => {
-    const logger = createMockLogger();
-    const service = new TelegramService(
-      { botToken: "test-token", chatId: "123456" },
-      logger,
-    );
-    const trade: TradeNotification = {
-      type: "SELL",
-      marketId: "0x1234567890abcdef1234567890abcdef",
-      tokenId: "token123",
-      size: 50,
-      price: 0.85,
-      sizeUsd: 42.5,
-      entryPrice: 0.65,
-      pnl: 10,
-      strategy: "ScalpTakeProfit",
-      marketQuestion: "Will BTC hit $100k?",
-    };
-    const pnlSnapshot = {
-      netPnl: 150,
-      totalRealizedPnl: 100,
-      totalUnrealizedPnl: 50,
-      winRate: 0.75,
-      winningTrades: 6,
-      losingTrades: 2,
-    };
-
-    const result = await service.sendTradeNotificationWithPnL(trade, pnlSnapshot);
-
-    assert.strictEqual(result, true);
-    assert.strictEqual(mockFetch.mock.calls.length, 1);
-
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    const body = JSON.parse(options.body);
-    // Check that the message contains key information
-    assert.ok(body.text.includes("Position Sold"));
-    assert.ok(body.text.includes("ScalpTakeProfit"));
-    assert.ok(body.text.includes("Portfolio Update"));
-    assert.ok(body.text.includes("$150.00")); // Net P&L
-    assert.ok(body.text.includes("75.0%")); // Win rate
-  });
-
-  test("sendTradeNotificationWithPnL works without P&L snapshot", async () => {
-    const logger = createMockLogger();
-    const service = new TelegramService(
-      { botToken: "test-token", chatId: "123456" },
-      logger,
-    );
-    const trade: TradeNotification = {
-      type: "HEDGE",
-      marketId: "0x1234567890abcdef1234567890abcdef",
-      tokenId: "token123",
-      size: 30,
-      price: 0.45,
-      sizeUsd: 13.5,
-      strategy: "SmartHedging",
-    };
-
-    const result = await service.sendTradeNotificationWithPnL(trade);
-
-    assert.strictEqual(result, true);
-    assert.strictEqual(mockFetch.mock.calls.length, 1);
-
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    const body = JSON.parse(options.body);
-    assert.ok(body.text.includes("Hedge Placed"));
-    assert.ok(body.text.includes("SmartHedging"));
-    // Should not include portfolio update without P&L snapshot
-    assert.ok(!body.text.includes("Portfolio Update"));
-  });
-
-  test("sendTradeNotification includes entry price and gain", async () => {
-    const logger = createMockLogger();
-    const service = new TelegramService(
-      { botToken: "test-token", chatId: "123456" },
-      logger,
-    );
-    const trade: TradeNotification = {
-      type: "SCALP",
-      marketId: "0x1234567890abcdef1234567890abcdef",
-      tokenId: "token123",
-      size: 100,
-      price: 0.80,
-      sizeUsd: 80,
-      entryPrice: 0.65,
-    };
-
-    const result = await service.sendTradeNotification(trade);
-
-    assert.strictEqual(result, true);
-
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    const body = JSON.parse(options.body);
-    // Check for entry price format: "Entry: 65.0¢ → 80.0¢"
-    assert.ok(body.text.includes("65.0¢"));
-    assert.ok(body.text.includes("80.0¢"));
-    assert.ok(body.text.includes("+15.0¢")); // Gain
-  });
-
-  test("sendTradeNotification includes tx hash when provided", async () => {
-    const logger = createMockLogger();
-    const service = new TelegramService(
-      { botToken: "test-token", chatId: "123456" },
-      logger,
-    );
-    const trade: TradeNotification = {
-      type: "REDEEM",
-      marketId: "0x1234567890abcdef1234567890abcdef",
-      tokenId: "token123",
-      size: 50,
-      price: 1.0,
-      sizeUsd: 50,
-      txHash: "0xabcdef1234567890abcdef1234567890",
-    };
-
-    const result = await service.sendTradeNotification(trade);
-
-    assert.strictEqual(result, true);
-
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    const body = JSON.parse(options.body);
-    assert.ok(body.text.includes("Tx:")); // Tx hash label
-    assert.ok(body.text.includes("0xabcdef12345678")); // Truncated tx hash
   });
 });
 

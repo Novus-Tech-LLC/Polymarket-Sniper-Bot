@@ -22,7 +22,6 @@ import type { PositionTracker } from "./position-tracker";
 import { postOrder } from "../utils/post-order.util";
 import { isLiveTradingEnabled } from "../utils/live-trading.util";
 import type { ReservePlan } from "../risk";
-import { notifyBuy } from "../services/trade-notification.service";
 
 /**
  * Endgame Sweep Configuration
@@ -304,22 +303,6 @@ export class EndgameSweepStrategy {
 
       if (result.status === "submitted") {
         this.logger.info(`[EndgameSweep] ✅ Bought successfully`);
-
-        // Send telegram notification for endgame sweep buy
-        void notifyBuy(
-          market.id,
-          market.tokenId,
-          sizeUsd / market.price, // Estimate shares from USD
-          market.price,
-          sizeUsd,
-          {
-            strategy: "EndgameSweep",
-            outcome: market.side,
-          },
-        ).catch(() => {
-          // Ignore notification errors - logging is handled by the service
-        });
-
         return true;
       }
 

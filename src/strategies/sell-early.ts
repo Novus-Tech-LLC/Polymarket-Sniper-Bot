@@ -35,7 +35,6 @@ import {
   HIGH_VALUE_PRICE_THRESHOLD,
   HIGH_VALUE_NO_BID_LOG_TTL_MS,
 } from "../utils/log-deduper.util";
-import { notifySell } from "../services/trade-notification.service";
 
 /**
  * Sell Early Configuration
@@ -530,26 +529,6 @@ export class SellEarlyStrategy {
       if (result.status === "submitted") {
         // Invalidate orderbook cache for this token
         this.positionTracker.invalidateOrderbookCache(position.tokenId);
-
-        // Calculate P&L and send telegram notification for sell-early
-        const sellPrice = position.currentBidPrice ?? position.currentPrice;
-        const tradePnl = (sellPrice - position.entryPrice) * position.size;
-        void notifySell(
-          position.marketId,
-          position.tokenId,
-          position.size,
-          sellPrice,
-          sizeUsd,
-          {
-            strategy: "SellEarly",
-            entryPrice: position.entryPrice,
-            pnl: tradePnl,
-            outcome: position.side,
-          },
-        ).catch(() => {
-          // Ignore notification errors
-        });
-
         return true;
       }
 

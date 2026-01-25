@@ -9,10 +9,6 @@ import { createPolymarketAuthFromEnv } from "../clob/polymarket-auth";
 import { MempoolMonitorService } from "../services/mempool-monitor.service";
 import { TradeExecutorService } from "../services/trade-executor.service";
 import { createTelegramService, TelegramService } from "../services/telegram.service";
-import {
-  initTradeNotificationService,
-  setTradeNotificationPnLCallback,
-} from "../services/trade-notification.service";
 import { ConsoleLogger } from "../utils/logger.util";
 import { getUsdBalanceApprox, getPolBalance } from "../utils/get-balance.util";
 import { startArbitrageEngine } from "../arbitrage/runtime";
@@ -216,11 +212,6 @@ async function main(): Promise<void> {
       const pnlLedger = orchestrator.getPnLLedger();
       telegramService.startPnlUpdates(() => pnlLedger.getSummary());
       logger.info("📱 Telegram P&L notifications started");
-
-      // Initialize centralized trade notification service for all strategies
-      initTradeNotificationService(telegramService, logger);
-      setTradeNotificationPnLCallback(() => pnlLedger.getSummary());
-      logger.info("📱 Trade notifications enabled - will notify on buys/sells/hedges/redemptions");
     }
   } else if (strategyConfig && !strategyConfig.enabled) {
     logger.info(

@@ -13,7 +13,6 @@ import {
   DEFAULT_CONFIG,
 } from "../constants/polymarket.constants";
 import { parallelFetch, TTLCache } from "../utils/parallel-utils";
-import { notifyFrontrun } from "./trade-notification.service";
 
 export type TradeExecutorDeps = {
   client: ClobClient & { wallet: Wallet };
@@ -253,20 +252,6 @@ export class TradeExecutorService {
         logger.info(
           `[Frontrun] ✅ Successfully executed ${signal.side} order for ${frontrunSize.toFixed(2)} USD`,
         );
-
-        // Send telegram notification for successful frontrun/copy trade
-        void notifyFrontrun(
-          signal.marketId,
-          signal.tokenId,
-          frontrunSize / signal.price, // Calculate shares from USD
-          signal.price,
-          frontrunSize,
-          {
-            outcome: signal.outcome,
-          },
-        ).catch(() => {
-          // Ignore notification errors - logging is handled by the service
-        });
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);

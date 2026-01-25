@@ -54,28 +54,8 @@ export const DEFAULT_TELEGRAM_CONFIG: TelegramConfig = {
 
 /**
  * Trade notification types
- *
- * Extended to cover all financial transaction types:
- * - BUY: Copy trade or endgame sweep buy
- * - SELL: General sell (quick flip, auto-sell, sell-early)
- * - REDEEM: Position redemption after market resolution
- * - HEDGE: Hedge order placed to protect losing position
- * - HEDGE_EXIT: Hedge position sold (profitable or not)
- * - STACK: Position stacking (doubling down on winner)
- * - STOP_LOSS: Stop-loss triggered to limit losses
- * - SCALP: Scalp take-profit triggered
- * - FRONTRUN: Frontrun/copy trade executed
  */
-export type TradeNotificationType =
-  | "BUY"
-  | "SELL"
-  | "REDEEM"
-  | "HEDGE"
-  | "HEDGE_EXIT"
-  | "STACK"
-  | "STOP_LOSS"
-  | "SCALP"
-  | "FRONTRUN";
+export type TradeNotificationType = "BUY" | "SELL" | "REDEEM";
 
 /**
  * Trade notification data
@@ -90,24 +70,6 @@ export interface TradeNotification {
   sizeUsd: number;
   pnl?: number;
   marketQuestion?: string;
-  /** Strategy that triggered this trade */
-  strategy?: string;
-  /** Entry price for position (used to calculate gain) */
-  entryPrice?: number;
-  /** Transaction hash if available */
-  txHash?: string;
-}
-
-/**
- * P&L snapshot to include with transaction notifications
- */
-export interface PnLSnapshot {
-  netPnl: number;
-  totalRealizedPnl: number;
-  totalUnrealizedPnl: number;
-  winRate: number;
-  winningTrades: number;
-  losingTrades: number;
 }
 
 /**
@@ -199,106 +161,24 @@ export class TelegramService {
     let message = `${emoji} <b>${this.escapeHtml(this.config.notificationName)}</b>\n\n`;
     message += `📍 <b>${action}</b>\n`;
 
-    if (trade.strategy) {
-      message += `🎯 Strategy: ${this.escapeHtml(trade.strategy)}\n`;
-    }
-
     if (trade.marketQuestion) {
       message += `📊 Market: ${this.escapeHtml(trade.marketQuestion)}\n`;
     }
 
     if (trade.outcome) {
-      message += `🎲 Outcome: ${this.escapeHtml(trade.outcome)}\n`;
+      message += `🎯 Outcome: ${this.escapeHtml(trade.outcome)}\n`;
     }
 
     message += `💵 Size: ${trade.size.toFixed(2)} shares\n`;
     message += `💰 Price: ${(trade.price * 100).toFixed(1)}¢\n`;
     message += `📊 Value: $${trade.sizeUsd.toFixed(2)}\n`;
 
-    // Show entry price and gain for sells
-    if (trade.entryPrice !== undefined && trade.entryPrice > 0) {
-      const gainCents = (trade.price - trade.entryPrice) * 100;
-      const gainEmoji = gainCents >= 0 ? "📈" : "📉";
-      message += `${gainEmoji} Entry: ${(trade.entryPrice * 100).toFixed(1)}¢ → ${(trade.price * 100).toFixed(1)}¢ (${gainCents >= 0 ? "+" : ""}${gainCents.toFixed(1)}¢)\n`;
-    }
-
     if (trade.pnl !== undefined) {
-      const pnlEmoji = trade.pnl >= 0 ? "💰" : "💸";
-      message += `${pnlEmoji} Trade P&L: ${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)}\n`;
+      const pnlEmoji = trade.pnl >= 0 ? "📈" : "📉";
+      message += `${pnlEmoji} P&L: ${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)}\n`;
     }
 
-    if (trade.txHash) {
-      message += `\n🔗 Tx: <code>${trade.txHash.slice(0, 16)}...</code>`;
-    } else {
-      message += `\n🔗 Market: <code>${trade.marketId.slice(0, 16)}...</code>`;
-    }
-
-    return this.sendMessage(message);
-  }
-
-  /**
-   * Send a trade notification with updated P&L snapshot
-   *
-   * This method sends a trade notification along with the current P&L summary,
-   * allowing users to track their portfolio movement with each trade.
-   */
-  async sendTradeNotificationWithPnL(
-    trade: TradeNotification,
-    pnlSnapshot?: PnLSnapshot,
-  ): Promise<boolean> {
-    if (!this.config.enabled) return false;
-
-    const emoji = this.getTradeEmoji(trade.type);
-    const action = this.getTradeAction(trade.type);
-
-    let message = `${emoji} <b>${this.escapeHtml(this.config.notificationName)}</b>\n\n`;
-    message += `📍 <b>${action}</b>\n`;
-
-    if (trade.strategy) {
-      message += `🎯 Strategy: ${this.escapeHtml(trade.strategy)}\n`;
-    }
-
-    if (trade.marketQuestion) {
-      message += `📊 Market: ${this.escapeHtml(trade.marketQuestion)}\n`;
-    }
-
-    if (trade.outcome) {
-      message += `🎲 Outcome: ${this.escapeHtml(trade.outcome)}\n`;
-    }
-
-    message += `💵 Size: ${trade.size.toFixed(2)} shares\n`;
-    message += `💰 Price: ${(trade.price * 100).toFixed(1)}¢\n`;
-    message += `📊 Value: $${trade.sizeUsd.toFixed(2)}\n`;
-
-    // Show entry price and gain for sells
-    if (trade.entryPrice !== undefined && trade.entryPrice > 0) {
-      const gainCents = (trade.price - trade.entryPrice) * 100;
-      const gainEmoji = gainCents >= 0 ? "📈" : "📉";
-      message += `${gainEmoji} Entry: ${(trade.entryPrice * 100).toFixed(1)}¢ → ${(trade.price * 100).toFixed(1)}¢ (${gainCents >= 0 ? "+" : ""}${gainCents.toFixed(1)}¢)\n`;
-    }
-
-    if (trade.pnl !== undefined) {
-      const pnlEmoji = trade.pnl >= 0 ? "💰" : "💸";
-      message += `${pnlEmoji} Trade P&L: ${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)}\n`;
-    }
-
-    // Add P&L snapshot if available
-    if (pnlSnapshot) {
-      const netEmoji = pnlSnapshot.netPnl >= 0 ? "🟢" : "🔴";
-      message += `\n━━━ Portfolio Update ━━━\n`;
-      message += `${netEmoji} Net P&L: ${pnlSnapshot.netPnl >= 0 ? "+" : ""}$${pnlSnapshot.netPnl.toFixed(2)}\n`;
-      message += `💰 Realized: ${pnlSnapshot.totalRealizedPnl >= 0 ? "+" : ""}$${pnlSnapshot.totalRealizedPnl.toFixed(2)}\n`;
-      message += `📈 Unrealized: ${pnlSnapshot.totalUnrealizedPnl >= 0 ? "+" : ""}$${pnlSnapshot.totalUnrealizedPnl.toFixed(2)}\n`;
-      if (pnlSnapshot.winningTrades + pnlSnapshot.losingTrades > 0) {
-        message += `📉 Win Rate: ${(pnlSnapshot.winRate * 100).toFixed(1)}% (${pnlSnapshot.winningTrades}W/${pnlSnapshot.losingTrades}L)\n`;
-      }
-    }
-
-    if (trade.txHash) {
-      message += `\n🔗 Tx: <code>${trade.txHash.slice(0, 16)}...</code>`;
-    } else {
-      message += `\n🔗 Market: <code>${trade.marketId.slice(0, 16)}...</code>`;
-    }
+    message += `\n🔗 Market ID: <code>${trade.marketId.slice(0, 16)}...</code>`;
 
     return this.sendMessage(message);
   }
@@ -489,18 +369,6 @@ export function getTradeEmoji(type: TradeNotificationType): string {
       return "💵";
     case "REDEEM":
       return "🏦";
-    case "HEDGE":
-      return "🛡️";
-    case "HEDGE_EXIT":
-      return "🔓";
-    case "STACK":
-      return "📦";
-    case "STOP_LOSS":
-      return "🛑";
-    case "SCALP":
-      return "⚡";
-    case "FRONTRUN":
-      return "🏃";
     default:
       return "📌";
   }
@@ -517,18 +385,6 @@ export function getTradeAction(type: TradeNotificationType): string {
       return "Position Sold";
     case "REDEEM":
       return "Position Redeemed";
-    case "HEDGE":
-      return "Hedge Placed";
-    case "HEDGE_EXIT":
-      return "Hedge Exited";
-    case "STACK":
-      return "Position Stacked";
-    case "STOP_LOSS":
-      return "Stop-Loss Triggered";
-    case "SCALP":
-      return "Scalp Profit Taken";
-    case "FRONTRUN":
-      return "Copy Trade Executed";
     default:
       return "Trade Executed";
   }
