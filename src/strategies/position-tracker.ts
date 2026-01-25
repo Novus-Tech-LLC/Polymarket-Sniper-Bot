@@ -403,6 +403,28 @@ export interface Position {
    */
   entryMetaCacheAgeMs?: number;
 
+  /**
+   * Whether the entry metadata can be trusted for scalp decision-making.
+   *
+   * Entry metadata is UNTRUSTED (false) when:
+   * - Computed netShares differs from Data API position shares by >2% or >0.5 shares
+   * - Trade history is incomplete or cannot be reconstructed
+   *
+   * When untrusted, scalp strategies should handle carefully:
+   * - Do NOT use timeHeldSec for hold-time decisions (could be wrong)
+   * - May still allow exits based on P&L if pnlTrusted === true
+   *
+   * CRITICAL: Long-held legacy positions often have untrusted entry metadata
+   * because trade history is incomplete or dates back beyond API limits.
+   */
+  entryMetaTrusted?: boolean;
+
+  /**
+   * Reason why entry metadata is untrusted (only set when entryMetaTrusted === false).
+   * Used for diagnostics and rate-limited logging.
+   */
+  entryMetaUntrustedReason?: string;
+
   // === DATA-API P&L FIELDS (UI-TRUTH) ===
   // These fields come directly from Polymarket Data API /positions endpoint
   // and represent what the Polymarket UI shows to users.
@@ -5657,12 +5679,21 @@ export class PositionTracker {
           lastAcquiredAt: entryMeta.lastAcquiredAt,
           timeHeldSec: entryMeta.timeHeldSec,
           entryMetaCacheAgeMs: entryMeta.cacheAgeMs,
+          // CRITICAL: Pass through entry metadata trust status
+          // Long-held legacy positions often have untrusted entry metadata
+          entryMetaTrusted: entryMeta.trusted,
+          entryMetaUntrustedReason: entryMeta.untrustedReason,
         });
         enrichedCount++;
       } else {
         // Entry metadata could not be resolved - include position without enrichment
         // This can happen if trade history is unavailable or incomplete
-        enrichedPositions.push(position);
+        // Mark as untrusted since we couldn't resolve entry data
+        enrichedPositions.push({
+          ...position,
+          entryMetaTrusted: false,
+          entryMetaUntrustedReason: "Entry metadata could not be resolved from trade history",
+        });
         skippedCount++;
       }
     }

@@ -329,3 +329,59 @@ test("SCALP_LOW_PRICE_MAX_HOLD_MINUTES env variable overrides default", () => {
   const config = loadStrategyConfig();
   assert.equal(config?.scalpLowPriceMaxHoldMinutes, 5);
 });
+
+// === SCALP Legacy Position Mode Tests ===
+
+test("SCALP_LEGACY_POSITION_MODE defaults to 'allow_profitable_only'", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLegacyPositionMode, "allow_profitable_only");
+});
+
+test("SCALP_LEGACY_POSITION_MODE can be set to 'skip'", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    SCALP_LEGACY_POSITION_MODE: "skip",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLegacyPositionMode, "skip");
+});
+
+test("SCALP_LEGACY_POSITION_MODE can be set to 'allow_all'", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    SCALP_LEGACY_POSITION_MODE: "allow_all",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLegacyPositionMode, "allow_all");
+});
+
+test("SCALP_LEGACY_POSITION_MODE handles hyphenated input (allow-profitable-only)", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    SCALP_LEGACY_POSITION_MODE: "allow-profitable-only",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLegacyPositionMode, "allow_profitable_only");
+});
+
+test("SCALP_LEGACY_POSITION_MODE falls back to default for invalid values", () => {
+  resetEnv();
+  Object.assign(process.env, baseEnv, {
+    STRATEGY_PRESET: "balanced",
+    SCALP_LEGACY_POSITION_MODE: "invalid_mode",
+  });
+
+  const config = loadStrategyConfig();
+  assert.equal(config?.scalpLegacyPositionMode, "allow_profitable_only");
+});

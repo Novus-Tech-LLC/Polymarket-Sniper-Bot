@@ -155,6 +155,7 @@ async function main(): Promise<void> {
         suddenSpikeWindowMinutes: strategyConfig.scalpSuddenSpikeWindowMinutes,
         lowPriceThreshold: strategyConfig.scalpLowPriceThreshold,
         lowPriceMaxHoldMinutes: strategyConfig.scalpLowPriceMaxHoldMinutes,
+        legacyPositionMode: strategyConfig.scalpLegacyPositionMode,
       },
     });
 

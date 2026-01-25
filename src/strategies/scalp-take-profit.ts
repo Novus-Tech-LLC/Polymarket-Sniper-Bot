@@ -214,6 +214,25 @@ export interface ScalpTakeProfitConfig {
    * Default: 5 (from MIN_ORDER_USD or config)
    */
   minOrderUsd: number;
+
+  /**
+   * Mode for handling positions with untrusted entry metadata (legacy positions).
+   *
+   * Legacy positions are those where EntryMetaResolver cannot accurately reconstruct
+   * entry timestamps from trade history (e.g., positions held for months, incomplete
+   * trade history, API limits exceeded).
+   *
+   * Options:
+   * - "skip": Skip all positions with untrusted entry metadata (safest, may block valid exits)
+   * - "allow_profitable_only": Allow exits ONLY if position is profitable AND P&L is trusted
+   *   (default - safer behavior that avoids treating legacy positions as scalp opportunities
+   *   but still allows taking profits when we're confident about the P&L)
+   * - "allow_all": Allow all positions regardless of entry metadata trust
+   *   (legacy behavior - may incorrectly treat long-held positions as scalp candidates)
+   *
+   * Default: "allow_profitable_only"
+   */
+  legacyPositionMode: "skip" | "allow_profitable_only" | "allow_all";
 }
 
 /**
@@ -664,6 +683,8 @@ export const DEFAULT_SCALP_TAKE_PROFIT_CONFIG: ScalpTakeProfitConfig = {
   exitWindowSec: 120, // 2 minute exit window
   profitRetrySec: 15, // Retry every 15 seconds during PROFIT stage
   minOrderUsd: 5, // Minimum order size (positions below this are DUST)
+  // Legacy position handling (safer default)
+  legacyPositionMode: "allow_profitable_only", // Only exit profitable positions with trusted P&L
 };
 
 /**
@@ -1153,6 +1174,41 @@ export class ScalpTakeProfitStrategy {
           this.recordSkipLog(positionKey, position.pnlPct);
         }
         continue;
+      }
+
+      // === LEGACY POSITION HANDLING (Jan 2025) ===
+      // Positions with untrusted entry metadata may be long-held legacy positions
+      // where trade history is incomplete. We need to be careful not to treat
+      // these as scalp candidates based on incorrect timeHeldSec values.
+      if (position.entryMetaTrusted === false) {
+        const mode = this.config.legacyPositionMode;
+
+        if (mode === "skip") {
+          // Most conservative: skip all positions with untrusted entry metadata
+          skipAggregator.add(tokenIdShort, "untrusted_entry_skip");
+          continue;
+        } else if (mode === "allow_profitable_only") {
+          // Default safer behavior: only allow if profitable AND P&L is trusted
+          // This was already checked above, so we only need to verify profitability
+          if (position.pnlPct <= 0) {
+            // Not profitable - skip this legacy position to avoid bad decisions
+            skipAggregator.add(tokenIdShort, "untrusted_entry_not_profitable");
+            continue;
+          }
+          // Profitable with trusted P&L - allow exit but log for visibility
+          if (
+            this.logDeduper.shouldLog(
+              `ScalpTakeProfit:legacy_profitable:${position.tokenId}`,
+              60_000, // Log at most once per minute per position
+            )
+          ) {
+            this.logger.debug(
+              `[ScalpTakeProfit] Legacy position ${tokenIdShort} has untrusted entry (${position.entryMetaUntrustedReason ?? "unknown"}), ` +
+                `but allowing exit since profitable (+${position.pnlPct.toFixed(1)}%) and P&L trusted`,
+            );
+          }
+        }
+        // mode === "allow_all": proceed with normal evaluation (legacy behavior)
       }
 
       // STRATEGY GATE: Skip positions with NO_BOOK status

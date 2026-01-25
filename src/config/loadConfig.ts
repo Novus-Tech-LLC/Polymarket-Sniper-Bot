@@ -256,6 +256,30 @@ const parseTradeMode: EnvParser<TradeMode> = (raw) => {
   return "clob";
 };
 
+/**
+ * Parse SCALP_LEGACY_POSITION_MODE env variable
+ * Valid values: "skip", "allow_profitable_only", "allow_all"
+ */
+const parseScalpLegacyMode: EnvParser<
+  "skip" | "allow_profitable_only" | "allow_all"
+> = (raw) => {
+  if (raw === "") return undefined;
+  const normalized = String(raw).toLowerCase().replace(/-/g, "_");
+  if (
+    normalized === "skip" ||
+    normalized === "allow_profitable_only" ||
+    normalized === "allow_all"
+  ) {
+    return normalized as "skip" | "allow_profitable_only" | "allow_all";
+  }
+  // Invalid value - log warning and return default
+  process.stderr.write(
+    `[Config] Invalid SCALP_LEGACY_POSITION_MODE="${raw}", defaulting to "allow_profitable_only". ` +
+      `Valid values: "skip", "allow_profitable_only", "allow_all"\n`,
+  );
+  return "allow_profitable_only";
+};
+
 const derivePublicKey = (
   privateKey: string | undefined,
 ): string | undefined => {
@@ -1462,6 +1486,24 @@ export type StrategyConfig = {
    * Default: 15 seconds
    */
   scalpProfitRetrySec: number;
+  /**
+   * Mode for handling positions with untrusted entry metadata (legacy positions).
+   *
+   * Legacy positions are those where EntryMetaResolver cannot accurately reconstruct
+   * entry timestamps from trade history (e.g., positions held for months, incomplete
+   * trade history, API limits exceeded).
+   *
+   * Options:
+   * - "skip": Skip all positions with untrusted entry metadata (safest, may block valid exits)
+   * - "allow_profitable_only": Allow exits ONLY if position is profitable AND P&L is trusted
+   *   (default - safer behavior that avoids treating legacy positions as scalp opportunities
+   *   but still allows taking profits when we're confident about the P&L)
+   * - "allow_all": Allow all positions regardless of entry metadata trust
+   *   (legacy behavior - may incorrectly treat long-held positions as scalp candidates)
+   *
+   * Default: "allow_profitable_only"
+   */
+  scalpLegacyPositionMode: "skip" | "allow_profitable_only" | "allow_all";
   // === SELL EARLY STRATEGY SETTINGS (SIMPLIFIED Jan 2025) ===
   // Capital efficiency: Sell positions at 99.9¢ instead of waiting for slow redemption
   // ONE CORE BEHAVIOR: If bid >= 99.9¢, SELL IT. No extra knobs by default.
@@ -2031,6 +2073,23 @@ export function loadStrategyConfig(
         ? (preset as { SCALP_PROFIT_RETRY_SEC: number }).SCALP_PROFIT_RETRY_SEC
         : undefined) ??
       15, // Default: 15 seconds
+    // SCALP_LEGACY_POSITION_MODE: How to handle positions with untrusted entry metadata
+    // Legacy positions often have incomplete trade history making entry time unreliable
+    scalpLegacyPositionMode:
+      parseScalpLegacyMode(
+        readEnv("SCALP_LEGACY_POSITION_MODE", overrides) ?? "",
+      ) ??
+      ("SCALP_LEGACY_POSITION_MODE" in preset
+        ? (
+            preset as {
+              SCALP_LEGACY_POSITION_MODE:
+                | "skip"
+                | "allow_profitable_only"
+                | "allow_all";
+            }
+          ).SCALP_LEGACY_POSITION_MODE
+        : undefined) ??
+      "allow_profitable_only", // Default: safer behavior - only exit profitable positions with trusted P&L
     // === SELL EARLY STRATEGY (Capital Efficiency - SIMPLIFIED Jan 2025) ===
     // SELL_EARLY_ENABLED: Enable selling near-$1 positions before redemption
     sellEarlyEnabled:
