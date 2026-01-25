@@ -217,6 +217,7 @@ export class DynamicReservesController {
   // Log deduplication TTLs
   private static readonly MODE_CHANGE_LOG_TTL_MS = 60_000; // Log mode changes once per minute
   private static readonly SHORTFALL_LOG_TTL_MS = 30_000; // Log shortfall details every 30s
+  private static readonly STATUS_LOG_TTL_MS = 60_000; // Log wallet balance and reserves once per minute
 
   constructor(config: Partial<DynamicReservesConfig>, logger: ConsoleLogger) {
     this.config = { ...DEFAULT_RESERVES_CONFIG, ...config };
@@ -310,6 +311,19 @@ export class DynamicReservesController {
               `${r.tokenId.slice(0, 8)}...(${r.tier},$${r.notionalUsd.toFixed(1)},${r.pnlPct.toFixed(1)}%)->$${r.finalReserve.toFixed(2)}`,
           )
           .join(", ")}`,
+      );
+    }
+
+    // Log wallet balance and reserves status (rate-limited, INFO level for visibility)
+    if (
+      this.logDeduper.shouldLog(
+        "DynamicReserves:status",
+        DynamicReservesController.STATUS_LOG_TTL_MS,
+      )
+    ) {
+      this.logger.info(
+        `[DynamicReserves] balance=$${availableCash.toFixed(2)} reserves=$${reserveRequired.toFixed(2)} ` +
+          `mode=${mode} equity=$${equityUsd.toFixed(2)} positions=${snapshot.activePositions.length}`,
       );
     }
 
