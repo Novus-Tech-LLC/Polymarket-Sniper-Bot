@@ -1563,6 +1563,14 @@ export type StrategyConfig = {
    * Default: 60 (1 minute)
    */
   autoSellMinHoldSec: number;
+  /**
+   * Hours before a profitable position is considered "stale"
+   * Stale profitable positions are sold to free up capital for new trades.
+   * This helps avoid tying up capital in positions that "aren't moving much".
+   * Set to 0 to disable stale position selling.
+   * Default: 24 (sell profitable positions held for 24+ hours)
+   */
+  autoSellStalePositionHours: number;
   // === ON-CHAIN EXIT STRATEGY SETTINGS ===
   // Handles positions that are NOT_TRADABLE_ON_CLOB but have high price (≥99¢)
   // Routes to on-chain redemption when market is resolved
@@ -2173,6 +2181,15 @@ export function loadStrategyConfig(
         ? (preset as { AUTO_SELL_MIN_HOLD_SEC: number }).AUTO_SELL_MIN_HOLD_SEC
         : undefined) ??
       60, // Default: 60 seconds - avoid conflict with endgame sweep
+    // AUTO_SELL_STALE_POSITION_HOURS: Hours before a profitable position is considered "stale"
+    // Stale profitable positions are sold to free up capital for new trades.
+    // Set to 0 to disable stale position selling.
+    autoSellStalePositionHours:
+      parseNumber(readEnv("AUTO_SELL_STALE_POSITION_HOURS", overrides) ?? "") ??
+      ("AUTO_SELL_STALE_POSITION_HOURS" in preset
+        ? (preset as { AUTO_SELL_STALE_POSITION_HOURS: number }).AUTO_SELL_STALE_POSITION_HOURS
+        : undefined) ??
+      24, // Default: 24 hours - sell profitable positions held for 24+ hours
     // === ON-CHAIN EXIT STRATEGY (routes NOT_TRADABLE positions to redemption) ===
     // ON_CHAIN_EXIT_ENABLED: Enable on-chain exit for positions that cannot trade on CLOB
     onChainExitEnabled:

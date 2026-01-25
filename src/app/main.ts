@@ -159,6 +159,15 @@ async function main(): Promise<void> {
         lowPriceMaxHoldMinutes: strategyConfig.scalpLowPriceMaxHoldMinutes,
         legacyPositionMode: strategyConfig.scalpLegacyPositionMode,
       },
+      // Pass auto-sell config for near-resolution and stale position selling
+      autoSellConfig: {
+        enabled: strategyConfig.autoSellEnabled,
+        threshold: strategyConfig.autoSellThreshold,
+        minHoldSeconds: strategyConfig.autoSellMinHoldSec,
+        disputeWindowExitEnabled: strategyConfig.autoSellDisputeExitEnabled,
+        disputeWindowExitPrice: strategyConfig.autoSellDisputeExitPrice,
+        stalePositionHours: strategyConfig.autoSellStalePositionHours,
+      },
     });
 
     await orchestrator.start();

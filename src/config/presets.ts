@@ -210,12 +210,14 @@ export const STRATEGY_PRESETS = {
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
      * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
      * Also handles dispute window exit at 99.9¢ for faster capital recovery.
+     * Stale profitable positions (held 24+ hours) are sold to free capital.
      */
     AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
     AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Avoid conflict with endgame sweep
+    AUTO_SELL_STALE_POSITION_HOURS: 24, // Sell profitable positions held for 24+ hours
     /**
      * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
      * When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
@@ -313,12 +315,14 @@ export const STRATEGY_PRESETS = {
     /**
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
      * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
+     * Stale profitable positions (held 24+ hours) are sold to free capital.
      */
     AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
     AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Conservative: wait 60s before selling
+    AUTO_SELL_STALE_POSITION_HOURS: 24, // Sell profitable positions held for 24+ hours
     /**
      * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
      * When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
@@ -433,12 +437,14 @@ export const STRATEGY_PRESETS = {
     /**
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
      * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
+     * Stale profitable positions (held 24+ hours) are sold to free capital.
      */
     AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
     AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Balanced: wait 60s before selling
+    AUTO_SELL_STALE_POSITION_HOURS: 24, // Sell profitable positions held for 24+ hours
     /**
      * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
      * When positions can't be sold via CLOB (executionStatus=NOT_TRADABLE_ON_CLOB)
@@ -611,12 +617,14 @@ export const STRATEGY_PRESETS = {
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
      * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
      * Aggressive preset: shorter hold time for faster capital recovery.
+     * Stale profitable positions (held 12+ hours) are sold more quickly.
      */
     AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
     AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 30, // Aggressive: only 30s hold time
+    AUTO_SELL_STALE_POSITION_HOURS: 12, // Aggressive: sell profitable positions held for 12+ hours
 
     /**
      * ON-CHAIN EXIT - Routes NOT_TRADABLE positions to redemption (Jan 2025)
