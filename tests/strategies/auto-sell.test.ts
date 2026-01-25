@@ -36,7 +36,7 @@ afterEach(() => {
 describe("AutoSell Default Config", () => {
   test("DEFAULT_AUTO_SELL_CONFIG has correct default values", () => {
     assert.strictEqual(DEFAULT_AUTO_SELL_CONFIG.enabled, true);
-    assert.strictEqual(DEFAULT_AUTO_SELL_CONFIG.threshold, 0.99);
+    assert.strictEqual(DEFAULT_AUTO_SELL_CONFIG.threshold, 0.999);
     assert.strictEqual(DEFAULT_AUTO_SELL_CONFIG.minHoldSeconds, 60);
     assert.strictEqual(DEFAULT_AUTO_SELL_CONFIG.minOrderUsd, 1);
     assert.strictEqual(DEFAULT_AUTO_SELL_CONFIG.disputeWindowExitEnabled, true);
@@ -58,24 +58,24 @@ describe("AutoSell Configuration - Preset Loading", () => {
       assert.strictEqual(config?.autoSellEnabled, true);
     });
 
-    test("AUTO_SELL_ENABLED defaults to false in off preset", () => {
+    test("AUTO_SELL_ENABLED defaults to true in off preset", () => {
       resetEnv();
       Object.assign(process.env, baseEnv, {
         STRATEGY_PRESET: "off",
       });
 
       const config = loadStrategyConfig();
-      assert.strictEqual(config?.autoSellEnabled, false);
+      assert.strictEqual(config?.autoSellEnabled, true);
     });
 
-    test("AUTO_SELL_THRESHOLD defaults to 0.99 (99¢)", () => {
+    test("AUTO_SELL_THRESHOLD defaults to 0.999 (99.9¢)", () => {
       resetEnv();
       Object.assign(process.env, baseEnv, {
         STRATEGY_PRESET: "balanced",
       });
 
       const config = loadStrategyConfig();
-      assert.strictEqual(config?.autoSellThreshold, 0.99);
+      assert.strictEqual(config?.autoSellThreshold, 0.999);
     });
 
     test("AUTO_SELL_DISPUTE_EXIT_PRICE defaults to 0.999 (99.9¢)", () => {

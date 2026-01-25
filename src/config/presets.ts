@@ -208,11 +208,11 @@ export const STRATEGY_PRESETS = {
     SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
     /**
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
-     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
      * Also handles dispute window exit at 99.9¢ for faster capital recovery.
      */
-    AUTO_SELL_ENABLED: false, // Disabled in "off" preset
-    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
+    AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Avoid conflict with endgame sweep
@@ -304,10 +304,10 @@ export const STRATEGY_PRESETS = {
     SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
     /**
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
-     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
      */
-    AUTO_SELL_ENABLED: true,
-    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
+    AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Conservative: wait 60s before selling
@@ -416,10 +416,10 @@ export const STRATEGY_PRESETS = {
     SELL_EARLY_MIN_HOLD_SEC: 0, // DISABLED by default
     /**
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
-     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
      */
-    AUTO_SELL_ENABLED: true,
-    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
+    AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 60, // Balanced: wait 60s before selling
@@ -585,11 +585,11 @@ export const STRATEGY_PRESETS = {
 
     /**
      * AUTO-SELL - Near-Resolution Exit (Jan 2025)
-     * Sells ACTIVE positions at 99¢+ to free capital before redemption.
+     * Sells ACTIVE positions at 99.9¢+ to free capital before redemption.
      * Aggressive preset: shorter hold time for faster capital recovery.
      */
-    AUTO_SELL_ENABLED: true,
-    AUTO_SELL_THRESHOLD: 0.99, // Normal threshold: 99¢
+    AUTO_SELL_ENABLED: true, // Default: enabled for all strategies
+    AUTO_SELL_THRESHOLD: 0.999, // Default threshold: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_PRICE: 0.999, // Dispute exit: 99.9¢
     AUTO_SELL_DISPUTE_EXIT_ENABLED: true, // Enable dispute window exit
     AUTO_SELL_MIN_HOLD_SEC: 30, // Aggressive: only 30s hold time

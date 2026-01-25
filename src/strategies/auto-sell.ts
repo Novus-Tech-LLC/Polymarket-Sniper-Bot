@@ -26,12 +26,12 @@ export interface AutoSellConfig {
 /**
  * Default configuration for AutoSell strategy
  * - Enabled by default for capital efficiency
- * - Normal threshold at 99¢ (0.99)
+ * - Normal threshold at 99.9¢ (0.999)
  * - Dispute exit at 99.9¢ (0.999) for faster capital recovery
  */
 export const DEFAULT_AUTO_SELL_CONFIG: AutoSellConfig = {
   enabled: true,
-  threshold: 0.99, // Normal near-resolution threshold (99¢)
+  threshold: 0.999, // Default near-resolution threshold (99.9¢)
   minHoldSeconds: 60, // Wait 60s before auto-selling to avoid conflict with endgame sweep
   minOrderUsd: 1, // Minimum $1 order size
   disputeWindowExitEnabled: true, // Enable dispute window exit

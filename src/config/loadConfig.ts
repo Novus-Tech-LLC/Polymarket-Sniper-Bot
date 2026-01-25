@@ -1960,7 +1960,7 @@ export function loadStrategyConfig(
       ("AUTO_SELL_THRESHOLD" in preset
         ? (preset as { AUTO_SELL_THRESHOLD: number }).AUTO_SELL_THRESHOLD
         : undefined) ??
-      0.99, // Default: 99¢ - sell positions near resolution
+      0.999, // Default: 99.9¢ - sell positions near resolution
     // AUTO_SELL_DISPUTE_EXIT_PRICE: Price for dispute window exit (0.0-1.0 scale)
     autoSellDisputeExitPrice:
       parseNumber(readEnv("AUTO_SELL_DISPUTE_EXIT_PRICE", overrides) ?? "") ??
