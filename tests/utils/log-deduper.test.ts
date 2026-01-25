@@ -245,6 +245,92 @@ describe("LogDeduper", () => {
       assert.strictEqual(deduper.getSuppressedCount("test:key"), 2);
     });
   });
+
+  describe("shouldLogComposite", () => {
+    test("builds composite key from module and eventKey", () => {
+      const result1 = deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_low_price",
+      });
+      assert.strictEqual(result1, true, "First call should return true");
+
+      const result2 = deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_low_price",
+      });
+      assert.strictEqual(result2, false, "Second call should return false");
+    });
+
+    test("different eventKeys create different keys", () => {
+      deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_low_price",
+      });
+
+      const result = deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_small_trade",
+      });
+      assert.strictEqual(result, true, "Different eventKey should return true");
+    });
+
+    test("includes optional marketId in key", () => {
+      deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_low_price",
+        marketId: "market123",
+      });
+
+      // Same module/event but different market
+      const result = deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_low_price",
+        marketId: "market456",
+      });
+      assert.strictEqual(result, true, "Different marketId should return true");
+    });
+
+    test("includes priceBucket in key", () => {
+      deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_low_price",
+        priceBucket: "0-10c",
+      });
+
+      // Same except different price bucket
+      const result = deduper.shouldLogComposite({
+        module: "Monitor",
+        eventKey: "skip_low_price",
+        priceBucket: "10-20c",
+      });
+      assert.strictEqual(result, true, "Different priceBucket should return true");
+    });
+  });
+
+  describe("priceToBucket", () => {
+    test("returns 0-10c for prices below 10 cents", () => {
+      assert.strictEqual(LogDeduper.priceToBucket(0.03), "0-10c");
+      assert.strictEqual(LogDeduper.priceToBucket(0.09), "0-10c");
+    });
+
+    test("returns 10-20c for prices 10-19 cents", () => {
+      assert.strictEqual(LogDeduper.priceToBucket(0.10), "10-20c");
+      assert.strictEqual(LogDeduper.priceToBucket(0.15), "10-20c");
+      assert.strictEqual(LogDeduper.priceToBucket(0.19), "10-20c");
+    });
+
+    test("returns 20-50c for prices 20-49 cents", () => {
+      assert.strictEqual(LogDeduper.priceToBucket(0.20), "20-50c");
+      assert.strictEqual(LogDeduper.priceToBucket(0.35), "20-50c");
+      assert.strictEqual(LogDeduper.priceToBucket(0.49), "20-50c");
+    });
+
+    test("returns 50c+ for prices at or above 50 cents", () => {
+      assert.strictEqual(LogDeduper.priceToBucket(0.50), "50c+");
+      assert.strictEqual(LogDeduper.priceToBucket(0.75), "50c+");
+      assert.strictEqual(LogDeduper.priceToBucket(0.99), "50c+");
+    });
+  });
 });
 
 describe("SkipReasonAggregator", () => {
